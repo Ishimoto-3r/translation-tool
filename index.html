@@ -307,10 +307,38 @@
             opacity: 1;
             transform: translateX(0);
         }
+        /* --- ★ここから追加★ ナビゲーションバー --- */
+.tool-nav {
+    background-color: #374151; /* bg-gray-700 */
+    padding: 0.75rem 1rem;
+    text-align: center;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.tool-nav a {
+    color: #f3f4f6; /* text-gray-100 */
+    text-decoration: none;
+    font-weight: 500;
+    margin: 0 1rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    transition: background-color 0.2s;
+}
+.tool-nav a:hover {
+    background-color: #4b5563; /* bg-gray-600 */
+}
+.tool-nav a.active {
+    background-color: #172554; /* bg-blue-900 (翻訳ヘッダーと合わせる) */
+    color: white;
+    font-weight: 600;
+}
+/* --- ★ここまで追加★ --- */
     </style>
 </head>
 <body>
-
+<nav class="tool-nav">
+    <a href="/index.html">翻訳ツール</a>
+    <a href="/report.html"class="active">修理レポート</a>
+</nav>
     <div id="toast-container"></div>
 
     <header>
@@ -463,3 +491,4 @@
 
 </body>
 </html>
+
