@@ -34,11 +34,11 @@ export default async function handler(request, response) {
           { "role": "system", "content": systemPrompt },
           { "role": "user", "content": userPrompt }
         ],
-        // --- ★ご指定の設定（翻訳用）をここに追加 ---
+        // --- ★★★ 修正 (ドット→アンダースコア) ★★★ ---
         "temperature": 0.2,
-        "reasoning.effort": "minimal",
+        "reasoning_effort": "minimal", // ⬅️ ここを修正しました
         "verbosity": "low"
-        // --- ★ここまで ---
+        // --- ★★★ ここまで ★★★ ---
       })
     });
 
@@ -47,6 +47,7 @@ export default async function handler(request, response) {
     // 5. OpenAI APIからのエラーハンドリング
     if (!apiResponse.ok) {
       console.error("OpenAI API Error:", data);
+      // エラーメッセージをフロントに返す
       const errorMessage = data.error?.message || `OpenAI API error: ${apiResponse.status}`;
       return response.status(apiResponse.status).json({ error: errorMessage });
     }
