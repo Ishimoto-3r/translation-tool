@@ -63,8 +63,6 @@ generateButton.addEventListener('click', async () => {
         return;
     }
 
-    // ★ APIキーのチェックは Vercel バックエンドに任せるため、ここでは不要
-
     // ローディング開始
     const originalButtonText = "最終レポートを生成";
     generateButton.innerHTML = '<div class="loader"></div> 生成中...';
@@ -87,39 +85,51 @@ generateButton.addEventListener('click', async () => {
     const finalPrompt = buildApiPrompt(formData);
     
     try {
-        // --- ★★★ Vercel バックエンド連携 ★★★ ---
-        // 元のOpenAI API呼び出しを、Vercelの /api/report に変更
-        const response = await fetch('/api/report', { // ⬅️ ここが重要！
+        // --- ★★★ Vercel バックエンド連携 (修正版) ★★★ ---
+        const response = await fetch('/api/report', { 
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                // APIキーはVercelのサーバー側で付与される
             },
             body: JSON.stringify({
-                finalPrompt: finalPrompt // 構築したプロンプトを裏方に送る
+                finalPrompt: finalPrompt
             })
         });
 
-        const data = await response.json();
-
+        // ★★★ 修正点 ★★★
+        // 翻訳ツールの app.js と同じように、
+        // 最初に .ok で失敗をチェックし、.json() の失敗も .catch() します。
         if (!response.ok) {
-            // Vercelバックエンド (api/report.js) からのエラーメッセージ
-            const errorMsg = data.error || `APIエラー: ${response.status}`;
+            // サーバーが 404 (ファイルなし) や 500 (エラー) を返した場合
+            // .json() が失敗する可能性があるので .catch() で空のオブジェクトを返す
+            const errorData = await response.json().catch(() => ({})); 
+            const errorMsg = errorData.error || `APIエラー (Status: ${response.status})。サーバーが応答しませんでした。`;
             throw new Error(errorMsg);
         }
+
+        // response.ok が true の場合のみ、安全に .json() を呼ぶ
+        const data = await response.json();
+        // ★★★ 修正ここまで ★★★
 
         if (!data.gptResponse) {
              throw new Error("APIから予期しない形式の応答がありました。");
         }
         
-        const gptResponse = data.gptResponse; // バックエンドから整形された結果
+        const gptResponse = data.gptResponse;
 
         // 最終結果を表示
         resultOutput.textContent = gptResponse.trim();
 
     } catch (error) {
         console.error('API呼び出しエラー:', error);
-        resultOutput.innerHTML = `<span class="error-message">エラーが発生しました: ${error.message}</span>`;
+        
+        // ★ユーザーに分かりやすいエラーメッセージを追加
+        if (error.message.includes("JSON.parse")) {
+             resultOutput.innerHTML = `<span class="error-message">エラー: サーバーから予期しない応答がありました。<br>ファイルパス (api/report.js) が正しいか確認してください。</span>`;
+        } else {
+             resultOutput.innerHTML = `<span class="error-message">エラーが発生しました: ${error.message}</span>`;
+        }
+
     } finally {
         // ローディング終了
         generateButton.innerHTML = originalButtonText;
