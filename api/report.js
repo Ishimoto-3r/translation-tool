@@ -33,11 +33,11 @@ export default async function handler(request, response) {
         messages: [
           { "role": "user", "content": finalPrompt }
         ],
-        // --- ★ご指定の設定（修理レポート用）をここに追加 ---
+        // --- ★★★ 修正 (ドット→アンダースコア) ★★★ ---
         "temperature": 0.3,
-        "reasoning.effort": "low",
+        "reasoning_effort": "low", // ⬅️ ここを修正しました
         "verbosity": "low"
-        // --- ★ここまで ---
+        // --- ★★★ ここまで ★★★ ---
       })
     });
 
