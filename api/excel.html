@@ -1,1 +1,190 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>frm自動翻訳（検証結果 → 指定列を翻訳）</title>
+  <!-- Tailwind CSS & SheetJS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.0/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+  <!-- ヘッダー -->
+  <header class="border-b bg-white">
+    <div class="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
+      <h1 class="text-xl font-semibold">frm自動翻訳ツール</h1>
+      <nav class="tool-nav flex gap-3 text-sm">
+        <a href="/index.html">翻訳ツール</a>
+        <a href="/report.html">修理レポート</a>
+        <a href="/excel.html" class="active font-bold text-indigo-600">Excel翻訳</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-6xl px-4 py-6 space-y-6">
+    <!-- 1) ファイル読み込み -->
+    <section class="rounded-2xl border bg-white p-4 shadow-sm">
+      <h2 class="mb-3 text-lg font-medium">1) 「検証結果」ファイルを読み込む</h2>
+      <div class="flex flex-wrap items-center gap-3">
+        <input id="fileInput" type="file" accept=".xlsx,.xls" class="block text-sm" />
+        <label class="text-sm">シート:</label>
+        <select id="sheetSelect" class="rounded border px-2 py-1 text-sm"></select>
+        <button id="loadSheetBtn" class="rounded bg-gray-900 px-3 py-1 text-sm text-white disabled:opacity-40">読み込む</button>
+        <span id="status" class="text-xs text-gray-500">未読込</span>
+      </div>
+    </section>
+
+    <!-- 2) 設定・実行 -->
+    <section class="rounded-2xl border bg-white p-4 shadow-sm">
+      <h2 class="mb-3 text-lg font-medium">2) 指定列を翻訳</h2>
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div class="grid grid-cols-2 items-center gap-2">
+          <label class="text-xs">対象列（A,B,C... 空=最右列）</label>
+          <input id="sourceCol" type="text" class="rounded border px-2 py-1 text-sm" placeholder="例: C" />
+          <label class="text-xs">見出し行</label>
+          <input id="headerRow" type="number" min="1" value="5" class="rounded border px-2 py-1 text-sm" />
+          <label class="text-xs">処理開始行</label>
+          <input id="startRow" type="number" min="1" value="6" class="rounded border px-2 py-1 text-sm" />
+          <label class="text-xs">出力列の見出し</label>
+          <input id="outHeader" type="text" value="翻訳" class="rounded border px-2 py-1 text-sm" />
+          <label class="text-xs">翻訳言語</label>
+          <select id="lang" class="rounded border px-2 py-1 text-sm">
+            <option value="ja">日本語</option>
+            <option value="zh">中国語</option>
+            <option value="en">英語</option>
+            <option value="ko">韓国語</option>
+          </select>
+        </div>
+        <div class="flex items-end gap-2">
+          <button id="runTranslate" class="rounded bg-indigo-600 px-3 py-2 text-sm text-white">確認して実行</button>
+          <button id="downloadBtn" class="rounded border px-3 py-2 text-sm">Excelとして保存</button>
+        </div>
+      </div>
+      <p class="mt-2 text-xs text-gray-500">※ 改行は一時的に <code>|||</code> で保護→復元します。APIは <code>/api/excel-translate</code> を使用。</p>
+    </section>
+  </main>
+
+  <!-- JS -->
+  <script>
+    let workbook = null;
+    let sheetName = null;
+    let aoa = [];
+
+    const $ = (id) => document.getElementById(id);
+    const fileInput = $("fileInput");
+    const sheetSelect = $("sheetSelect");
+    const loadSheetBtn = $("loadSheetBtn");
+    const statusEl = $("status");
+
+    // Excel読込
+    fileInput.addEventListener('change', async (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      const buf = await f.arrayBuffer();
+      workbook = XLSX.read(buf, { type: 'array' });
+      sheetSelect.innerHTML = '';
+      workbook.SheetNames.forEach(n => {
+        const op = document.createElement('option');
+        op.value = n;
+        op.textContent = n;
+        sheetSelect.appendChild(op);
+      });
+      sheetName = workbook.SheetNames[0];
+      sheetSelect.value = sheetName;
+      loadSheetBtn.disabled = false;
+      statusEl.textContent = `読み込み完了: ${f.name}`;
+    });
+
+    loadSheetBtn.addEventListener('click', () => {
+      sheetName = sheetSelect.value;
+      const ws = workbook.Sheets[sheetName];
+      aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+      statusEl.textContent = `${sheetName} を読み込みました（行:${aoa.length}）`;
+    });
+
+    // 翻訳処理
+    $("runTranslate").addEventListener('click', async () => {
+      if (!aoa.length) { alert('先にExcelを読み込んでください'); return; }
+
+      const lang = $("lang").value;
+      const headerRow = parseInt($("headerRow").value, 10) || 5;
+      const startRow = parseInt($("startRow").value, 10) || 6;
+      const outHeader = $("outHeader").value || '翻訳';
+      let srcColStr = $("sourceCol").value.trim().toUpperCase();
+
+      // 対象列を特定
+      const cols = Math.max(...aoa.map(r => r.length));
+      let srcColIdx = cols - 1;
+      if (srcColStr) srcColIdx = XLSX.utils.decode_col(srcColStr);
+
+      const msg = `指定列 ${XLSX.utils.encode_col(srcColIdx)} を ${lang} に翻訳して右隣へ出力します。よろしいですか？`;
+      if (!confirm(msg)) return;
+
+      // 出力列ヘッダ設定
+      aoa[headerRow - 1] = aoa[headerRow - 1] || [];
+      const outCol = srcColIdx + 1;
+      aoa[headerRow - 1][outCol] = outHeader;
+
+      // 入力抽出
+      const SPECIAL = '|||';
+      const inputs = [];
+      const rowMap = [];
+      for (let r = startRow - 1; r < aoa.length; r++) {
+        const v = (aoa[r] && aoa[r][srcColIdx] != null) ? String(aoa[r][srcColIdx]) : '';
+        if (v !== '') { inputs.push(v.replaceAll('\n', SPECIAL)); rowMap.push(r); }
+      }
+      if (!inputs.length) { alert('翻訳対象テキストがありません'); return; }
+
+      statusEl.textContent = `翻訳中… (${inputs.length} 件)`;
+      const translations = await translateBatched(inputs, lang);
+
+      // 結果反映
+      for (let i = 0; i < rowMap.length; i++) {
+        const r = rowMap[i];
+        const t = (translations[i] || '').replaceAll(SPECIAL, '\n');
+        aoa[r] = aoa[r] || [];
+        aoa[r][outCol] = t;
+      }
+      statusEl.textContent = '翻訳 完了（保存ボタンで書き出し）';
+    });
+
+    // バッチ翻訳
+    async function translateBatched(items, lang) {
+      const out = [];
+      const CHUNK = 300;
+      for (let i = 0; i < items.length; i += CHUNK) {
+        const chunk = items.slice(i, i + CHUNK);
+        const res = await fetch('/api/excel-translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ rows: chunk, fromLang: null, toLang: lang })
+        });
+        let arr;
+        if (res.ok) {
+          const j = await res.json();
+          arr = Array.isArray(j.translations) ? j.translations : chunk;
+        } else {
+          console.warn('MOCK使用');
+          arr = chunk.map(x => x ? `[MOCK→${lang}] ${x}` : '');
+        }
+        out.push(...arr);
+        statusEl.textContent = `翻訳中… ${Math.min(i + CHUNK, items.length)} / ${items.length}`;
+      }
+      return out;
+    }
+
+    // Excel保存
+    $("downloadBtn").addEventListener('click', () => {
+      if (!aoa.length) { alert('データなし'); return; }
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      const cols = Math.max(...aoa.map(r => r.length));
+      ws['!cols'] = Array.from({ length: cols }, () => ({ wch: 30 }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, sheetName || 'Sheet1');
+      XLSX.writeFile(wb, '検証結果_翻訳.xlsx');
+    });
+  </script>
+</body>
+</html>
 
