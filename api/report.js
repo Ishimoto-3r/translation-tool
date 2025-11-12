@@ -33,9 +33,9 @@ export default async function handler(request, response) {
         messages: [
           { "role": "user", "content": finalPrompt }
         ],
-        // --- ★★★ 修正 (ドット→アンダースコア) ★★★ ---
-        "temperature": 0.3,
-        "reasoning_effort": "low", // ⬅️ ここを修正しました
+        // --- ★★★ 修正 (temperatureを削除) ★★★ ---
+        // "temperature": 0.3, // ⬅️ この行を削除
+        "reasoning_effort": "low", 
         "verbosity": "low"
         // --- ★★★ ここまで ★★★ ---
       })
