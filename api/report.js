@@ -1,5 +1,4 @@
-// Vercelのバックエンド (Node.js) として動作します
-// (api/report.js)
+// api/report.js
 
 export default async function handler(request, response) {
   // 1. POSTリクエスト以外は拒否
@@ -16,7 +15,6 @@ export default async function handler(request, response) {
     }
 
     // 3. Vercelの環境変数から、安全にAPIキーを取得
-    // (これは /api/translate.js と同じキーを共有します)
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
       console.error("OPENAI_API_KEY is not set in Vercel environment variables.");
@@ -28,13 +26,18 @@ export default async function handler(request, response) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}` // ⬅️ 安全なキーを使用
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-5', // ご指定のモデル
+        model: 'gpt-5',
         messages: [
-          { "role": "user", "content": finalPrompt } // フロントから受け取ったプロンプト
-        ]
+          { "role": "user", "content": finalPrompt }
+        ],
+        // --- ★ご指定の設定（修理レポート用）をここに追加 ---
+        "temperature": 0.3,
+        "reasoning.effort": "low",
+        "verbosity": "low"
+        // --- ★ここまで ---
       })
     });
 
@@ -49,7 +52,6 @@ export default async function handler(request, response) {
     
     // 6. 成功した結果をフロントエンドに返す
     const gptResponse = data.choices[0].message.content.trim();
-    // report.js が期待する { gptResponse: "..." } の形で返す
     response.status(200).json({ gptResponse: gptResponse });
 
   } catch (error) {
