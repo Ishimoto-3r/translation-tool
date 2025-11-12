@@ -1,4 +1,4 @@
-// Vercelのバックエンド (Node.js) として動作します
+// api/translate.js
 
 export default async function handler(request, response) {
   // 1. POSTリクエスト以外は拒否
@@ -26,14 +26,19 @@ export default async function handler(request, response) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}` // ⬅️ 安全なキーを使用
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-5', // ご指定のモデル
+        model: 'gpt-5',
         messages: [
           { "role": "system", "content": systemPrompt },
           { "role": "user", "content": userPrompt }
-        ]
+        ],
+        // --- ★ご指定の設定（翻訳用）をここに追加 ---
+        "temperature": 0.2,
+        "reasoning.effort": "minimal",
+        "verbosity": "low"
+        // --- ★ここまで ---
       })
     });
 
@@ -42,19 +47,10 @@ export default async function handler(request, response) {
     // 5. OpenAI APIからのエラーハンドリング
     if (!apiResponse.ok) {
       console.error("OpenAI API Error:", data);
-      // OpenAIからのエラーメッセージをそのままフロントに伝える
       const errorMessage = data.error?.message || `OpenAI API error: ${apiResponse.status}`;
-      
-      if (apiResponse.status === 401) {
-          return response.status(401).json({ error: 'APIキーが認証されませんでした。(サーバー側)' });
-      }
-      if (apiResponse.status === 404) {
-          return response.status(404).json({ error: 'モデル(gpt-5)が見つかりません。(サーバー側)' });
-      }
-      
       return response.status(apiResponse.status).json({ error: errorMessage });
     }
-
+    
     // 6. 成功した結果をフロントエンドに返す
     const translatedText = data.choices[0].message.content.trim();
     response.status(200).json({ translatedText: translatedText });
