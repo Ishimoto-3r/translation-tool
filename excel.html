@@ -1,340 +1,353 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Excel翻訳ツール (GPT-5)</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-        "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
-      margin: 0;
-      padding: 0;
-      background-color: #f3f4f6;
-      color: #1f2937;
-    }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel翻訳ツール (GPT-5)</title>
+    <style>
+        /* 共通レイアウト（report.html をベースに統一） */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 1.5rem 2rem;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        #main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        h1 {
+            text-align: center;
+            color: #111827;
+            padding-bottom: 0;
+            margin-top: 0;
+            margin-bottom: 0;
+            font-size: 1.75rem;
+        }
 
-    header {
-      background: #111827;
-      color: #f9fafb;
-      padding: 12px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+        /* ナビゲーションバー（report.html と同一） */
+        .tool-nav {
+            background-color: #374151; /* bg-gray-700 */
+            padding: 0.75rem 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .tool-nav a {
+            color: #f3f4f6; /* text-gray-100 */
+            text-decoration: none;
+            font-weight: 500;
+            margin: 0 1rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+        }
+        .tool-nav a:hover {
+            background-color: #4b5563; /* bg-gray-600 */
+        }
+        .tool-nav a.active {
+            background-color: #172554; /* bg-blue-900 */
+            color: white;
+            font-weight: 600;
+        }
 
-    header h1 {
-      margin: 0;
-      font-size: 1.2rem;
-      font-weight: 600;
-    }
+        /* Excel翻訳用 UI */
+        .section-card {
+            margin-bottom: 1.5rem;
+            padding: 1.25rem 1.5rem;
+            border-radius: 10px;
+            border: 1px solid #e5e7eb;
+            background-color: #ffffff;
+        }
+        .section-card h2 {
+            font-size: 1rem;
+            margin-top: 0;
+            margin-bottom: 0.75rem;
+            color: #111827;
+        }
+        .form-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .form-group {
+            flex: 1;
+            min-width: 180px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+            color: #374151;
+            font-size: 0.9rem;
+        }
+        input[type="file"],
+        input[type="text"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-family: inherit;
+            box-sizing: border-box;
+            outline: none;
+            background-color: #ffffff;
+            transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+        }
+        input:focus,
+        select:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.2);
+        }
+        input:disabled,
+        select:disabled {
+            background-color: #e5e7eb;
+            color: #6b7280;
+            cursor: not-allowed;
+        }
 
-    .tool-nav {
-      display: flex;
-      gap: 12px;
-      margin-top: 8px;
-      font-size: 0.9rem;
-    }
+        /* ロック中のグレーハッチ */
+        input.locked-input {
+            background-image: repeating-linear-gradient(
+                -45deg,
+                #e5e7eb,
+                #e5e7eb 6px,
+                #d1d5db 6px,
+                #d1d5db 12px
+            );
+        }
+        input.locked-input.editable {
+            background-image: none;
+            background-color: #ffffff;
+            cursor: text;
+        }
 
-    .tool-nav a {
-      color: #9ca3af;
-      text-decoration: none;
-      padding: 4px 10px;
-      border-radius: 999px;
-    }
+        .button-row {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 8px;
+        }
+        button {
+            border-radius: 8px;
+            border: none;
+            padding: 0.6rem 1.1rem;
+            font-size: 0.9rem;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        #translate-btn {
+            background-color: #3b82f6;
+            color: #ffffff;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+        }
+        #translate-btn:hover:not(:disabled) {
+            background-color: #2563eb;
+        }
+        #translate-btn:disabled {
+            background-color: #93c5fd;
+            cursor: not-allowed;
+            opacity: 0.85;
+        }
+        #unlock-advanced-btn {
+            background-color: #e5e7eb;
+            color: #111827;
+        }
 
-    .tool-nav a.active {
-      background-color: #f9fafb;
-      color: #111827;
-      font-weight: 600;
-    }
+        #status-text {
+            font-size: 0.85rem;
+            color: #374151;
+            margin-top: 4px;
+        }
 
-    main {
-      max-width: 960px;
-      margin: 24px auto 40px;
-      padding: 0 16px;
-    }
+        /* ドラッグ＆ドロップエリア */
+        .drop-zone {
+            border: 2px dashed #cbd5e0;
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #4b5563;
+            margin-bottom: 10px;
+            background-color: #f9fafb;
+        }
+        .drop-zone.drag-over {
+            background-color: #dbeafe;
+            border-color: #2563eb;
+            color: #1d4ed8;
+        }
 
-    .card {
-      background-color: #ffffff;
-      border-radius: 12px;
-      box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.1),
-        0 4px 6px -4px rgba(15, 23, 42, 0.1);
-      padding: 20px;
-      margin-bottom: 16px;
-    }
+        /* エラーモーダル */
+        #error-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        #error-modal-content {
+            background: #ffffff;
+            border-radius: 12px;
+            padding: 16px 20px;
+            max-width: 420px;
+            width: 90%;
+            box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.2);
+        }
+        #error-message {
+            font-size: 0.9rem;
+            color: #b91c1c;
+            margin-bottom: 12px;
+            white-space: pre-wrap;
+        }
+        #error-close {
+            background-color: #111827;
+            color: #f9fafb;
+            padding: 6px 14px;
+            border-radius: 999px;
+            border: none;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
 
-    .card h2 {
-      font-size: 1rem;
-      margin: 0 0 12px;
-      font-weight: 600;
-      color: #111827;
-    }
-
-    .form-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-
-    .form-group {
-      flex: 1;
-      min-width: 180px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    label {
-      font-size: 0.85rem;
-      color: #4b5563;
-    }
-
-    input[type="file"],
-    input[type="text"],
-    input[type="number"],
-    select {
-      border-radius: 8px;
-      border: 1px solid #d1d5db;
-      padding: 8px 10px;
-      font-size: 0.9rem;
-      outline: none;
-      background-color: #ffffff;
-    }
-
-    input:disabled,
-    select:disabled {
-      background-color: #e5e7eb;
-      color: #6b7280;
-      cursor: not-allowed;
-    }
-
-    input.locked-input {
-      background-image: repeating-linear-gradient(
-        -45deg,
-        #e5e7eb,
-        #e5e7eb 6px,
-        #d1d5db 6px,
-        #d1d5db 12px
-      );
-    }
-
-    input.locked-input.editable {
-      background-image: none;
-      background-color: #ffffff;
-      cursor: text;
-    }
-
-    .button-row {
-      display: flex;
-      gap: 12px;
-      justify-content: flex-end;
-      margin-top: 12px;
-    }
-
-    button {
-      border-radius: 999px;
-      border: none;
-      padding: 8px 16px;
-      font-size: 0.9rem;
-      cursor: pointer;
-    }
-
-    #translate-btn {
-      background-color: #2563eb;
-      color: #ffffff;
-      font-weight: 600;
-    }
-
-    #translate-btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
-    #unlock-advanced-btn {
-      background-color: #e5e7eb;
-      color: #111827;
-    }
-
-    #status-text {
-      font-size: 0.85rem;
-      color: #374151;
-      margin-top: 4px;
-    }
-
-    .drop-zone {
-      border: 2px dashed #cbd5e0;
-      border-radius: 10px;
-      padding: 16px;
-      text-align: center;
-      font-size: 0.9rem;
-      color: #4b5563;
-      margin-bottom: 10px;
-      background-color: #f9fafb;
-    }
-
-    .drop-zone.drag-over {
-      background-color: #dbeafe;
-      border-color: #2563eb;
-      color: #1d4ed8;
-    }
-
-    #error-modal {
-      position: fixed;
-      inset: 0;
-      background: rgba(15, 23, 42, 0.5);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 999;
-    }
-
-    #error-modal-content {
-      background: #ffffff;
-      border-radius: 12px;
-      padding: 16px 20px;
-      max-width: 420px;
-      width: 90%;
-      box-shadow: 0 10px 15px -3px rgba(15, 23, 42, 0.2);
-    }
-
-    #error-message {
-      font-size: 0.9rem;
-      color: #b91c1c;
-      margin-bottom: 12px;
-      white-space: pre-wrap;
-    }
-
-    #error-close {
-      background-color: #111827;
-      color: #f9fafb;
-      padding: 6px 14px;
-      border-radius: 999px;
-      border: none;
-      font-size: 0.85rem;
-      cursor: pointer;
-    }
-
-    @media (max-width: 640px) {
-      header {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      .tool-nav {
-        margin-top: 6px;
-        flex-wrap: wrap;
-      }
-    }
-  </style>
+        @media (max-width: 640px) {
+            .container {
+                margin: 1rem;
+                padding: 1rem 1.25rem;
+            }
+        }
+    </style>
 </head>
 <body>
-  <header>
-    <div>
-      <h1>Excel翻訳ツール (GPT-5)</h1>
-      <nav class="tool-nav">
-        <a href="/index.html">翻訳ツール</a>
-        <a href="/report.html">修理レポート</a>
-        <a href="/excel.html" class="active">Excel翻訳</a>
-      </nav>
-    </div>
-  </header>
 
-  <main>
-    <!-- 1. ファイル選択・シート選択 -->
-    <section class="card">
-      <h2>1. ファイル選択 &amp; シート指定</h2>
-      <div id="drop-zone" class="drop-zone">
-        ここに Excel ファイル（.xlsx）をドラッグ＆ドロップするか、
-        下のボタンからファイルを選択してください。
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="excel-file">Excelファイル (.xlsx)</label>
-          <input type="file" id="excel-file" accept=".xlsx" />
+<!-- ★ ナビゲーションバー（他ツールと共通） -->
+<nav class="tool-nav">
+  <a href="/index.html">翻訳ツール</a>
+  <a href="/report.html">修理レポート</a>
+  <a href="/excel.html" class="active">Excel翻訳</a>
+</nav>
+
+<div class="container">
+    <div id="main-header">
+        <h1>Excel翻訳ツール (GPT-5)</h1>
+        <!-- 必要なら右上に別ボタンを置けますが、今回は無し -->
+        <span></span>
+    </div>
+
+    <!-- 1. ファイル選択 & シート指定 -->
+    <section class="section-card">
+        <h2>1. ファイル選択 &amp; シート指定</h2>
+        <div id="drop-zone" class="drop-zone">
+            ここに Excel ファイル（.xlsx）をドラッグ＆ドロップするか、
+            下のボタンからファイルを選択してください。
         </div>
-        <div class="form-group">
-          <label for="sheet-select">翻訳対象シート</label>
-          <select id="sheet-select"></select>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="excel-file">Excelファイル (.xlsx)</label>
+                <input type="file" id="excel-file" accept=".xlsx" />
+            </div>
+            <div class="form-group">
+                <label for="sheet-select">翻訳対象シート</label>
+                <select id="sheet-select"></select>
+            </div>
         </div>
-      </div>
-      <div id="status-text">Excelファイルを選択してください。</div>
+        <div id="status-text">Excelファイルを選択してください。</div>
     </section>
 
     <!-- 2. 翻訳設定 -->
-    <section class="card">
-      <h2>2. 翻訳設定</h2>
-      <div class="form-row">
-        <div class="form-group">
-          <label for="to-lang">翻訳言語</label>
-          <select id="to-lang">
-            <option value="ja">日本語</option>
-            <option value="en">英語</option>
-            <option value="zh">中国語</option>
-            <option value="ko">韓国語</option>
-          </select>
+    <section class="section-card">
+        <h2>2. 翻訳設定</h2>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="to-lang">翻訳言語</label>
+                <select id="to-lang">
+                    <option value="ja">日本語</option>
+                    <option value="en">英語</option>
+                    <option value="zh">中国語</option>
+                    <option value="ko">韓国語</option>
+                </select>
+            </div>
         </div>
-      </div>
 
-      <div class="form-row">
-        <div class="form-group">
-          <label for="source-column">対象列（デフォルト：最右列）</label>
-          <input
-            type="text"
-            id="source-column"
-            value="最右列"
-            disabled
-            class="locked-input"
-          />
+        <div class="form-row">
+            <div class="form-group">
+                <label for="source-column">対象列（デフォルト：最右列）</label>
+                <input
+                    type="text"
+                    id="source-column"
+                    value="最右列"
+                    disabled
+                    class="locked-input"
+                />
+            </div>
+            <div class="form-group">
+                <label for="header-row">見出し行</label>
+                <input
+                    type="number"
+                    id="header-row"
+                    value="1"
+                    disabled
+                    class="locked-input"
+                />
+            </div>
+            <div class="form-group">
+                <label for="start-row">処理開始行</label>
+                <input
+                    type="number"
+                    id="start-row"
+                    value="2"
+                    disabled
+                    class="locked-input"
+                />
+            </div>
         </div>
-        <div class="form-group">
-          <label for="header-row">見出し行</label>
-          <input
-            type="number"
-            id="header-row"
-            value="1"
-            disabled
-            class="locked-input"
-          />
-        </div>
-        <div class="form-group">
-          <label for="start-row">処理開始行</label>
-          <input
-            type="number"
-            id="start-row"
-            value="2"
-            disabled
-            class="locked-input"
-          />
-        </div>
-      </div>
 
-      <div class="button-row">
-        <button id="unlock-advanced-btn" type="button">
-          詳細設定を編集する
-        </button>
-      </div>
+        <div class="button-row">
+            <button id="unlock-advanced-btn" type="button">
+                詳細設定を編集する
+            </button>
+        </div>
     </section>
 
-    <!-- 3. 実行 -->
-    <section class="card">
-      <h2>3. 翻訳実行</h2>
-      <div class="button-row">
-        <button id="translate-btn" type="button">翻訳を実行する</button>
-      </div>
+    <!-- 3. 翻訳実行 -->
+    <section class="section-card">
+        <h2>3. 翻訳実行</h2>
+        <div class="button-row">
+            <button id="translate-btn" type="button">翻訳を実行する</button>
+        </div>
     </section>
-  </main>
+</div>
 
-  <!-- エラーモーダル -->
-  <div id="error-modal">
-    <div id="error-modal-content">
-      <div id="error-message"></div>
-      <button id="error-close" type="button">閉じる</button>
-    </div>
+<!-- エラーモーダル -->
+<div id="error-modal">
+  <div id="error-modal-content">
+    <div id="error-message"></div>
+    <button id="error-close" type="button">閉じる</button>
   </div>
+</div>
 
-  <!-- SheetJS & ExcelツールJS -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-  <script src="/excel.js" defer></script>
+<!-- SheetJS & ExcelツールJS -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script src="/excel.js" defer></script>
+
 </body>
 </html>
