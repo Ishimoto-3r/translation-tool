@@ -8,7 +8,7 @@ let advancedLocked = true;
 function setStatus(message) {
   const el = document.getElementById("status-text");
   if (el) el.textContent = message;
-  console.log("[verify] " + message); // ログも見やすく verify に変更
+  console.log("[verify] " + message);
 }
 
 function showLoading(show, total = 0, current = 0) {
@@ -41,7 +41,8 @@ function hideErrorModal() {
 }
 
 function toggleUI(disabled) {
-  const ids = ["excel-file", "sheet-select", "to-lang", "source-column", "header-row", "start-row", "translate-btn"];
+  // ★変更点: translation-context を追加
+  const ids = ["excel-file", "sheet-select", "to-lang", "source-column", "header-row", "start-row", "translate-btn", "translation-context"];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = disabled;
@@ -173,7 +174,8 @@ function collectRowsToTranslate(sheet) {
 
 // ====== API呼び出し ======
 
-async function callVerifyTranslateAPI(rows, toLang, onProgress) {
+// ★変更点: context 引数を追加
+async function callVerifyTranslateAPI(rows, toLang, context, onProgress) {
   const BATCH_SIZE = 40;
   const allTranslations = [];
   const total = rows.length;
@@ -181,11 +183,11 @@ async function callVerifyTranslateAPI(rows, toLang, onProgress) {
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     
-    // ★ここが変更: 呼び出し先を /api/verify に変更
     const res = await fetch("/api/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows: batch, toLang }),
+      // ★変更点: context を送信
+      body: JSON.stringify({ rows: batch, toLang, context }),
     });
 
     if (!res.ok) {
@@ -280,6 +282,8 @@ async function handleTranslateClick() {
 
   const sheet = getTargetSheet();
   const toLang = document.getElementById("to-lang").value;
+  // ★変更点: コンテキストを取得
+  const context = document.getElementById("translation-context").value;
 
   try {
     toggleUI(true);
@@ -297,8 +301,8 @@ async function handleTranslateClick() {
 
     showLoading(true, info.rows.length, 0);
     
-    // 関数名変更: callVerifyTranslateAPI
-    const translations = await callVerifyTranslateAPI(info.rows, toLang, (done, total) => {
+    // ★変更点: context を渡す
+    const translations = await callVerifyTranslateAPI(info.rows, toLang, context, (done, total) => {
       showLoading(true, total, done);
     });
 
