@@ -1,12 +1,11 @@
-// excel.js — Excel翻訳ツール フロントロジック（確定版）
-// 前提：excel.html 側で SheetJS (XLSX) を読み込み済み。
+// excel.js — Excel翻訳ツール フロントロジック（バッチ対応・確定版）
 
 let EXCEL_workbook = null;
 let EXCEL_worksheet = null;
 let EXCEL_fileName = null;
 let advancedLocked = true;
 
-// ---------- ユーティリティ ----------
+// ====== 共通ユーティリティ ======
 
 function setStatus(message) {
   const el = document.getElementById("status-text");
@@ -44,11 +43,17 @@ function toggleUI(disabled) {
   ];
   ids.forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.disabled = disabled && id !== "unlock-advanced-btn";
+    if (!el) return;
+    if (id === "unlock-advanced-btn") {
+      // ロック切り替えボタンは常に操作可能
+      el.disabled = false;
+    } else {
+      el.disabled = disabled;
+    }
   });
 }
 
-// 詳細設定のロック状態反映
+// 詳細設定ロック状態の反映
 function updateAdvancedLockUI() {
   const inputs = [
     document.getElementById("source-column"),
@@ -60,11 +65,12 @@ function updateAdvancedLockUI() {
   inputs.forEach((el) => {
     if (!el) return;
     el.disabled = advancedLocked;
-    el.classList.toggle("editable", !advancedLocked);
     if (advancedLocked) {
       el.classList.add("locked-input");
+      el.classList.remove("editable");
     } else {
       el.classList.remove("locked-input");
+      el.classList.add("editable");
     }
   });
 
@@ -75,7 +81,7 @@ function updateAdvancedLockUI() {
   }
 }
 
-// ---------- ファイル読み込み & シート選択 ----------
+// ====== ファイル読み込み & シート選択 ======
 
 function onWorkbookLoaded(workbook, fileName) {
   EXCEL_workbook = workbook;
@@ -157,7 +163,7 @@ function setupDragAndDrop() {
   });
 }
 
-// ---------- 翻訳対象行の収集 ----------
+// ====== 翻訳対象行の収集 ======
 
 function collectRowsToTranslate() {
   if (!EXCEL_worksheet) {
@@ -208,40 +214,66 @@ function collectRowsToTranslate() {
   };
 }
 
-// ---------- API呼び出し ----------
+// ====== API呼び出し（バッチ分割版） ======
 
-async function callExcelTranslateAPI(rows, toLang) {
-  const res = await fetch("/api/excel-translate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rows, toLang }),
-  });
+async function callExcelTranslateAPI(rows, toLang, onProgress) {
+  const BATCH_SIZE = 40; // ここでバッチ幅を制御
+  const allTranslations = [];
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    console.error("[excel] API error:", res.status, text);
-    throw new Error(
-      "サーバー側の翻訳処理に失敗しました。（HTTP " + res.status + "）"
-    );
+  const total = rows.length;
+
+  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+    const batch = rows.slice(i, i + BATCH_SIZE);
+
+    const res = await fetch("/api/excel-translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows: batch, toLang }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error("[excel] API error:", res.status, text);
+      throw new Error(
+        "サーバー側の翻訳処理に失敗しました。（HTTP " + res.status + "）"
+      );
+    }
+
+    const data = await res.json();
+    if (!data || !Array.isArray(data.translations)) {
+      console.error("[excel] Unexpected API response:", data);
+      throw new Error("サーバーから不正な形式の応答が返されました。");
+    }
+    if (data.translations.length !== batch.length) {
+      console.error(
+        "[excel] length mismatch in batch",
+        data.translations.length,
+        batch.length
+      );
+      throw new Error("翻訳結果の件数が一致しませんでした。（バッチ）");
+    }
+
+    allTranslations.push(...data.translations);
+
+    if (onProgress) {
+      const done = Math.min(i + BATCH_SIZE, total);
+      onProgress(done, total);
+    }
   }
 
-  const data = await res.json();
-  if (!data || !Array.isArray(data.translations)) {
-    console.error("[excel] Unexpected API response:", data);
-    throw new Error("サーバーから不正な形式の応答が返されました。");
-  }
-  if (data.translations.length !== rows.length) {
+  if (allTranslations.length !== rows.length) {
     console.error(
-      "[excel] length mismatch",
-      data.translations.length,
+      "[excel] final length mismatch",
+      allTranslations.length,
       rows.length
     );
-    throw new Error("翻訳結果の件数が一致しませんでした。");
+    throw new Error("翻訳結果の件数が一致しませんでした。（最終）");
   }
-  return data.translations;
+
+  return allTranslations;
 }
 
-// ---------- 書き込み（幅・書式・格子コピー＋ヘッダ） ----------
+// ====== 書き込み（幅・書式・格子コピー＋ヘッダ） ======
 
 function writeTranslationsToSheet(info, translations, toLang) {
   const { rowIndices, sourceColIndex, targetColIndex, headerRow } = info;
@@ -276,7 +308,7 @@ function writeTranslationsToSheet(info, translations, toLang) {
     }
   });
 
-  // 列幅コピー（!cols）
+  // 列幅コピー
   const cols = ws["!cols"] || [];
   ws["!cols"] = cols;
   cols[targetColIndex] = cols[sourceColIndex]
@@ -323,7 +355,7 @@ function writeTranslationsToSheet(info, translations, toLang) {
   setStatus("翻訳結果を書き込みました。");
 }
 
-// ---------- ダウンロード ----------
+// ====== ダウンロード ======
 
 function downloadUpdatedWorkbook(toLang) {
   if (!EXCEL_workbook) {
@@ -349,7 +381,7 @@ function downloadUpdatedWorkbook(toLang) {
   URL.revokeObjectURL(url);
 }
 
-// ---------- メイン処理 ----------
+// ====== メイン処理 ======
 
 async function handleTranslateClick() {
   try {
@@ -377,7 +409,13 @@ async function handleTranslateClick() {
     toggleUI(true);
     setStatus(`翻訳中… 全 ${rows.length} 行`);
 
-    const translations = await callExcelTranslateAPI(rows, toLang);
+    const translations = await callExcelTranslateAPI(
+      rows,
+      toLang,
+      (done, total) => {
+        setStatus(`翻訳中… ${done} / ${total} 行`);
+      }
+    );
 
     writeTranslationsToSheet(info, translations, toLang);
     downloadUpdatedWorkbook(toLang);
@@ -393,7 +431,7 @@ async function handleTranslateClick() {
   }
 }
 
-// ---------- 初期化 ----------
+// ====== 初期化 ======
 
 document.addEventListener("DOMContentLoaded", () => {
   const fileInput = document.getElementById("excel-file");
