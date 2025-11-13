@@ -1,5 +1,5 @@
-let EXCEL_workbook = null; // ExcelJSのWorkbookオブジェクト
-let EXCEL_buffer = null;   // ファイルの生データ
+let EXCEL_workbook = null;
+let EXCEL_buffer = null;
 let EXCEL_fileName = null;
 let advancedLocked = true;
 
@@ -11,8 +11,22 @@ function setStatus(message) {
   console.log("[excel] " + message);
 }
 
+function showLoading(show, total = 0, current = 0) {
+  const overlay = document.getElementById("loading-overlay");
+  const msg = document.getElementById("loading-detail");
+  if (overlay) {
+    overlay.style.display = show ? "flex" : "none";
+    if (show && msg) {
+      msg.textContent = total > 0 ? `${current} / ${total} 行完了` : "準備中...";
+    }
+  }
+}
+
 function showError(message) {
   console.error("[excel] ERROR:", message);
+  // ローディングを強制解除
+  showLoading(false);
+  
   const modal = document.getElementById("error-modal");
   const msgEl = document.getElementById("error-message");
   if (modal && msgEl) {
@@ -35,7 +49,7 @@ function toggleUI(disabled) {
     if (el) el.disabled = disabled;
   });
   const unlockBtn = document.getElementById("unlock-advanced-btn");
-  if(unlockBtn) unlockBtn.disabled = false; // ロック解除ボタンは常に有効
+  if(unlockBtn) unlockBtn.disabled = false;
 }
 
 function updateAdvancedLockUI() {
@@ -56,7 +70,7 @@ function updateAdvancedLockUI() {
   if (btn) btn.textContent = advancedLocked ? "詳細設定を編集する" : "詳細設定をロックする";
 }
 
-// ====== ファイル読み込み (ExcelJS使用) ======
+// ====== ファイル読み込み (ExcelJS) ======
 
 async function handleFileSelected(event) {
   const input = event.target;
@@ -69,9 +83,8 @@ async function loadExcelFile(file) {
   try {
     EXCEL_fileName = file.name.replace(/\.xlsx$/i, "");
     const arrayBuffer = await file.arrayBuffer();
-    EXCEL_buffer = arrayBuffer; // 翻訳時に再利用するため保存
+    EXCEL_buffer = arrayBuffer;
 
-    // 読み込みテスト
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(arrayBuffer);
 
@@ -82,7 +95,7 @@ async function loadExcelFile(file) {
     
     workbook.eachSheet((sheet, id) => {
       const opt = document.createElement("option");
-      opt.value = sheet.name; // 名前で管理
+      opt.value = sheet.name;
       opt.textContent = sheet.name;
       sheetSelect.appendChild(opt);
     });
@@ -122,39 +135,34 @@ function getTargetSheet() {
 }
 
 function collectRowsToTranslate(sheet) {
-  const headerRowVal = parseInt(document.getElementById("header-row").value) || 1;
-  const startRowVal = parseInt(document.getElementById("start-row").value) || 2;
+  const headerRowVal = parseInt(document.getElementById("header-row").value) || 5;
+  const startRowVal = parseInt(document.getElementById("start-row").value) || 6;
   
-  // データが存在する最終列を探す（ExcelJSは columnCount が正確でない場合があるので走査する）
   let maxCol = 0;
   sheet.eachRow((row, rowNumber) => {
-    if (rowNumber >= headerRowVal) { // 見出し行以降をチェック
+    if (rowNumber >= headerRowVal) {
       maxCol = Math.max(maxCol, row.cellCount); 
     }
   });
 
-  // もし「詳細設定」で列指定があればそれを使う実装も可能だが、基本は「最右列」
+  // 対象は最右列
   const sourceColIndex = maxCol; 
+  // 翻訳結果はその右
   const targetColIndex = maxCol + 1;
 
   const rows = [];
   const rowIndices = [];
 
-  // startRow から順にデータを取得
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber >= startRowVal) {
       const cell = row.getCell(sourceColIndex);
-      // valueがオブジェクト(数式やリンク)の場合の対応
       let text = "";
       if (cell.value && typeof cell.value === 'object') {
         text = cell.value.result || cell.value.text || "";
       } else {
         text = String(cell.value || "");
       }
-      
-      // 改行コードを置換
       text = text.replace(/\n/g, "|||");
-      
       rows.push(text);
       rowIndices.push(rowNumber);
     }
@@ -163,7 +171,7 @@ function collectRowsToTranslate(sheet) {
   return { rows, rowIndices, sourceColIndex, targetColIndex, headerRow: headerRowVal };
 }
 
-// ====== API呼び出し (変更なし) ======
+// ====== API呼び出し ======
 
 async function callExcelTranslateAPI(rows, toLang, onProgress) {
   const BATCH_SIZE = 40;
@@ -191,60 +199,70 @@ async function callExcelTranslateAPI(rows, toLang, onProgress) {
   return allTranslations;
 }
 
-// ====== 書き込み & ダウンロード (ExcelJSの強み) ======
+// ====== 書き込み & ダウンロード ======
 
 async function writeAndDownload(sheet, info, translations, toLang) {
   const { rowIndices, sourceColIndex, targetColIndex, headerRow } = info;
 
-  // 1. ヘッダー書き込み
-  const headerCell = sheet.getRow(headerRow).getCell(targetColIndex);
-  headerCell.value = "翻訳結果";
+  // --- ヘッダー行の処理 ---
+  const headerRowObj = sheet.getRow(headerRow);
+  
+  // 1. 「翻訳」列（翻訳結果が入る列）
+  const transHeaderCell = headerRowObj.getCell(targetColIndex);
+  transHeaderCell.value = "翻訳"; // 「翻訳結果」→「翻訳」に変更
   
   // 元のヘッダーのスタイルをコピー
-  const srcHeader = sheet.getRow(headerRow).getCell(sourceColIndex);
-  headerCell.style = srcHeader.style;
+  const srcHeaderCell = headerRowObj.getCell(sourceColIndex);
+  transHeaderCell.style = srcHeaderCell.style;
 
-  // さらに右隣に「メーカー/スリーアール」
-  const labelCell = sheet.getRow(headerRow).getCell(targetColIndex + 1);
-  labelCell.value = toLang === "zh" ? "メーカー" : "スリーアール";
-  labelCell.style = srcHeader.style;
+  // 2. 「メーカー / スリーアール」列（その右隣）
+  const labelColIndex = targetColIndex + 1;
+  const labelHeaderCell = headerRowObj.getCell(labelColIndex);
+  
+  // 日本語なら「スリーアール」、それ以外なら「メーカー」
+  labelHeaderCell.value = toLang === "ja" ? "スリーアール" : "メーカー";
+  labelHeaderCell.style = srcHeaderCell.style; // スタイルコピー
 
-  // 2. データ書き込み
+  // --- データ行の書き込み ---
   rowIndices.forEach((rowNum, i) => {
     const row = sheet.getRow(rowNum);
     const srcCell = row.getCell(sourceColIndex);
-    const targetCell = row.getCell(targetColIndex);
-
-    const translatedText = (translations[i] || "").replace(/\|\|\|/g, "\n");
     
-    // 値をセット
-    targetCell.value = translatedText;
+    const transCell = row.getCell(targetColIndex);
+    const labelCell = row.getCell(labelColIndex);
 
-    // ★ここが重要：スタイル（フォント、背景、罫線）を完全コピー
-    targetCell.style = srcCell.style;
+    // 翻訳テキストセット
+    const translatedText = (translations[i] || "").replace(/\|\|\|/g, "\n");
+    transCell.value = translatedText;
+    transCell.style = srcCell.style; // スタイル完全コピー
+
+    // ラベル列（右隣）のスタイル設定（空文字を入れることでセルとして認識させる）
+    labelCell.value = null; 
+    labelCell.style = srcCell.style; // スタイル完全コピー
   });
 
-  // 3. 列幅のコピー
+  // --- 列幅のコピー ---
   const srcCol = sheet.getColumn(sourceColIndex);
-  const tgtCol = sheet.getColumn(targetColIndex);
-  const labelCol = sheet.getColumn(targetColIndex + 1);
+  const transCol = sheet.getColumn(targetColIndex);
+  const labelCol = sheet.getColumn(labelColIndex);
 
   if (srcCol && srcCol.width) {
-    tgtCol.width = srcCol.width;
-    labelCol.width = 20; // ラベル列は適当な幅
+    transCol.width = srcCol.width; // 同じ幅
+    labelCol.width = srcCol.width; // 同じ幅
   } else {
-    tgtCol.width = 30;
+    transCol.width = 30;
+    labelCol.width = 30;
   }
 
-  // 4. ファイル生成
+  // --- ファイル生成 ---
   const buffer = await EXCEL_workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   
   const a = document.createElement("a");
-  const suffix = toLang ? "_" + toLang : "_translated";
+  // ファイル名末尾に「_翻訳」をつける
   a.href = url;
-  a.download = (EXCEL_fileName || "translated") + suffix + ".xlsx";
+  a.download = (EXCEL_fileName || "download") + "_翻訳.xlsx";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -264,28 +282,33 @@ async function handleTranslateClick() {
 
   try {
     toggleUI(true);
-    setStatus("データ解析中...");
+    showLoading(true, 0, 0); // ローディング開始
 
     const info = collectRowsToTranslate(sheet);
     if (info.rows.length === 0) {
       throw new Error("翻訳対象のデータが見つかりませんでした");
     }
 
-    setStatus(`翻訳中... ${info.rows.length}件`);
+    showLoading(true, info.rows.length, 0);
     
     const translations = await callExcelTranslateAPI(info.rows, toLang, (done, total) => {
-      setStatus(`翻訳進行中: ${done}/${total}`);
+      showLoading(true, total, done);
     });
 
     setStatus("Excel生成中...");
     await writeAndDownload(sheet, info, translations, toLang);
     
-    setStatus("完了しました");
+    showLoading(false);
+    setStatus("完了");
+    
+    // 完了ポップアップ
+    alert("翻訳が完了しました。\nファイルがダウンロードされます。");
 
   } catch (e) {
     showError(e.message);
   } finally {
     toggleUI(false);
+    showLoading(false);
   }
 }
 
