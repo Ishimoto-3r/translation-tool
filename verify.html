@@ -49,11 +49,12 @@
         }
         input.locked-input {
             background-image: repeating-linear-gradient(-45deg, #e5e7eb, #e5e7eb 6px, #d1d5db 6px, #d1d5db 12px);
+            color: #6b7280; /* 文字色を少し薄く */
         }
-        input.locked-input.editable { background-image: none; background-color: #fff; }
+        input.locked-input.editable { background-image: none; background-color: #fff; color: #1f2937; }
 
         .button-row { display: flex; gap: 12px; justify-content: center; margin-top: 8px; }
-        .button-row.right { justify-content: flex-end; }
+        .button-row.right { justify-content: flex-end; margin-top: 0; }
 
         button {
             padding: 0.6rem 2rem;
@@ -64,7 +65,11 @@
         #translate-btn:hover:not(:disabled) { background-color: #2563eb; transform: translateY(-1px); }
         #translate-btn:disabled { background-color: #93c5fd; cursor: not-allowed; transform: none; box-shadow: none; }
         
-        #unlock-advanced-btn { background-color: #e5e7eb; color: #111827; padding: 0.6rem 1.1rem; font-size: 0.9rem; }
+        #unlock-advanced-btn { 
+            background-color: #ffffff; border: 1px solid #d1d5db; 
+            color: #4b5563; padding: 0.4rem 1rem; font-size: 0.85rem; 
+        }
+        #unlock-advanced-btn:hover { background-color: #f3f4f6; }
 
         .drop-zone {
             border: 2px dashed #cbd5e0; border-radius: 10px; padding: 16px;
@@ -73,6 +78,22 @@
         .drop-zone.drag-over { background-color: #dbeafe; border-color: #2563eb; }
 
         #status-text { font-size: 0.85rem; color: #374151; margin-top: 4px; text-align: center; }
+
+        /* ★新設：詳細設定エリアのデザイン */
+        .advanced-settings-area {
+            background-color: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .advanced-header {
+            display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem;
+        }
+        .advanced-note {
+            font-size: 0.85rem; color: #6b7280; margin: 0; line-height: 1.4;
+        }
+        .advanced-note strong { color: #4b5563; }
 
         /* ローディングオーバーレイ */
         #loading-overlay {
@@ -143,24 +164,32 @@
                 </select>
             </div>
         </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label>対象列</label>
-                <input type="text" id="source-column" value="最右列" disabled class="locked-input" />
+
+        <div class="advanced-settings-area">
+            <div class="advanced-header">
+                <p class="advanced-note">
+                    <strong>▼ 詳細設定（通常は変更不要）</strong><br>
+                    以下の項目は基本的に固定ですので、編集する必要はありません。
+                </p>
+                <button id="unlock-advanced-btn" type="button">ロック解除</button>
             </div>
-            <div class="form-group">
-                <label>見出し行（デフォルト: 5）</label>
-                <input type="number" id="header-row" value="5" disabled class="locked-input" />
-            </div>
-            <div class="form-group">
-                <label>開始行（デフォルト: 6）</label>
-                <input type="number" id="start-row" value="6" disabled class="locked-input" />
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>対象列（デフォルト：最右列）</label>
+                    <input type="text" id="source-column" value="最右列" disabled class="locked-input" />
+                </div>
+                <div class="form-group">
+                    <label>見出し行（デフォルト: 5）</label>
+                    <input type="number" id="header-row" value="5" disabled class="locked-input" />
+                </div>
+                <div class="form-group">
+                    <label>開始行（デフォルト: 6）</label>
+                    <input type="number" id="start-row" value="6" disabled class="locked-input" />
+                </div>
             </div>
         </div>
-        <div class="button-row right">
-            <button id="unlock-advanced-btn" type="button">詳細設定を編集する</button>
-        </div>
-    </section>
+        </section>
 
     <section class="section-card">
         <h2>3. 翻訳実行</h2>
