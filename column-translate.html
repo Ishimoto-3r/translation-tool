@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>列指定 翻訳ツール (GPT-5)</title>
     <style>
-        /* verify.html と同じ共通スタイル */
+        /* 共通スタイル */
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0; padding: 0; background-color: #f3f4f6; color: #1f2937;
@@ -21,7 +21,6 @@
         }
         h1 { font-size: 1.75rem; margin: 0; color: #111827; }
 
-        /* ナビゲーションバー */
         .tool-nav {
             background-color: #374151; padding: 0.75rem 1rem; text-align: center;
         }
@@ -32,7 +31,6 @@
         .tool-nav a:hover { background-color: #4b5563; }
         .tool-nav a.active { background-color: #172554; color: white; font-weight: 600; }
 
-        /* UIパーツ */
         .section-card {
             margin-bottom: 1.5rem; padding: 1.25rem 1.5rem;
             border-radius: 10px; border: 1px solid #e5e7eb; background-color: #ffffff;
@@ -145,15 +143,15 @@
         <div class="form-row">
             <div class="form-group">
                 <label>開始行</label>
-                <input type="number" id="start-row" value="1" />
+                <input type="number" id="start-row" value="1" min="1" />
             </div>
             <div class="form-group">
                 <label>終了行（空欄＝最後まで）</label>
-                <input type="number" id="end-row" placeholder="自動" />
+                <input type="number" id="end-row" placeholder="最終行まで" min="1" />
             </div>
         </div>
         <p style="font-size:0.85rem; color:#6b7280; margin-top:8px;">
-            ※ 指定した列の内容を翻訳し、<strong>すぐ右隣のセル</strong>に出力します（元のセル書式をコピー）。
+            ※ 指定した列の内容を翻訳し、<strong>すぐ右隣のセル</strong>に出力します（書式はコピーせず、テキストのみ入力）。
         </p>
     </section>
 
