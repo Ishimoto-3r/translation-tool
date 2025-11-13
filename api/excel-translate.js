@@ -19,8 +19,8 @@ module.exports = async (req, res) => {
   try {
     const { rows, toLang } = req.body;
     
-    // ★ログ：何が送られてきたか確認
-    console.log("【受信データ】", JSON.stringify(req.body));
+    // ログ：受信データ確認
+    console.log("【受信データ】", rows.length + "件");
 
     if (!rows || !Array.isArray(rows) || rows.length === 0) {
       throw new Error('データが空です');
@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
       { "translations": ["翻訳1", "翻訳2"] }
     `;
 
-    // ★モデルは gpt-5 を指定
+    // ★高速化設定を適用
     const completion = await openai.chat.completions.create({
       model: "gpt-5", 
       messages: [
@@ -42,18 +42,26 @@ module.exports = async (req, res) => {
         { role: "user", content: JSON.stringify({ rows: rows }) },
       ],
       response_format: { type: "json_object" },
+      
+      // 【変更点】速度優先設定
+      // temperature: 0.3, // ← 削除（reasoning_effortと併用できないため）
+      reasoning_effort: "minimal", // ← 追加（推論時間を短縮）
+      
+      // SDKの型定義にないパラメータを送信するための裏技
+      extra_body: {
+        verbosity: "low"
+      }
     });
 
     const content = completion.choices[0].message.content;
     
-    // ★ログ：AIが何を返してきたか確認
-    console.log("【AI応答】", content);
+    // ログ：AI応答確認
+    console.log("【AI応答】受信完了");
 
     const parsedResult = JSON.parse(content);
     return res.status(200).json(parsedResult);
 
   } catch (error) {
-    // ★ログ：エラー内容を出力
     console.error("【エラー発生】", error);
     return res.status(500).json({ error: error.message });
   }
