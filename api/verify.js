@@ -11,11 +11,11 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { rows, toLang } = req.body;
+    // ★変更点: context を受け取る
+    const { rows, toLang, context } = req.body;
     const apiKey = process.env.OPENAI_API_KEY;
 
-    // ログ：受信データ確認
-    console.log("【受信データ】", rows ? rows.length + "件" : "なし");
+    console.log("【受信データ】", rows ? rows.length + "件" : "なし", "Context:", context || "なし");
 
     if (!apiKey) {
       throw new Error('APIキーが設定されていません');
@@ -24,15 +24,26 @@ module.exports = async (req, res) => {
       throw new Error('データが空です');
     }
 
+    // ★変更点: コンテキストがあればシステムプロンプトに追加
+    let contextPrompt = "";
+    if (context && context.trim() !== "") {
+        contextPrompt = `
+        【追加指示（コンテキスト）】
+        ユーザーからの指示: "${context}"
+        この指示に従って翻訳のトーンや用語選択を行ってください。
+        `;
+    }
+
     const systemPrompt = `
       あなたはプロの翻訳者です。
       入力された配列を "${toLang}" に翻訳し、JSON形式で返してください。
+      
+      ${contextPrompt}
       
       出力フォーマット:
       { "translations": ["翻訳1", "翻訳2"] }
     `;
 
-    // ★ご提示いただいたコードをベースに fetch で直接送信
     const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -45,16 +56,14 @@ module.exports = async (req, res) => {
           { "role": "system", "content": systemPrompt },
           { "role": "user", "content": JSON.stringify({ rows: rows }) }
         ],
-        response_format: { type: "json_object" }, // JSON出力を強制
+        response_format: { type: "json_object" }, 
         
-        // ★速度向上のための推論調整（ご指定の設定）
+        // 速度向上のための設定（維持）
         reasoning_effort: "minimal",
         verbosity: "low"
-        // temperature は削除済み
       })
     });
 
-    // APIからの生のエラーレスポンスを取得
     if (!apiResponse.ok) {
       const errData = await apiResponse.json();
       console.error("OpenAI API Error:", JSON.stringify(errData));
@@ -64,7 +73,6 @@ module.exports = async (req, res) => {
     const data = await apiResponse.json();
     const content = data.choices[0].message.content;
 
-    // ログ：AI応答確認
     console.log("【AI応答】受信完了");
 
     const parsedResult = JSON.parse(content);
