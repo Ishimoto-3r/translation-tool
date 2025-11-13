@@ -41,10 +41,12 @@
         .form-group { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 4px; }
         label { font-weight: 600; font-size: 0.9rem; color: #374151; }
         
-        input, select {
+        input, select, textarea {
             width: 100%; padding: 0.5rem; border: 1px solid #d1d5db;
             border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;
+            font-family: inherit;
         }
+        textarea { resize: vertical; min-height: 80px; }
         
         .button-row { display: flex; gap: 12px; justify-content: center; margin-top: 8px; }
 
@@ -100,7 +102,7 @@
   <a href="/report.html">修理レポート</a>
   <a href="/verify.html">検証結果翻訳</a>
   <a href="/column-translate.html" class="active">列指定翻訳</a>
-　<a href="/sheet-translate.html">シート翻訳</a>
+  <a href="/sheet-translate.html">シート翻訳</a>
 </nav>
 
 <div class="container">
@@ -151,6 +153,17 @@
                 <input type="number" id="end-row" placeholder="最終行まで" min="1" />
             </div>
         </div>
+
+        <div class="form-row">
+            <div class="form-group" style="flex: 1 1 100%;">
+                <label>翻訳のヒント（コンテキスト）※任意</label>
+                <textarea id="translation-context" placeholder="例：これは専門的な技術文書です。硬い表現で翻訳してください。"></textarea>
+                <p style="font-size:0.85rem; color:#6b7280; margin-top:4px;">
+                    ※ ここに入力した内容はAIに指示として伝わります。空欄でも構いません。
+                </p>
+            </div>
+        </div>
+
         <p style="font-size:0.85rem; color:#6b7280; margin-top:8px;">
             ※ 指定した列の内容を翻訳し、<strong>すぐ右隣のセル</strong>に出力します（書式はコピーせず、テキストのみ入力）。
         </p>
