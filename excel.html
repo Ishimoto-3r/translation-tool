@@ -1,101 +1,306 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Excel翻訳</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel翻訳</title>
 
-  <!-- Tailwind（既存ツールと同一） -->
-  <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 書式付きでExcelを扱うためのライブラリ -->
+    <script src="https://unpkg.com/xlsx-populate/browser/xlsx-populate.min.js"></script>
 
-  <!-- 書式保持編集：xlsx-populate -->
-  <script src="https://unpkg.com/xlsx-populate/browser/xlsx-populate.min.js"></script>
+    <style>
+        /* ==== 共通デザイン（report.html と同じ） ==== */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+        #toast-container {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+        .toast {
+            background-color: #1f2937;
+            color: #f9fafb;
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            opacity: 0;
+            transition: opacity 0.5s, transform 0.5s;
+            transform: translateX(100%);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 1.5rem 2rem;
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        #main-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        h1 {
+            text-align: center;
+            color: #111827;
+            padding-bottom: 0;
+            margin-top: 0;
+            margin-bottom: 0;
+            font-size: 1.75rem;
+        }
+        .form-group {
+            margin-bottom: 1.75rem;
+        }
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #374151;
+            font-size: 0.9rem;
+        }
+        input[type="text"], input[type="number"], textarea, select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: inherit;
+            box-sizing: border-box;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+        }
+        textarea {
+            height: 120px;
+            resize: vertical;
+        }
+        .hidden { display: none; }
 
-  <style>
-    /* 既存のダークナビ外観に合わせる（最小限） */
-    .topbar { background:#1f2937; }            /* slate-800 */
-    .topbar a { color:#cbd5e1; padding:8px 12px; border-radius:6px; }
-    .topbar a:hover { background:#111827; color:#fff; }
-    .topbar a.active { background:#111827; color:#fff; }
-    /* モーダル */
-    .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:50; }
-    .modal { width: 520px; max-width:calc(100vw - 2rem); }
-  </style>
+        /* --- ナビゲーションバー（完全一致） --- */
+        .tool-nav {
+            background-color: #374151; /* bg-gray-700 */
+            padding: 0.75rem 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .tool-nav a {
+            color: #f3f4f6; /* text-gray-100 */
+            text-decoration: none;
+            font-weight: 500;
+            margin: 0 1rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+        }
+        .tool-nav a:hover {
+            background-color: #4b5563; /* bg-gray-600 */
+        }
+        .tool-nav a.active {
+            background-color: #172554; /* bg-blue-900 */
+            color: white;
+            font-weight: 600;
+        }
+
+        /* ==== Excel翻訳用の追加スタイル ==== */
+        .inline-row {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 0.75rem;
+            align-items: center;
+        }
+        .inline-row > div { width: 100%; }
+
+        .btn-primary {
+            display: inline-block;
+            padding: 0.7rem 1.4rem;
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.3s, box-shadow 0.3s;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+                        0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .btn-primary:hover:not(:disabled) {
+            background-color: #2563eb;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+                        0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .btn-primary:disabled {
+            background-color: #93c5fd;
+            cursor: not-allowed;
+            opacity: 0.8;
+        }
+
+        .btn-secondary {
+            display: inline-block;
+            padding: 0.7rem 1.2rem;
+            background-color: #4b5563;
+            color: #f9fafb;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .btn-secondary:hover:not(:disabled) {
+            background-color: #374151;
+        }
+        .btn-secondary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status-text {
+            font-size: 0.8rem;
+            color: #6b7280;
+            margin-top: 0.4rem;
+        }
+
+        /* モーダル */
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+        .modal {
+            width: 520px;
+            max-width: calc(100vw - 2rem);
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+            padding: 1.25rem 1.5rem;
+        }
+    </style>
 </head>
-<body class="bg-gray-100 text-gray-800">
+<body>
 
-  <!-- 上部ナビ（翻訳ツール / 修理レポート / Excel翻訳）-->
-  <header class="topbar text-sm text-slate-300">
-    <div class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
-      <a href="/index.html">翻訳ツール</a>
-      <a href="/report.html">修理レポート</a>
-      <a href="/excel.html" class="active">Excel翻訳</a>
+<!-- ナビゲーション（他ツールと完全一致） -->
+<nav class="tool-nav">
+  <a href="/index.html">翻訳ツール</a>
+  <a href="/report.html">修理レポート</a>
+  <a href="/excel.html" class="active">Excel翻訳</a>
+</nav>
+
+<div id="toast-container"></div>
+
+<!-- メインコンテンツ -->
+<div class="container">
+    <div id="main-header">
+        <h1>Excel翻訳</h1>
+        <!-- 右側は空でもOKだが、レイアウト維持のため空のspanを置く -->
+        <span></span>
     </div>
-  </header>
 
-  <main class="mx-auto max-w-6xl px-4 py-6 space-y-6">
-    <!-- 1) ファイルを選択 -->
-    <section class="rounded-2xl border bg-white p-4 shadow-sm">
-      <h2 class="mb-3 text-lg font-semibold">Excel翻訳</h2>
-      <div class="flex flex-wrap items-center gap-3">
-        <input id="fileInput" type="file" accept=".xlsx" class="block text-sm" />
-        <span id="fileName" class="text-sm text-gray-600">未選択</span>
-      </div>
-      <p class="mt-2 text-xs text-gray-500">※ .xlsx（先頭シートを対象）。</p>
-      <p id="status" class="mt-1 text-xs text-gray-500">ファイル未選択</p>
-    </section>
-
-    <!-- 2) 設定・実行 -->
-    <section class="rounded-2xl border bg-white p-4 shadow-sm">
-      <h3 class="mb-3 text-base font-medium">指定列を翻訳</h3>
-      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div class="grid grid-cols-2 items-center gap-2">
-          <label class="text-xs">対象列（A,B,C... 空=最右列）</label>
-          <input id="sourceCol" type="text" class="rounded border px-2 py-1 text-sm" placeholder="例: C"/>
-          <label class="text-xs">見出し行</label>
-          <input id="headerRow" type="number" min="1" value="5" class="rounded border px-2 py-1 text-sm"/>
-          <label class="text-xs">処理開始行</label>
-          <input id="startRow" type="number" min="1" value="6" class="rounded border px-2 py-1 text-sm"/>
-          <label class="text-xs">出力列の見出し</label>
-          <input id="outHeader" type="text" value="翻訳" class="rounded border px-2 py-1 text-sm"/>
-          <label class="text-xs">翻訳言語</label>
-          <select id="lang" class="rounded border px-2 py-1 text-sm">
-            <option value="ja">日本語</option>
-            <option value="zh">中国語</option>
-            <option value="en">英語</option>
-            <option value="ko">韓国語</option>
-          </select>
+    <!-- 1) ファイル選択 -->
+    <div class="form-group">
+        <label for="fileInput">1. 「検証結果」ファイルを選択</label>
+        <div class="inline-row">
+            <div>
+                <input id="fileInput" type="file" accept=".xlsx">
+            </div>
+            <div>
+                <div id="fileName" class="status-text">未選択</div>
+            </div>
         </div>
-        <div class="flex items-end gap-2">
-          <button id="runBtn"  type="button" class="rounded bg-indigo-600 px-3 py-2 text-sm text-white">実行</button>
-          <button id="saveAsBtn" type="button" class="rounded border px-3 py-2 text-sm" disabled>別名で保存</button>
-        </div>
-      </div>
-      <p class="mt-2 text-xs text-gray-500">
-        ※ 改行は一時的に <code>|||</code> で保護→復元。翻訳APIは <code>/api/excel-translate</code> を使用（MOCKなし）。
-      </p>
-    </section>
-  </main>
-
-  <!-- 保存名入力モーダル（全ブラウザ対応） -->
-  <div id="saveModal" class="modal-backdrop">
-    <div class="modal rounded-2xl border bg-white p-4 shadow-xl">
-      <h3 class="text-base font-semibold mb-2">別名で保存</h3>
-      <label class="text-xs text-gray-600 block mb-1">保存ファイル名（拡張子 .xlsx）</label>
-      <input id="saveName" type="text" class="w-full rounded border px-2 py-1 text-sm" />
-      <div class="mt-4 flex justify-end gap-2">
-        <button id="cancelSave" class="rounded border px-3 py-1 text-sm">キャンセル</button>
-        <button id="confirmSave" class="rounded bg-indigo-600 px-3 py-1 text-sm text-white">保存</button>
-      </div>
+        <div id="status" class="status-text">ファイル未選択</div>
+        <div class="status-text">※ .xlsx（先頭シートを対象）</div>
     </div>
-  </div>
 
-  <script>
-    // ---------- 状態 ----------
-    let workbook = null;        // xlsx-populate Workbook
-    let ws = null;              // 先頭シート
-    let fileName = "";          // 元ファイル名
-    let pendingBlob = null;     // 保存待ち
+    <!-- 2) 設定 -->
+    <div class="form-group">
+        <label>2. 指定列を翻訳</label>
+        <div class="form-group">
+            <div class="inline-row">
+                <div>
+                    <label for="sourceCol">対象列（A,B,C... 空=最右列）</label>
+                    <input id="sourceCol" type="text" placeholder="例: C">
+                </div>
+                <div>
+                    <label for="lang">翻訳言語</label>
+                    <select id="lang">
+                        <option value="ja">日本語</option>
+                        <option value="zh">中国語</option>
+                        <option value="en">英語</option>
+                        <option value="ko">韓国語</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-group inline-row">
+            <div>
+                <label for="headerRow">見出し行</label>
+                <input id="headerRow" type="number" min="1" value="5">
+            </div>
+            <div>
+                <label for="startRow">処理開始行</label>
+                <input id="startRow" type="number" min="1" value="6">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="outHeader">出力列の見出し</label>
+            <input id="outHeader" type="text" value="翻訳">
+        </div>
+
+        <div class="form-group">
+            <button id="runBtn" type="button" class="btn-primary">実行</button>
+            <button id="saveAsBtn" type="button" class="btn-secondary" disabled>別名で保存</button>
+        </div>
+        <div class="status-text">
+            ※ 改行は一時的に <code>|||</code> で保護→復元します。翻訳APIは <code>/api/excel-translate</code> を使用（MOCKなし）。
+        </div>
+    </div>
+</div>
+
+<!-- 保存名入力モーダル -->
+<div id="saveModal" class="modal-backdrop">
+    <div class="modal">
+        <h3 class="text-base font-semibold mb-2">別名で保存</h3>
+        <label class="text-xs text-gray-600 block mb-1">保存ファイル名（拡張子 .xlsx）</label>
+        <input id="saveName" type="text" class="w-full rounded border px-2 py-1 text-sm" />
+        <div style="margin-top:1rem; display:flex; justify-content:flex-end; gap:0.5rem;">
+            <button id="cancelSave" class="btn-secondary">キャンセル</button>
+            <button id="confirmSave" class="btn-primary">保存</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ========= 状態 =========
+    let workbook = null;   // XlsxPopulate Workbook
+    let ws = null;         // 先頭シート
+    let fileName = "";
+    let pendingBlob = null;
 
     const $ = (id) => document.getElementById(id);
     const fileInput = $("fileInput");
@@ -112,206 +317,234 @@
     function setStatus(t){ statusEl.textContent = t; }
 
     function colLetterToNumber(str){
-      // A->1
-      str = (str||"").trim().toUpperCase();
-      if(!str) return null;
-      let n=0; for(let i=0;i<str.length;i++){ n = n*26 + (str.charCodeAt(i)-64); }
-      return n;
+        str = (str||"").trim().toUpperCase();
+        if(!str) return null;
+        let n=0;
+        for(let i=0;i<str.length;i++){
+            n = n*26 + (str.charCodeAt(i)-64);
+        }
+        return n;
     }
     function numberToColLetter(n){
-      let s=""; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); }
-      return s;
+        let s="";
+        while(n>0){
+            const m=(n-1)%26;
+            s=String.fromCharCode(65+m)+s;
+            n=Math.floor((n-1)/26);
+        }
+        return s;
     }
 
     function openModal(defaultName){
-      saveName.value = defaultName;
-      saveModal.style.display = "flex";
-      saveName.focus(); saveName.select();
+        saveName.value = defaultName;
+        saveModal.style.display = "flex";
+        saveName.focus();
+        saveName.select();
     }
-    function closeModal(){ saveModal.style.display = "none"; }
+    function closeModal(){
+        saveModal.style.display = "none";
+    }
 
-    // ---- ファイル読み込み ----
+    // ========= ファイル読み込み =========
     fileInput.addEventListener("change", async (e)=>{
-      try{
-        const f = e.target.files?.[0];
-        if(!f) return;
-        fileName = f.name || "";
-        fileNameEl.textContent = fileName || "未選択";
-        setStatus("読み込み中…");
+        try{
+            const f = e.target.files?.[0];
+            if(!f) return;
+            fileName = f.name || "";
+            fileNameEl.textContent = fileName || "未選択";
+            setStatus("読み込み中…");
 
-        const buf = await f.arrayBuffer();
-        workbook = await XlsxPopulate.fromDataAsync(buf);
-        ws = workbook.sheet(0);
-        setStatus(`開きました：${fileName}（シート: ${ws.name()}）`);
-        saveAsBtn.disabled = true;
-        pendingBlob = null;
-      }catch(err){
-        console.error(err);
-        setStatus("エラー：ファイルの読み込みに失敗しました（.xlsx を指定）");
-      }
+            const buf = await f.arrayBuffer();
+            workbook = await XlsxPopulate.fromDataAsync(buf);
+            ws = workbook.sheet(0);
+            setStatus(`開きました：${fileName}（シート: ${ws.name()}）`);
+            saveAsBtn.disabled = true;
+            pendingBlob = null;
+        }catch(err){
+            console.error(err);
+            setStatus("エラー：ファイルの読み込みに失敗しました（.xlsx を指定）");
+        }
     });
 
-    // ---- 書式コピー ----
+    // ========= 書式コピー =========
     function copyCellStyle(src, dst){
-      const keys = [
-        "bold","italic","underline","strikethrough",
-        "fontColor","fontFamily","fontSize",
-        "horizontalAlignment","verticalAlignment",
-        "wrapText","shrinkToFit","textRotation",
-        "fill","numberFormat"
-      ];
-      keys.forEach(k=>{
-        try{ const v = src.style(k); if(v !== undefined) dst.style(k, v); }catch(_){}
-      });
-      ["top","left","bottom","right"].forEach(side=>{
-        try{
-          const cap = side.charAt(0).toUpperCase()+side.slice(1);
-          const b = src.style("border"+cap);
-          if(b) dst.style("border"+cap, b);
-        }catch(_){}
-      });
+        const keys = [
+            "bold","italic","underline","strikethrough",
+            "fontColor","fontFamily","fontSize",
+            "horizontalAlignment","verticalAlignment",
+            "wrapText","shrinkToFit","textRotation",
+            "fill","numberFormat"
+        ];
+        keys.forEach(k=>{
+            try{
+                const v = src.style(k);
+                if(v !== undefined) dst.style(k, v);
+            }catch(_){}
+        });
+        ["top","left","bottom","right"].forEach(side=>{
+            try{
+                const cap = side.charAt(0).toUpperCase()+side.slice(1);
+                const b = src.style("border"+cap);
+                if(b) dst.style("border"+cap, b);
+            }catch(_){}
+        });
     }
 
-    // ---- 翻訳API（MOCK無し）----
+    // ========= 翻訳API（配列→配列） =========
     async function fetchTranslations(texts, toLang){
-      const CHUNK = 300;
-      const result = [];
-      for(let i=0;i<texts.length;i+=CHUNK){
-        const chunk = texts.slice(i,i+CHUNK);
-        const res = await fetch("/api/excel-translate",{
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ rows: chunk, toLang })
-        });
-        if(!res.ok){
-          const t = await res.text();
-          throw new Error("翻訳APIエラー: " + t);
+        const CHUNK = 300;
+        const result = [];
+        for(let i=0;i<texts.length;i+=CHUNK){
+            const chunk = texts.slice(i,i+CHUNK);
+            const res = await fetch("/api/excel-translate",{
+                method:"POST",
+                headers:{ "Content-Type":"application/json" },
+                body: JSON.stringify({ rows: chunk, toLang })
+            });
+            if(!res.ok){
+                const t = await res.text();
+                throw new Error("翻訳APIエラー: " + t);
+            }
+            const json = await res.json();
+            if(!Array.isArray(json.translations) || json.translations.length !== chunk.length){
+                throw new Error("翻訳結果の長さ不一致");
+            }
+            result.push(...json.translations);
+            setStatus(`翻訳中… ${Math.min(i+CHUNK,texts.length)} / ${texts.length}`);
         }
-        const json = await res.json();
-        if(!Array.isArray(json.translations) || json.translations.length !== chunk.length){
-          throw new Error("翻訳結果の長さ不一致");
-        }
-        result.push(...json.translations);
-        setStatus(`翻訳中… ${Math.min(i+CHUNK,texts.length)} / ${texts.length}`);
-      }
-      return result;
+        return result;
     }
 
-    // ---- 実行（確認ダイアログは出さない）----
-    $("runBtn").addEventListener("click", async ()=>{
-      try{
-        if(!workbook || !ws){ alert("先にExcelファイルを選択してください"); return; }
-
-        const lang = document.getElementById("lang").value;
-        const headerRow = parseInt(document.getElementById("headerRow").value,10) || 5;
-        const startRow  = parseInt(document.getElementById("startRow").value,10)  || 6;
-        const outHeader = document.getElementById("outHeader").value || "翻訳";
-        const srcColStr = (document.getElementById("sourceCol").value || "").trim().toUpperCase();
-
-        const usedRange = ws.usedRange();
-        const lastRow   = usedRange.endCell().rowNumber();
-        const lastCol   = usedRange.endCell().columnNumber();
-
-        let srcCol = srcColStr ? colLetterToNumber(srcColStr) : lastCol;
-        if(!srcCol || srcCol<1) srcCol = lastCol;
-
-        const outCol = srcCol + 1;
-
-        // ヘッダ書式＆列幅
-        const srcHeaderCell = ws.cell(headerRow, srcCol);
-        const outHeaderCell = ws.cell(headerRow, outCol).value(outHeader);
-        copyCellStyle(srcHeaderCell, outHeaderCell);
+    // ========= 実行（確認ダイアログなし） =========
+    runBtn.addEventListener("click", async ()=>{
         try{
-          const w = ws.column(srcCol).width();
-          if(typeof w === "number") ws.column(outCol).width(w);
-        }catch(_){}
+            if(!workbook || !ws){
+                alert("先にExcelファイルを選択してください");
+                return;
+            }
+            const lang      = $("lang").value;
+            const headerRow = parseInt($("headerRow").value,10) || 5;
+            const startRow  = parseInt($("startRow").value,10)  || 6;
+            const outHeader = $("outHeader").value || "翻訳";
+            const srcColStr = ($("sourceCol").value || "").trim().toUpperCase();
 
-        // 入力抽出
-        const SPECIAL = "|||";
-        const inputs = [];
-        const rowMap = [];
-        for(let r = startRow; r <= lastRow; r++){
-          const v = ws.cell(r, srcCol).value();
-          const s = (v===undefined || v===null) ? "" : String(v);
-          if(s !== ""){
-            inputs.push(s.replace(/\n/g, SPECIAL));
-            rowMap.push(r);
-          }
+            const usedRange = ws.usedRange();
+            const lastRow   = usedRange.endCell().rowNumber();
+            const lastCol   = usedRange.endCell().columnNumber();
+
+            let srcCol = srcColStr ? colLetterToNumber(srcColStr) : lastCol;
+            if(!srcCol || srcCol < 1) srcCol = lastCol;
+            const outCol = srcCol + 1;
+
+            // 見出し・列幅
+            const srcHeaderCell = ws.cell(headerRow, srcCol);
+            const outHeaderCell = ws.cell(headerRow, outCol).value(outHeader);
+            copyCellStyle(srcHeaderCell, outHeaderCell);
+            try{
+                const w = ws.column(srcCol).width();
+                if(typeof w === "number") ws.column(outCol).width(w);
+            }catch(_){}
+
+            // 入力抽出
+            const SPECIAL = "|||";
+            const inputs = [];
+            const rowMap = [];
+            for(let r = startRow; r <= lastRow; r++){
+                const v = ws.cell(r, srcCol).value();
+                const s = (v===undefined || v===null) ? "" : String(v);
+                if(s !== ""){
+                    inputs.push(s.replace(/\n/g, SPECIAL));
+                    rowMap.push(r);
+                }
+            }
+            if(inputs.length === 0){
+                alert("翻訳対象テキストがありません");
+                return;
+            }
+
+            setStatus(`翻訳中… (${inputs.length} 件)`);
+            const translations = await fetchTranslations(inputs, lang);
+
+            // 反映
+            for(let i=0;i<rowMap.length;i++){
+                const r = rowMap[i];
+                const srcCell = ws.cell(r, srcCol);
+                const dstCell = ws.cell(r, outCol);
+                const text = translations[i].replaceAll(SPECIAL, "\n");
+                dstCell.value(text);
+                copyCellStyle(srcCell, dstCell);
+            }
+
+            // 結果をメモリへ保持（別名保存待ち）
+            const outBuffer = await workbook.outputAsync();
+            pendingBlob = new Blob([outBuffer], {
+                type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            });
+            saveAsBtn.disabled = false;
+
+            const base = fileName ? fileName.replace(/\.xlsx$/i, "") : "検証結果";
+            openModal(`${base}_翻訳.xlsx`);
+            setStatus("完了：結果をメモリに保持しました。保存名と保存先を指定してください。");
+
+        }catch(e){
+            console.error(e);
+            setStatus("エラー：翻訳処理に失敗しました");
+            alert(e.message || "翻訳中にエラーが発生しました。");
         }
-        if(inputs.length === 0){ alert("翻訳対象テキストがありません"); return; }
+    });
 
-        setStatus(`翻訳中… (${inputs.length} 件)`);
-        const translations = await fetchTranslations(inputs, lang);
-
-        // 反映（書式は元セルからコピー）
-        for(let i=0;i<rowMap.length;i++){
-          const r = rowMap[i];
-          const srcCell = ws.cell(r, srcCol);
-          const dstCell = ws.cell(r, outCol);
-          const text = translations[i].replaceAll(SPECIAL, "\n");
-          dstCell.value(text);
-          copyCellStyle(srcCell, dstCell);
+    // ========= 保存処理 =========
+    function saveWithPicker(name, blob){
+        if (window.showSaveFilePicker) {
+            return (async () => {
+                const handle = await showSaveFilePicker({
+                    suggestedName: name,
+                    types: [{
+                        description: "Excel",
+                        accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] }
+                    }]
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+            })();
         }
+        // フォールバック：download属性
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return Promise.resolve();
+    }
 
-        // 結果をメモリへ（別名保存を促す）
-        const outBuffer = await workbook.outputAsync();
-        pendingBlob = new Blob([outBuffer], {
-          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        });
-        saveAsBtn.disabled = false;
-
+    cancelSave.addEventListener("click", ()=> closeModal());
+    saveAsBtn.addEventListener("click", ()=>{
         const base = fileName ? fileName.replace(/\.xlsx$/i, "") : "検証結果";
         openModal(`${base}_翻訳.xlsx`);
-        setStatus("完了：結果をメモリに保持しました。保存名と保存先を指定してください。");
-      }catch(e){
-        console.error(e);
-        setStatus("エラー：翻訳処理に失敗しました");
-        alert(e.message || "翻訳中にエラーが発生しました。");
-      }
     });
+    confirmSave.addEventListener("click", async ()=>{
+        try{
+            if(!pendingBlob){
+                alert("保存できる内容がありません。先に翻訳を実行してください。");
+                return;
+            }
+            let name = (saveName.value || "").trim();
+            if(!name) name = "検証結果_翻訳.xlsx";
+            if(!/\.xlsx$/i.test(name)) name += ".xlsx";
 
-    // ---- 別名で保存（モーダル）----
-    function saveWithPicker(name, blob){
-      // File System Access API がある場合は原生ダイアログ
-      if (window.showSaveFilePicker) {
-        return (async () => {
-          const handle = await showSaveFilePicker({
-            suggestedName: name,
-            types: [{ description: "Excel", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }]
-          });
-          const writable = await handle.createWritable();
-          await writable.write(blob);
-          await writable.close();
-        })();
-      }
-      // フォールバック：download属性（保存先ダイアログはブラウザ設定に依存）
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
-      return Promise.resolve();
-    }
-
-    document.getElementById("cancelSave").addEventListener("click", ()=> closeModal());
-    document.getElementById("saveAsBtn").addEventListener("click", ()=>{
-      const base = fileName ? fileName.replace(/\.xlsx$/i, "") : "検証結果";
-      openModal(`${base}_翻訳.xlsx`);
+            await saveWithPicker(name, pendingBlob);
+            closeModal();
+            setStatus("保存しました。");
+        }catch(e){
+            console.error(e);
+            alert(e.message || "保存に失敗しました。");
+        }
     });
-    document.getElementById("confirmSave").addEventListener("click", async ()=>{
-      try{
-        if(!pendingBlob){ alert("保存できる内容がありません。先に翻訳を実行してください。"); return; }
-        let name = (document.getElementById("saveName").value || "").trim();
-        if(!name) name = "検証結果_翻訳.xlsx";
-        if(!/\.xlsx$/i.test(name)) name += ".xlsx";
+</script>
 
-        await saveWithPicker(name, pendingBlob);
-        closeModal();
-        setStatus("保存しました。");
-      }catch(e){
-        console.error(e);
-        alert(e.message || "保存に失敗しました。");
-      }
-    });
-  </script>
 </body>
 </html>
