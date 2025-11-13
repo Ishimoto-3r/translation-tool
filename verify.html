@@ -43,13 +43,17 @@
         .form-group { flex: 1; min-width: 180px; display: flex; flex-direction: column; gap: 4px; }
         label { font-weight: 600; font-size: 0.9rem; color: #374151; }
         
-        input, select {
+        /* ★textareaを追加 */
+        input, select, textarea {
             width: 100%; padding: 0.5rem; border: 1px solid #d1d5db;
             border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;
+            font-family: inherit;
         }
+        textarea { resize: vertical; min-height: 80px; }
+
         input.locked-input {
             background-image: repeating-linear-gradient(-45deg, #e5e7eb, #e5e7eb 6px, #d1d5db 6px, #d1d5db 12px);
-            color: #6b7280; /* 文字色を少し薄く */
+            color: #6b7280;
         }
         input.locked-input.editable { background-image: none; background-color: #fff; color: #1f2937; }
 
@@ -79,7 +83,7 @@
 
         #status-text { font-size: 0.85rem; color: #374151; margin-top: 4px; text-align: center; }
 
-        /* ★新設：詳細設定エリアのデザイン */
+        /* 詳細設定エリア */
         .advanced-settings-area {
             background-color: #f9fafb;
             border: 1px solid #e5e7eb;
@@ -129,8 +133,8 @@
   <a href="/index.html">翻訳ツール</a>
   <a href="/report.html">修理レポート</a>
   <a href="/verify.html" class="active">検証結果翻訳</a>
-　<a href="/column-translate.html">列指定翻訳</a>
-　<a href="/sheet-translate.html">シート翻訳</a>
+  <a href="/column-translate.html">列指定翻訳</a>
+  <a href="/sheet-translate.html">シート翻訳</a>
 </nav>
 
 <div class="container">
@@ -166,6 +170,16 @@
                 </select>
             </div>
         </div>
+        
+        <div class="form-row">
+            <div class="form-group" style="flex: 1 1 100%;">
+                <label>翻訳のヒント（コンテキスト）※任意</label>
+                <textarea id="translation-context" placeholder="例：一般的な商品名や商品ジャンルなど"></textarea>
+                <p style="font-size:0.85rem; color:#6b7280; margin-top:4px;">
+                    ※ ここに入力した内容はAIに指示として伝わります。空欄でも構いません。
+                </p>
+            </div>
+        </div>
 
         <div class="advanced-settings-area">
             <div class="advanced-header">
@@ -191,7 +205,7 @@
                 </div>
             </div>
         </div>
-        </section>
+    </section>
 
     <section class="section-card">
         <h2>3. 翻訳実行</h2>
