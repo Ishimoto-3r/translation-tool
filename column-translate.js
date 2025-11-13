@@ -127,7 +127,11 @@ function collectRowsToTranslate(sheet) {
   const sourceColIndex = colLetterToNumber(colStr); 
   if (sourceColIndex < 1) throw new Error("列の指定が正しくありません。");
 
-  const startRowVal = parseInt(document.getElementById("start-row").value) || 1;
+  // ★変更点：開始行の入力チェックを追加
+  const startRowInput = document.getElementById("start-row");
+  if (!startRowInput.value) throw new Error("開始行を入力してください。");
+  
+  const startRowVal = parseInt(startRowInput.value);
   let endRowVal = parseInt(document.getElementById("end-row").value);
   
   if (!endRowVal || isNaN(endRowVal)) {
@@ -212,8 +216,7 @@ async function writeAndDownload(sheet, info, translations) {
     const row = sheet.getRow(rowNum);
     const targetCell = row.getCell(targetColIndex);
 
-    // ★修正：書式コピー（styleの代入）を削除しました。
-    // targetCell.style = srcCell.style; // 削除済
+    // 書式コピーは行わない
 
     const translationIndex = rowNumToTranslationIndex[rowNum];
     if (translationIndex !== undefined) {
@@ -224,7 +227,7 @@ async function writeAndDownload(sheet, info, translations) {
     }
   }
 
-  // 列幅のコピー（利便性のため残していますが、不要なら以下if文を削除してください）
+  // 列幅のコピー (利便性のため残していますが、不要なら以下if文を削除可能)
   const srcCol = sheet.getColumn(sourceColIndex);
   const targetCol = sheet.getColumn(targetColIndex);
   if (srcCol && srcCol.width) {
