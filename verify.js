@@ -8,7 +8,7 @@ let advancedLocked = true;
 function setStatus(message) {
   const el = document.getElementById("status-text");
   if (el) el.textContent = message;
-  console.log("[excel] " + message);
+  console.log("[verify] " + message); // ログも見やすく verify に変更
 }
 
 function showLoading(show, total = 0, current = 0) {
@@ -23,9 +23,8 @@ function showLoading(show, total = 0, current = 0) {
 }
 
 function showError(message) {
-  console.error("[excel] ERROR:", message);
+  console.error("[verify] ERROR:", message);
   showLoading(false);
-  
   const modal = document.getElementById("error-modal");
   const msgEl = document.getElementById("error-message");
   if (modal && msgEl) {
@@ -148,8 +147,6 @@ function collectRowsToTranslate(sheet) {
   const targetColIndex = maxCol + 1;
 
   const rows = [];
-  // 翻訳対象の元のExcel行番号と、そのAIへの送信インデックスを紐づけるマップ
-  // { '元の行番号': AIへの送信インデックス }
   const rowNumToTranslationIndex = {}; 
 
   sheet.eachRow((row, rowNumber) => {
@@ -164,8 +161,8 @@ function collectRowsToTranslate(sheet) {
       
       text = text.replace(/\n/g, "|||");
       
-      if (text.trim() !== "") { // 空白でないセルのみ翻訳リストに追加
-        rowNumToTranslationIndex[rowNumber] = rows.length; // AIへの送信インデックスを記録
+      if (text.trim() !== "") { 
+        rowNumToTranslationIndex[rowNumber] = rows.length; 
         rows.push(text);
       }
     }
@@ -176,7 +173,7 @@ function collectRowsToTranslate(sheet) {
 
 // ====== API呼び出し ======
 
-async function callExcelTranslateAPI(rows, toLang, onProgress) {
+async function callVerifyTranslateAPI(rows, toLang, onProgress) {
   const BATCH_SIZE = 40;
   const allTranslations = [];
   const total = rows.length;
@@ -184,7 +181,8 @@ async function callExcelTranslateAPI(rows, toLang, onProgress) {
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     
-    const res = await fetch("/api/excel-translate", {
+    // ★ここが変更: 呼び出し先を /api/verify に変更
+    const res = await fetch("/api/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ rows: batch, toLang }),
@@ -214,19 +212,16 @@ async function writeAndDownload(sheet, info, translations, toLang) {
 
   const headerRowObj = sheet.getRow(headerRow);
   
-  // ヘッダー：翻訳列
   const transHeaderCell = headerRowObj.getCell(targetColIndex);
   transHeaderCell.value = "翻訳";
   const srcHeaderCell = headerRowObj.getCell(sourceColIndex);
   transHeaderCell.style = srcHeaderCell.style;
 
-  // ヘッダー：メーカー/スリーアール列
   const labelColIndex = targetColIndex + 1;
   const labelHeaderCell = headerRowObj.getCell(labelColIndex);
   labelHeaderCell.value = toLang === "ja" ? "スリーアール" : "メーカー";
   labelHeaderCell.style = srcHeaderCell.style;
 
-  // 列幅コピー（ヘッダーより先に設定しておく）
   const srcCol = sheet.getColumn(sourceColIndex);
   const transCol = sheet.getColumn(targetColIndex);
   const labelCol = sheet.getColumn(labelColIndex);
@@ -239,10 +234,7 @@ async function writeAndDownload(sheet, info, translations, toLang) {
     labelCol.width = 30;
   }
 
-  // --- 全ての対象行に対して処理 ---
-  // sheet.eachRow はデータのある行だけでなく、空行も走査できるようにする
-  // 厳密にはシートの最大行まで走査
-  const maxRow = sheet.actualRowCount > headerRow ? sheet.actualRowCount : headerRow + 10; // データの最大行か、見出し行+α
+  const maxRow = sheet.actualRowCount > headerRow ? sheet.actualRowCount : headerRow + 10;
   
   for (let rowNum = headerRow + 1; rowNum <= maxRow; rowNum++) {
     const row = sheet.getRow(rowNum);
@@ -251,20 +243,18 @@ async function writeAndDownload(sheet, info, translations, toLang) {
     const transCell = row.getCell(targetColIndex);
     const labelCell = row.getCell(labelColIndex);
 
-    // ★すべてのセルに元のセルのスタイルをコピー
     transCell.style = srcCell.style;
     labelCell.style = srcCell.style;
     
-    // 翻訳が必要な行の場合のみ値を設定
     const translationIndex = rowNumToTranslationIndex[rowNum];
-    if (translationIndex !== undefined) { // 翻訳対象の行であれば
+    if (translationIndex !== undefined) {
       const translatedText = (translations[translationIndex] || "").replace(/\|\|\|/g, "\n");
       transCell.value = translatedText;
     } else {
-      transCell.value = null; // 翻訳対象でなければ空にする
+      transCell.value = null;
     }
     
-    labelCell.value = null; // ラベル列は常に空（ヘッダー以外）
+    labelCell.value = null;
   }
 
   const buffer = await EXCEL_workbook.xlsx.writeBuffer();
@@ -297,10 +287,8 @@ async function handleTranslateClick() {
 
     const info = collectRowsToTranslate(sheet);
     if (info.rows.length === 0) {
-      // 翻訳対象のデータが1つもない場合も、エラーとせず処理を進める
-      // →空の翻訳列とラベル列（スタイル付き）が生成される
       setStatus("翻訳対象のデータはありませんが、ファイルを作成します。");
-      await writeAndDownload(sheet, info, [], toLang); // 空の翻訳結果で書き込み
+      await writeAndDownload(sheet, info, [], toLang);
       showLoading(false);
       setStatus("完了");
       alert("翻訳対象のデータがなかったため、空の翻訳列とラベル列を作成しました。\nファイルがダウンロードされます。");
@@ -309,7 +297,8 @@ async function handleTranslateClick() {
 
     showLoading(true, info.rows.length, 0);
     
-    const translations = await callExcelTranslateAPI(info.rows, toLang, (done, total) => {
+    // 関数名変更: callVerifyTranslateAPI
+    const translations = await callVerifyTranslateAPI(info.rows, toLang, (done, total) => {
       showLoading(true, total, done);
     });
 
