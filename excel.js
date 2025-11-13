@@ -1,4 +1,4 @@
-// excel.js — Excel翻訳ツール フロントロジック（バッチ対応・確定版）
+// excel.js — Excel翻訳ツール フロントロジック（詳細エラー表示版）
 
 let EXCEL_workbook = null;
 let EXCEL_worksheet = null;
@@ -214,12 +214,11 @@ function collectRowsToTranslate() {
   };
 }
 
-// ====== API呼び出し（バッチ分割版） ======
+// ====== API呼び出し（バッチ＋詳細エラー表示） ======
 
 async function callExcelTranslateAPI(rows, toLang, onProgress) {
-  const BATCH_SIZE = 40; // ここでバッチ幅を制御
+  const BATCH_SIZE = 40;
   const allTranslations = [];
-
   const total = rows.length;
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
@@ -231,15 +230,33 @@ async function callExcelTranslateAPI(rows, toLang, onProgress) {
       body: JSON.stringify({ rows: batch, toLang }),
     });
 
+    let data;
+
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error("[excel] API error:", res.status, text);
+      // エラー時も JSON を優先的に読む
+      try {
+        data = await res.json();
+      } catch {
+        const text = await res.text().catch(() => "");
+        throw new Error(
+          `サーバー側の翻訳処理に失敗しました。（HTTP ${res.status}）` +
+            (text ? `\n\n${text}` : "")
+        );
+      }
+
+      const detail =
+        data.detail ||
+        data.error ||
+        (typeof data === "string" ? data : JSON.stringify(data));
+
       throw new Error(
-        "サーバー側の翻訳処理に失敗しました。（HTTP " + res.status + "）"
+        `サーバー側の翻訳処理に失敗しました。（HTTP ${res.status}）` +
+          (detail ? `\n\n${detail}` : "")
       );
     }
 
-    const data = await res.json();
+    data = await res.json();
+
     if (!data || !Array.isArray(data.translations)) {
       console.error("[excel] Unexpected API response:", data);
       throw new Error("サーバーから不正な形式の応答が返されました。");
@@ -280,7 +297,6 @@ function writeTranslationsToSheet(info, translations, toLang) {
   const ws = EXCEL_worksheet;
   if (!ws) throw new Error("ワークシートが存在しません。");
 
-  // 各行のセル書き込み（元セルのスタイルをコピー）
   rowIndices.forEach((rowNumber, idx) => {
     const srcRef = XLSX.utils.encode_cell({
       c: sourceColIndex,
@@ -296,7 +312,7 @@ function writeTranslationsToSheet(info, translations, toLang) {
 
     if (srcCell) {
       ws[tgtRef] = {
-        ...srcCell, // フォント・罫線・塗りつぶしなどをコピー
+        ...srcCell,
         v: translated,
         w: undefined,
       };
@@ -308,14 +324,12 @@ function writeTranslationsToSheet(info, translations, toLang) {
     }
   });
 
-  // 列幅コピー
   const cols = ws["!cols"] || [];
   ws["!cols"] = cols;
   cols[targetColIndex] = cols[sourceColIndex]
     ? { ...cols[sourceColIndex] }
     : { wch: 40 };
 
-  // 見出し行の「翻訳」と「スリーアール／メーカー」
   const headerRowIndex = headerRow - 1;
   const srcHeaderRef = XLSX.utils.encode_cell({
     c: sourceColIndex,
@@ -332,14 +346,12 @@ function writeTranslationsToSheet(info, translations, toLang) {
 
   const srcHeaderCell = ws[srcHeaderRef] || { t: "s" };
 
-  // 「翻訳」ヘッダ
   ws[tgtHeaderRef] = {
     ...srcHeaderCell,
     v: "翻訳",
     w: undefined,
   };
 
-  // 翻訳言語に応じて「スリーアール」 or 「メーカー」
   const labelText = toLang === "ja" ? "スリーアール" : "メーカー";
   ws[labelRef] = {
     ...srcHeaderCell,
@@ -347,7 +359,6 @@ function writeTranslationsToSheet(info, translations, toLang) {
     w: undefined,
   };
 
-  // ラベル列（翻訳列の右隣）の列幅もコピー
   cols[targetColIndex + 1] = cols[sourceColIndex]
     ? { ...cols[sourceColIndex] }
     : { wch: 20 };
