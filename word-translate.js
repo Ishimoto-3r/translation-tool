@@ -72,7 +72,6 @@ function setupDragAndDrop() {
     const file = e.dataTransfer.files[0];
     if (file) {
       fileInput.files = e.dataTransfer.files;
-      // 手動発火
       WORD_file = file;
       WORD_fileName = file.name.replace(/\.docx$/i, "");
       file.arrayBuffer().then(buf => {
@@ -85,45 +84,34 @@ function setupDragAndDrop() {
 
 // ====== Word解析・翻訳ロジック ======
 
-// XMLテキストから特殊文字をエスケープ解除/再エスケープ
-// (簡単な実装として、テキストコンテンツをそのまま扱うDOMParserを使用)
-
 async function processWordTranslation(arrayBuffer, toLang, context) {
   const zip = new JSZip();
   const loadedZip = await zip.loadAsync(arrayBuffer);
 
-  // Wordの本文は通常 "word/document.xml" にある
   const docXmlPath = "word/document.xml";
   if (!loadedZip.files[docXmlPath]) {
     throw new Error("有効なWordファイルではありません (document.xmlが見つかりません)");
   }
 
-  // XMLをテキストとして取得
   const docXmlStr = await loadedZip.files[docXmlPath].async("string");
-  
-  // DOMParserでXMLをパース
   const parser = new DOMParser();
   const xmlDoc = parser.parseFromString(docXmlStr, "application/xml");
   
-  // エラーチェック
   const parseError = xmlDoc.getElementsByTagName("parsererror");
   if (parseError.length > 0) {
     throw new Error("Wordファイルの解析に失敗しました (XML Parse Error)");
   }
 
-  // <w:t> タグ（テキストノード）をすべて取得
   const textNodes = xmlDoc.getElementsByTagName("w:t");
   const textsToTranslate = [];
-  const nodeIndices = []; // 翻訳対象のノードインデックスを記録
+  const nodeIndices = []; 
 
   for (let i = 0; i < textNodes.length; i++) {
     const node = textNodes[i];
     const text = node.textContent;
 
-    // 空白のみ、数値のみ、短い記号のみはスキップ（Excel同様のフィルタ）
     if (!text || text.trim() === "") continue;
-    if (/^[0-9\s.,\-%]+$/.test(text)) continue; // 数値のみ
-    // 3文字以下の英数字記号のみもスキップ（単位など）
+    if (/^[0-9\s.,\-%]+$/.test(text)) continue; 
     if (/^[A-Za-z0-9\s.,\-%]+$/.test(text) && text.length <= 3) continue;
 
     textsToTranslate.push(text);
@@ -134,18 +122,15 @@ async function processWordTranslation(arrayBuffer, toLang, context) {
     throw new Error("翻訳対象となるテキストが見つかりませんでした。");
   }
 
-  // API呼び出し
   showLoading(true, textsToTranslate.length, 0);
   
   const translatedTexts = await callWordTranslateAPI(textsToTranslate, toLang, context, (done, total) => {
       showLoading(true, total, done);
   });
 
-  // 翻訳結果をXMLに書き戻す
   for (let k = 0; k < nodeIndices.length; k++) {
     const index = nodeIndices[k];
     const node = textNodes[index];
-    const originalText = textsToTranslate[k];
     const translated = translatedTexts[k];
 
     if (translated) {
@@ -153,14 +138,11 @@ async function processWordTranslation(arrayBuffer, toLang, context) {
     }
   }
 
-  // XMLを文字列に戻す
   const serializer = new XMLSerializer();
   const newDocXmlStr = serializer.serializeToString(xmlDoc);
 
-  // Zip内のファイルを更新
   loadedZip.file(docXmlPath, newDocXmlStr);
 
-  // ファイル生成
   const outBlob = await loadedZip.generateAsync({
       type: "blob",
       mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -171,7 +153,8 @@ async function processWordTranslation(arrayBuffer, toLang, context) {
 
 // ====== API呼び出し ======
 async function callWordTranslateAPI(rows, toLang, context, onProgress) {
-  const BATCH_SIZE = 30; // Wordは文脈が大事なので少し少なめに
+  // ★変更点: バッチサイズを 30 -> 10 に縮小して安定化
+  const BATCH_SIZE = 10; 
   const allTranslations = [];
   const total = rows.length;
 
@@ -195,7 +178,8 @@ async function callWordTranslateAPI(rows, toLang, context, onProgress) {
     const data = await res.json();
     
     if (!data.translations || data.translations.length !== batch.length) {
-       throw new Error("翻訳整合性エラー: 送受信数が一致しません");
+       // エラー詳細に数を含めてデバッグしやすくする
+       throw new Error(`翻訳整合性エラー: 送信数(${batch.length})と受信数(${data.translations?.length})が一致しません。`);
     }
 
     allTranslations.push(...data.translations);
@@ -224,7 +208,6 @@ async function handleTranslateClick() {
     setStatus("完了");
     showLoading(false);
 
-    // ダウンロード
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
