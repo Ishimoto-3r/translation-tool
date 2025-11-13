@@ -5,49 +5,49 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Excel翻訳</title>
 
-  <!-- Tailwind（既存ツールと同一の見た目） -->
+  <!-- Tailwind（既存ツールと同一） -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- 書式保持編集用：xlsx-populate -->
+  <!-- 書式保持編集：xlsx-populate -->
   <script src="https://unpkg.com/xlsx-populate/browser/xlsx-populate.min.js"></script>
 
   <style>
-    /* 他ツールと同じナビ体裁（最低限） */
-    .tool-nav a { padding:6px 10px; border-radius:8px; }
-    .tool-nav a.active, .tool-nav a:hover { background:#111827; color:#fff; }
-    /* 簡易モーダル */
+    /* 既存のダークナビ外観に合わせる（最小限） */
+    .topbar { background:#1f2937; }            /* slate-800 */
+    .topbar a { color:#cbd5e1; padding:8px 12px; border-radius:6px; }
+    .topbar a:hover { background:#111827; color:#fff; }
+    .topbar a.active { background:#111827; color:#fff; }
+    /* モーダル */
     .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center; justify-content:center; z-index:50; }
     .modal { width: 520px; max-width:calc(100vw - 2rem); }
   </style>
 </head>
-<body class="bg-gray-50 text-gray-800">
-  <!-- ヘッダー（他ページと完全一致構造） -->
-  <header class="border-b bg-white">
-    <div class="mx-auto max-w-6xl px-4 py-4 flex items-center justify-between">
-      <h1 class="text-xl font-semibold">Excel翻訳</h1>
-      <nav class="tool-nav flex gap-3 text-sm">
-        <a href="/index.html">翻訳ツール</a>
-        <a href="/report.html">修理レポート</a>
-        <a href="/excel.html" class="active">Excel翻訳</a>
-      </nav>
+<body class="bg-gray-100 text-gray-800">
+
+  <!-- 上部ナビ（翻訳ツール / 修理レポート / Excel翻訳）-->
+  <header class="topbar text-sm text-slate-300">
+    <div class="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
+      <a href="/index.html">翻訳ツール</a>
+      <a href="/report.html">修理レポート</a>
+      <a href="/excel.html" class="active">Excel翻訳</a>
     </div>
   </header>
 
   <main class="mx-auto max-w-6xl px-4 py-6 space-y-6">
-    <!-- 1) ファイルを開く -->
+    <!-- 1) ファイルを選択 -->
     <section class="rounded-2xl border bg-white p-4 shadow-sm">
-      <h2 class="mb-3 text-lg font-medium">1) 「検証結果」ファイルを開く</h2>
+      <h2 class="mb-3 text-lg font-semibold">Excel翻訳</h2>
       <div class="flex flex-wrap items-center gap-3">
         <input id="fileInput" type="file" accept=".xlsx" class="block text-sm" />
         <span id="fileName" class="text-sm text-gray-600">未選択</span>
       </div>
-      <p class="mt-2 text-xs text-gray-500">※ .xlsx を選択してください（先頭シートを対象）。</p>
+      <p class="mt-2 text-xs text-gray-500">※ .xlsx（先頭シートを対象）。</p>
       <p id="status" class="mt-1 text-xs text-gray-500">ファイル未選択</p>
     </section>
 
-    <!-- 2) 指定列 翻訳 -->
+    <!-- 2) 設定・実行 -->
     <section class="rounded-2xl border bg-white p-4 shadow-sm">
-      <h2 class="mb-3 text-lg font-medium">2) 指定列を翻訳</h2>
+      <h3 class="mb-3 text-base font-medium">指定列を翻訳</h3>
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div class="grid grid-cols-2 items-center gap-2">
           <label class="text-xs">対象列（A,B,C... 空=最右列）</label>
@@ -67,15 +67,17 @@
           </select>
         </div>
         <div class="flex items-end gap-2">
-          <button id="runBtn"  type="button" class="rounded bg-indigo-600 px-3 py-2 text-sm text-white">確認して実行</button>
+          <button id="runBtn"  type="button" class="rounded bg-indigo-600 px-3 py-2 text-sm text-white">実行</button>
           <button id="saveAsBtn" type="button" class="rounded border px-3 py-2 text-sm" disabled>別名で保存</button>
         </div>
       </div>
-      <p class="mt-2 text-xs text-gray-500">※ 改行は一時的に <code>|||</code> で保護→復元。翻訳APIは <code>/api/excel-translate</code> を利用（MOCKなし）。</p>
+      <p class="mt-2 text-xs text-gray-500">
+        ※ 改行は一時的に <code>|||</code> で保護→復元。翻訳APIは <code>/api/excel-translate</code> を使用（MOCKなし）。
+      </p>
     </section>
   </main>
 
-  <!-- 保存名入力モーダル -->
+  <!-- 保存名入力モーダル（全ブラウザ対応） -->
   <div id="saveModal" class="modal-backdrop">
     <div class="modal rounded-2xl border bg-white p-4 shadow-xl">
       <h3 class="text-base font-semibold mb-2">別名で保存</h3>
@@ -91,9 +93,9 @@
   <script>
     // ---------- 状態 ----------
     let workbook = null;        // xlsx-populate Workbook
-    let ws = null;              // 対象シート（先頭）
+    let ws = null;              // 先頭シート
     let fileName = "";          // 元ファイル名
-    let pendingBlob = null;     // 保存待ちの結果
+    let pendingBlob = null;     // 保存待ち
 
     const $ = (id) => document.getElementById(id);
     const fileInput = $("fileInput");
@@ -110,15 +112,13 @@
     function setStatus(t){ statusEl.textContent = t; }
 
     function colLetterToNumber(str){
-      // A->1 (1基準)
+      // A->1
       str = (str||"").trim().toUpperCase();
       if(!str) return null;
-      let n=0;
-      for(let i=0;i<str.length;i++){ n = n*26 + (str.charCodeAt(i)-64); }
+      let n=0; for(let i=0;i<str.length;i++){ n = n*26 + (str.charCodeAt(i)-64); }
       return n;
     }
     function numberToColLetter(n){
-      // 1->A
       let s=""; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); }
       return s;
     }
@@ -126,12 +126,11 @@
     function openModal(defaultName){
       saveName.value = defaultName;
       saveModal.style.display = "flex";
-      saveName.focus();
-      saveName.select();
+      saveName.focus(); saveName.select();
     }
     function closeModal(){ saveModal.style.display = "none"; }
 
-    // ---- ファイル選択 → 読み込み ----
+    // ---- ファイル読み込み ----
     fileInput.addEventListener("change", async (e)=>{
       try{
         const f = e.target.files?.[0];
@@ -142,7 +141,7 @@
 
         const buf = await f.arrayBuffer();
         workbook = await XlsxPopulate.fromDataAsync(buf);
-        ws = workbook.sheet(0); // 先頭シート
+        ws = workbook.sheet(0);
         setStatus(`開きました：${fileName}（シート: ${ws.name()}）`);
         saveAsBtn.disabled = true;
         pendingBlob = null;
@@ -152,7 +151,7 @@
       }
     });
 
-    // ---- 書式コピー（代表的な項目を移送）----
+    // ---- 書式コピー ----
     function copyCellStyle(src, dst){
       const keys = [
         "bold","italic","underline","strikethrough",
@@ -173,7 +172,7 @@
       });
     }
 
-    // ---- 翻訳API（配列→配列、MOCKなし）----
+    // ---- 翻訳API（MOCK無し）----
     async function fetchTranslations(texts, toLang){
       const CHUNK = 300;
       const result = [];
@@ -181,8 +180,8 @@
         const chunk = texts.slice(i,i+CHUNK);
         const res = await fetch("/api/excel-translate",{
           method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body: JSON.stringify({ rows: chunk, fromLang: null, toLang })
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ rows: chunk, toLang })
         });
         if(!res.ok){
           const t = await res.text();
@@ -198,8 +197,8 @@
       return result;
     }
 
-    // ---- 実行 ----
-    runBtn.addEventListener("click", async ()=>{
+    // ---- 実行（確認ダイアログは出さない）----
+    $("runBtn").addEventListener("click", async ()=>{
       try{
         if(!workbook || !ws){ alert("先にExcelファイルを選択してください"); return; }
 
@@ -209,22 +208,16 @@
         const outHeader = document.getElementById("outHeader").value || "翻訳";
         const srcColStr = (document.getElementById("sourceCol").value || "").trim().toUpperCase();
 
-        // 使用範囲を取得
         const usedRange = ws.usedRange();
         const lastRow   = usedRange.endCell().rowNumber();
         const lastCol   = usedRange.endCell().columnNumber();
 
-        let srcCol = srcColStr ? colLetterToNumber(srcColStr) : lastCol; // 1基準
+        let srcCol = srcColStr ? colLetterToNumber(srcColStr) : lastCol;
         if(!srcCol || srcCol<1) srcCol = lastCol;
 
-        const srcColLetter = numberToColLetter(srcCol);
-        const outCol       = srcCol + 1;
-        const outColLetter = numberToColLetter(outCol);
+        const outCol = srcCol + 1;
 
-        const msg = `指定列 ${srcColLetter} を ${lang} に翻訳して ${outColLetter} 列へ出力します。よろしいですか？`;
-        if(!confirm(msg)) return;
-
-        // 見出しセルと列幅コピー
+        // ヘッダ書式＆列幅
         const srcHeaderCell = ws.cell(headerRow, srcCol);
         const outHeaderCell = ws.cell(headerRow, outCol).value(outHeader);
         copyCellStyle(srcHeaderCell, outHeaderCell);
@@ -233,7 +226,7 @@
           if(typeof w === "number") ws.column(outCol).width(w);
         }catch(_){}
 
-        // 入力抽出（改行保護）
+        // 入力抽出
         const SPECIAL = "|||";
         const inputs = [];
         const rowMap = [];
@@ -250,7 +243,7 @@
         setStatus(`翻訳中… (${inputs.length} 件)`);
         const translations = await fetchTranslations(inputs, lang);
 
-        // 反映（値だけ置換・書式は元セルからコピー）
+        // 反映（書式は元セルからコピー）
         for(let i=0;i<rowMap.length;i++){
           const r = rowMap[i];
           const srcCell = ws.cell(r, srcCol);
@@ -260,17 +253,15 @@
           copyCellStyle(srcCell, dstCell);
         }
 
-        // 結果をメモリへ（上書きせず、別名保存待ちにする）
-        const outBuffer = await workbook.outputAsync(); // ArrayBuffer
+        // 結果をメモリへ（別名保存を促す）
+        const outBuffer = await workbook.outputAsync();
         pendingBlob = new Blob([outBuffer], {
           type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         });
         saveAsBtn.disabled = false;
 
-        // 保存名のデフォルト（元ファイル名_翻訳.xlsx）
         const base = fileName ? fileName.replace(/\.xlsx$/i, "") : "検証結果";
         openModal(`${base}_翻訳.xlsx`);
-
         setStatus("完了：結果をメモリに保持しました。保存名と保存先を指定してください。");
       }catch(e){
         console.error(e);
@@ -280,47 +271,42 @@
     });
 
     // ---- 別名で保存（モーダル）----
-    cancelSave.addEventListener("click", ()=> closeModal());
-    saveAsBtn.addEventListener("click", ()=>{
+    function saveWithPicker(name, blob){
+      // File System Access API がある場合は原生ダイアログ
+      if (window.showSaveFilePicker) {
+        return (async () => {
+          const handle = await showSaveFilePicker({
+            suggestedName: name,
+            types: [{ description: "Excel", accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] } }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+        })();
+      }
+      // フォールバック：download属性（保存先ダイアログはブラウザ設定に依存）
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      return Promise.resolve();
+    }
+
+    document.getElementById("cancelSave").addEventListener("click", ()=> closeModal());
+    document.getElementById("saveAsBtn").addEventListener("click", ()=>{
       const base = fileName ? fileName.replace(/\.xlsx$/i, "") : "検証結果";
       openModal(`${base}_翻訳.xlsx`);
     });
-
-    confirmSave.addEventListener("click", async ()=>{
+    document.getElementById("confirmSave").addEventListener("click", async ()=>{
       try{
         if(!pendingBlob){ alert("保存できる内容がありません。先に翻訳を実行してください。"); return; }
-        let name = (saveName.value || "").trim();
+        let name = (document.getElementById("saveName").value || "").trim();
         if(!name) name = "検証結果_翻訳.xlsx";
         if(!/\.xlsx$/i.test(name)) name += ".xlsx";
 
-        // 1) File System Access API があれば、完全な保存ダイアログ
-        if(window.showSaveFilePicker){
-          const handle = await showSaveFilePicker({
-            suggestedName: name,
-            types: [{
-              description: "Excel",
-              accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] }
-            }]
-          });
-          const writable = await handle.createWritable();
-          await writable.write(pendingBlob);
-          await writable.close();
-          closeModal();
-          setStatus("保存しました。");
-          return;
-        }
-
-        // 2) フォールバック：通常ダウンロード（ブラウザ設定により保存先ダイアログが出ます）
-        const url = URL.createObjectURL(pendingBlob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = name;  // ここでファイル名を指定
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        await saveWithPicker(name, pendingBlob);
         closeModal();
-        setStatus("ダウンロードを開始しました。（保存先はブラウザの設定に依存）");
+        setStatus("保存しました。");
       }catch(e){
         console.error(e);
         alert(e.message || "保存に失敗しました。");
