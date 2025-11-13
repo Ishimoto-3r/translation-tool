@@ -1,102 +1,74 @@
-// /api/excel-translate.js
-// Excel翻訳API：rows(string[]) を受け取り、同じ長さの translations(string[]) を返す（CommonJS版）
+// OpenAIの機能を読み込みます
+const OpenAI = require('openai');
 
-const OpenAI = require("openai");
-
-const client = new OpenAI({
+// Vercelに設定されたパスワード(API Key)を使って準備します
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Vercel の環境変数に OPENAI_MODEL があればそれを使用。
-// なければ gpt-4o-mini を使う。
-const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+// ここがメインの処理です
+module.exports = async (req, res) => {
+  // 1. ブラウザからのアクセスを許可する設定（おまじない）
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
-module.exports = async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.setHeader("Allow", "POST");
-    return res.status(405).json({ error: "Method not allowed" });
+  // 通信確認（OPTIONS）の場合は「OK」だけ返して終了
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
   }
 
   try {
-    const { rows, toLang } = req.body || {};
+    // 2. フロント画面から送られてきたデータを取り出す
+    const { rows, toLang } = req.body;
 
-    // 入力バリデーション
-    if (!Array.isArray(rows) || rows.length === 0) {
-      return res
-        .status(400)
-        .json({ error: "rows は1件以上の文字列配列である必要があります" });
-    }
-    if (typeof toLang !== "string" || !toLang.trim()) {
-      return res
-        .status(400)
-        .json({ error: "toLang は翻訳先言語コードの文字列である必要があります" });
+    // データが空っぽだったり、リスト形式でなければエラーにする
+    if (!rows || !Array.isArray(rows) || rows.length === 0) {
+      throw new Error('データが正しくありません（rowsが空、または配列ではありません）');
     }
 
-    console.log(
-      `[excel-translate] request: rows=${rows.length}, toLang=${toLang}`
-    );
+    // 3. AIへの命令文を作る
+    const systemPrompt = `
+      あなたはプロの翻訳アシスタントです。
+      提供されたテキスト配列を、指定された言語コード "${toLang}" に翻訳してください。
+      
+      【重要ルール】
+      - 必ず JSON 形式で返してください。
+      - 結果は "translations" という名前のリストに入れてください。
+      - 入力された行数と、出力する行数は必ず同じ数にしてください。
+    `;
 
-    // モデルへの指示：JSON配列だけ返す
-    const systemPrompt =
-      "You are a professional translation engine. " +
-      "You receive a JSON object like {\"target_language\":\"ja\",\"texts\":[\"...\"]}. " +
-      "You MUST respond with ONLY a valid JSON array of translated strings, nothing else. " +
-      "The array length MUST be exactly the same as the input 'texts' array. " +
-      "Do not add explanations or additional keys.";
-
-    const userPayload = {
-      target_language: toLang,
-      texts: rows,
-    };
-
-    const completion = await client.chat.completions.create({
-      model: MODEL,
+    // 4. OpenAI (GPT-5) に翻訳を依頼する
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5", 
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: JSON.stringify(userPayload) },
+        { role: "user", content: JSON.stringify({ rows: rows }) },
       ],
-      temperature: 0.1,
+      response_format: { type: "json_object" }, // 必ずJSONで返させる設定
     });
 
-    const raw = completion.choices?.[0]?.message?.content?.trim();
-    if (!raw) {
-      console.error("[excel-translate] empty content:", completion);
-      throw new Error("モデルからの出力が空でした");
+    // 5. AIからの返事を解析する
+    const content = completion.choices[0].message.content;
+    const parsedResult = JSON.parse(content);
+    const translations = parsedResult.translations;
+
+    // 数が合っているか最終チェック
+    if (!translations || translations.length !== rows.length) {
+      throw new Error('翻訳前と翻訳後の行数が一致しませんでした。');
     }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (e) {
-      console.error("[excel-translate] JSON parse error", {
-        message: e.message,
-        rawPreview: raw.slice(0, 500),
-      });
-      throw new Error("モデル出力のJSON解析に失敗しました");
-    }
+    // 6. 成功！翻訳結果を画面に返す
+    return res.status(200).json({ translations });
 
-    if (!Array.isArray(parsed)) {
-      console.error("[excel-translate] parsed is not array:", parsed);
-      throw new Error("モデル出力が配列ではありません");
-    }
-
-    if (parsed.length !== rows.length) {
-      console.error("[excel-translate] length mismatch", {
-        expected: rows.length,
-        got: parsed.length,
-        inputPreview: rows.slice(0, 3),
-        outputPreview: parsed.slice(0, 3),
-      });
-      throw new Error("モデル出力の要素数が入力と一致しません");
-    }
-
-    console.log("[excel-translate] success");
-    return res.status(200).json({ translations: parsed });
-  } catch (err) {
-    console.error("[excel-translate] Unexpected error", err);
+  } catch (error) {
+    // 何かエラーが起きたら、その内容を画面（開発者ツール）に返す
+    console.error("API Error:", error);
     return res.status(500).json({
-      error: "Translation failed on server",
-      detail: err.message || String(err),
+      error: 'Internal Server Error',
+      detail: error.message
     });
   }
 };
