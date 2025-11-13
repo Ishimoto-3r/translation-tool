@@ -39,7 +39,7 @@ function hideErrorModal() {
 }
 
 function toggleUI(disabled) {
-  const ids = ["excel-file", "sheet-select", "to-lang", "target-column-letter", "start-row", "end-row", "translate-btn"];
+  const ids = ["excel-file", "sheet-select", "to-lang", "target-column-letter", "start-row", "end-row", "translate-btn", "translation-context"];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = disabled;
@@ -127,7 +127,6 @@ function collectRowsToTranslate(sheet) {
   const sourceColIndex = colLetterToNumber(colStr); 
   if (sourceColIndex < 1) throw new Error("列の指定が正しくありません。");
 
-  // ★変更点：開始行の入力チェックを追加
   const startRowInput = document.getElementById("start-row");
   if (!startRowInput.value) throw new Error("開始行を入力してください。");
   
@@ -139,9 +138,7 @@ function collectRowsToTranslate(sheet) {
     if (endRowVal < startRowVal) endRowVal = startRowVal;
   }
 
-  // 翻訳書き込み列は、指定列の右隣
   const targetColIndex = sourceColIndex + 1;
-
   const rows = [];
   const rowNumToTranslationIndex = {}; 
 
@@ -175,7 +172,8 @@ function collectRowsToTranslate(sheet) {
 
 // ====== API呼び出し ======
 
-async function callTranslateAPI(rows, toLang, onProgress) {
+// ★変更点: context 引数を追加
+async function callTranslateAPI(rows, toLang, context, onProgress) {
   const BATCH_SIZE = 40;
   const allTranslations = [];
   const total = rows.length;
@@ -186,7 +184,8 @@ async function callTranslateAPI(rows, toLang, onProgress) {
     const res = await fetch("/api/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ rows: batch, toLang }),
+      // ★変更点: context を送信
+      body: JSON.stringify({ rows: batch, toLang, context }),
     });
 
     if (!res.ok) {
@@ -211,12 +210,9 @@ async function callTranslateAPI(rows, toLang, onProgress) {
 async function writeAndDownload(sheet, info, translations) {
   const { rowNumToTranslationIndex, sourceColIndex, targetColIndex, startRow, endRow } = info;
 
-  // 指定範囲を走査し、翻訳結果を右隣に書き込む
   for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
     const row = sheet.getRow(rowNum);
     const targetCell = row.getCell(targetColIndex);
-
-    // 書式コピーは行わない
 
     const translationIndex = rowNumToTranslationIndex[rowNum];
     if (translationIndex !== undefined) {
@@ -227,7 +223,6 @@ async function writeAndDownload(sheet, info, translations) {
     }
   }
 
-  // 列幅のコピー (利便性のため残していますが、不要なら以下if文を削除可能)
   const srcCol = sheet.getColumn(sourceColIndex);
   const targetCol = sheet.getColumn(targetColIndex);
   if (srcCol && srcCol.width) {
@@ -259,6 +254,8 @@ async function handleTranslateClick() {
 
   const sheet = getTargetSheet();
   const toLang = document.getElementById("to-lang").value;
+  // ★変更点: コンテキストを取得
+  const context = document.getElementById("translation-context").value;
 
   try {
     toggleUI(true);
@@ -276,7 +273,8 @@ async function handleTranslateClick() {
 
     showLoading(true, info.rows.length, 0);
     
-    const translations = await callTranslateAPI(info.rows, toLang, (done, total) => {
+    // ★変更点: context を渡す
+    const translations = await callTranslateAPI(info.rows, toLang, context, (done, total) => {
       showLoading(true, total, done);
     });
 
