@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Excel翻訳ツール (GPT-5)</title>
+    <title>検証結果翻訳ツール (GPT-5)</title>
     <style>
         /* 共通レイアウト */
         body {
@@ -52,13 +52,11 @@
         }
         input.locked-input.editable { background-image: none; background-color: #fff; }
 
-        /* ボタン配置（センター寄せに変更） */
         .button-row { display: flex; gap: 12px; justify-content: center; margin-top: 8px; }
-        /* 詳細設定ボタンは右寄せのままにする場合 */
         .button-row.right { justify-content: flex-end; }
 
         button {
-            padding: 0.6rem 2rem; /* ボタンを少し横長に */
+            padding: 0.6rem 2rem;
             border-radius: 8px; border: none;
             font-size: 1rem; font-weight: 600; cursor: pointer;
         }
@@ -109,12 +107,12 @@
 <nav class="tool-nav">
   <a href="/index.html">翻訳ツール</a>
   <a href="/report.html">修理レポート</a>
-  <a href="/excel.html" class="active">Excel翻訳</a>
+  <a href="/verify.html" class="active">検証結果翻訳</a>
 </nav>
 
 <div class="container">
     <div id="main-header">
-        <h1>Excel翻訳ツール (GPT-5)</h1>
+        <h1>検証結果翻訳ツール (GPT-5)</h1>
     </div>
 
     <section class="section-card">
@@ -187,7 +185,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
-<script src="/excel.js" defer></script>
+<script src="/verify.js" defer></script>
 
 </body>
 </html>
