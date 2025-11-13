@@ -1,17 +1,17 @@
 // /api/excel-translate.js
-// Excel翻訳API：rows(string[]) を受け取り、同じ長さの translations(string[]) を返す
+// Excel翻訳API：rows(string[]) を受け取り、同じ長さの translations(string[]) を返す（CommonJS版）
 
-import OpenAI from "openai";
+const OpenAI = require("openai");
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ★必要なら Vercel の環境変数 OPENAI_MODEL にモデル名を入れてください
-// 未設定なら gpt-4o-mini を使います（安くて速いモデル）
+// Vercel の環境変数に OPENAI_MODEL があればそれを使用。
+// なければ gpt-4o-mini を使う。
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
       `[excel-translate] request: rows=${rows.length}, toLang=${toLang}`
     );
 
-    // Chat Completions を使って「JSON配列のみ」を出させる
+    // モデルへの指示：JSON配列だけ返す
     const systemPrompt =
       "You are a professional translation engine. " +
       "You receive a JSON object like {\"target_language\":\"ja\",\"texts\":[\"...\"]}. " +
@@ -53,17 +53,12 @@ export default async function handler(req, res) {
       model: MODEL,
       messages: [
         { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: JSON.stringify(userPayload),
-        },
+        { role: "user", content: JSON.stringify(userPayload) },
       ],
       temperature: 0.1,
     });
 
-    const raw =
-      completion.choices?.[0]?.message?.content?.trim();
-
+    const raw = completion.choices?.[0]?.message?.content?.trim();
     if (!raw) {
       console.error("[excel-translate] empty content:", completion);
       throw new Error("モデルからの出力が空でした");
@@ -104,4 +99,4 @@ export default async function handler(req, res) {
       detail: err.message || String(err),
     });
   }
-}
+};
