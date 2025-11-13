@@ -101,7 +101,6 @@ function setupDragAndDrop() {
 }
 
 // ====== ユーティリティ: 列アルファベットを数値に変換 ======
-// "A"->1, "B"->2, "AA"->27
 function colLetterToNumber(colStr) {
   let base = 'A'.charCodeAt(0) - 1;
   let col = colStr.toUpperCase().trim();
@@ -125,26 +124,23 @@ function collectRowsToTranslate(sheet) {
   const colStr = document.getElementById("target-column-letter").value;
   if (!colStr) throw new Error("翻訳したい列（アルファベット）を指定してください。");
   
-  const sourceColIndex = colLetterToNumber(colStr); // 1-based index
+  const sourceColIndex = colLetterToNumber(colStr); 
   if (sourceColIndex < 1) throw new Error("列の指定が正しくありません。");
 
   const startRowVal = parseInt(document.getElementById("start-row").value) || 1;
   let endRowVal = parseInt(document.getElementById("end-row").value);
   
-  // 終了行が空欄なら、シートのデータが存在する最終行まで
   if (!endRowVal || isNaN(endRowVal)) {
     endRowVal = sheet.actualRowCount;
-    // 念のため最低でも開始行より後ろにする
     if (endRowVal < startRowVal) endRowVal = startRowVal;
   }
 
-  // 翻訳書き込み列は、指定列の右隣 (source + 1)
+  // 翻訳書き込み列は、指定列の右隣
   const targetColIndex = sourceColIndex + 1;
 
   const rows = [];
   const rowNumToTranslationIndex = {}; 
 
-  // 指定範囲を走査
   for (let r = startRowVal; r <= endRowVal; r++) {
     const row = sheet.getRow(r);
     const cell = row.getCell(sourceColIndex);
@@ -173,7 +169,7 @@ function collectRowsToTranslate(sheet) {
   };
 }
 
-// ====== API呼び出し (既存の検証ツール用APIを再利用) ======
+// ====== API呼び出し ======
 
 async function callTranslateAPI(rows, toLang, onProgress) {
   const BATCH_SIZE = 40;
@@ -183,7 +179,6 @@ async function callTranslateAPI(rows, toLang, onProgress) {
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     
-    // 既存の verify API を再利用
     const res = await fetch("/api/verify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -215,25 +210,21 @@ async function writeAndDownload(sheet, info, translations) {
   // 指定範囲を走査し、翻訳結果を右隣に書き込む
   for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
     const row = sheet.getRow(rowNum);
-    const srcCell = row.getCell(sourceColIndex);
     const targetCell = row.getCell(targetColIndex);
 
-    // スタイル（罫線・フォントなど）をコピー
-    targetCell.style = srcCell.style;
+    // ★修正：書式コピー（styleの代入）を削除しました。
+    // targetCell.style = srcCell.style; // 削除済
 
     const translationIndex = rowNumToTranslationIndex[rowNum];
     if (translationIndex !== undefined) {
-      // 翻訳結果がある場合
       const translatedText = (translations[translationIndex] || "").replace(/\|\|\|/g, "\n");
       targetCell.value = translatedText;
     } else {
-      // 翻訳対象外（空欄）だった場合、スタイルだけ適用し中身は空に
-      // (もし既存データがあっても空欄扱いにする仕様とする)
       targetCell.value = null;
     }
   }
 
-  // 列幅のコピー (少し広げるなどの調整はお好みで。今回は完全コピー)
+  // 列幅のコピー（利便性のため残していますが、不要なら以下if文を削除してください）
   const srcCol = sheet.getColumn(sourceColIndex);
   const targetCol = sheet.getColumn(targetColIndex);
   if (srcCol && srcCol.width) {
@@ -272,7 +263,6 @@ async function handleTranslateClick() {
 
     const info = collectRowsToTranslate(sheet);
     if (info.rows.length === 0) {
-      // 翻訳対象なしでもファイル生成して終了
       setStatus("翻訳対象がありませんでしたが、ファイルを作成します。");
       await writeAndDownload(sheet, info, []);
       showLoading(false);
