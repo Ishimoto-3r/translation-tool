@@ -14,17 +14,16 @@ module.exports = async (req, res) => {
     const { rows, toLang, context } = req.body;
     const apiKey = process.env.OPENAI_API_KEY;
 
-    console.log("【Word受信】", rows ? rows.length + "件" : "なし", "Context:", context || "なし");
+    console.log("【Word受信】", rows ? rows.length + "件" : "なし");
 
     if (!apiKey) throw new Error('APIキーが設定されていません');
     if (!rows || !Array.isArray(rows) || rows.length === 0) throw new Error('データが空です');
 
-    // コンテキストがあれば追加
     let contextPrompt = "";
     if (context && context.trim() !== "") {
       contextPrompt = `
       【文書の背景情報】
-      ユーザーからの指示: "${context}"
+      ユーザー指示: "${context}"
       この情報を踏まえて適切な用語選択を行ってください。
       `;
     }
@@ -35,12 +34,17 @@ module.exports = async (req, res) => {
       
       ${contextPrompt}
 
-      【重要ルール】
+      【最重要ルール：要素数の維持】
+      - 入力された配列の要素数と、出力配列「translations」の要素数は **完全に一致** させてください。
+      - 1つの入力に対して、必ず1つの出力を返してください。
+      - 翻訳不要な場合や空白の場合は、原文をそのまま返してください。絶対に省略しないでください。
+
+      【その他のルール】
       - これはWordファイル内のテキストです。文脈を維持してください。
       - 数値、型番、固有の記号などはそのまま維持してください。
       
       出力フォーマット:
-      { "translations": ["翻訳1", "翻訳2"] }
+      { "translations": ["翻訳1", "翻訳2", ...] }
     `;
 
     const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -50,13 +54,12 @@ module.exports = async (req, res) => {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-5',
+        model: 'gpt-5', // または gpt-4o
         messages: [
           { "role": "system", "content": systemPrompt },
           { "role": "user", "content": JSON.stringify({ rows: rows }) }
         ],
         response_format: { type: "json_object" },
-        // 高速化設定
         reasoning_effort: "minimal",
         verbosity: "low"
       })
