@@ -24,7 +24,6 @@ function showLoading(show, total = 0, current = 0) {
 
 function showError(message) {
   console.error("[excel] ERROR:", message);
-  // ローディングを強制解除
   showLoading(false);
   
   const modal = document.getElementById("error-modal");
@@ -145,9 +144,7 @@ function collectRowsToTranslate(sheet) {
     }
   });
 
-  // 対象は最右列
   const sourceColIndex = maxCol; 
-  // 翻訳結果はその右
   const targetColIndex = maxCol + 1;
 
   const rows = [];
@@ -162,7 +159,15 @@ function collectRowsToTranslate(sheet) {
       } else {
         text = String(cell.value || "");
       }
+      
+      // 改行コードの置換
       text = text.replace(/\n/g, "|||");
+      
+      // ★ここが重要修正：空白のセルはリストに入れない（ズレ防止）
+      if (text.trim() === "") {
+        return; // スキップ
+      }
+
       rows.push(text);
       rowIndices.push(rowNumber);
     }
@@ -192,6 +197,12 @@ async function callExcelTranslateAPI(rows, toLang, onProgress) {
       throw new Error(`サーバーエラー: ${text}`);
     }
     const data = await res.json();
+    
+    // バッチごとの整合性チェック
+    if (!data.translations || data.translations.length !== batch.length) {
+       throw new Error(`翻訳エラー：送信数(${batch.length})と受信数(${data.translations?.length})が一致しません。`);
+    }
+
     allTranslations.push(...data.translations);
 
     if (onProgress) onProgress(Math.min(i + BATCH_SIZE, total), total);
@@ -204,26 +215,21 @@ async function callExcelTranslateAPI(rows, toLang, onProgress) {
 async function writeAndDownload(sheet, info, translations, toLang) {
   const { rowIndices, sourceColIndex, targetColIndex, headerRow } = info;
 
-  // --- ヘッダー行の処理 ---
   const headerRowObj = sheet.getRow(headerRow);
   
-  // 1. 「翻訳」列（翻訳結果が入る列）
+  // ヘッダー：翻訳列
   const transHeaderCell = headerRowObj.getCell(targetColIndex);
-  transHeaderCell.value = "翻訳"; // 「翻訳結果」→「翻訳」に変更
-  
-  // 元のヘッダーのスタイルをコピー
+  transHeaderCell.value = "翻訳";
   const srcHeaderCell = headerRowObj.getCell(sourceColIndex);
   transHeaderCell.style = srcHeaderCell.style;
 
-  // 2. 「メーカー / スリーアール」列（その右隣）
+  // ヘッダー：メーカー/スリーアール列
   const labelColIndex = targetColIndex + 1;
   const labelHeaderCell = headerRowObj.getCell(labelColIndex);
-  
-  // 日本語なら「スリーアール」、それ以外なら「メーカー」
   labelHeaderCell.value = toLang === "ja" ? "スリーアール" : "メーカー";
-  labelHeaderCell.style = srcHeaderCell.style; // スタイルコピー
+  labelHeaderCell.style = srcHeaderCell.style;
 
-  // --- データ行の書き込み ---
+  // データ書き込み（リストにある行だけ書き込む＝空白行は無視して飛ばす）
   rowIndices.forEach((rowNum, i) => {
     const row = sheet.getRow(rowNum);
     const srcCell = row.getCell(sourceColIndex);
@@ -231,36 +237,33 @@ async function writeAndDownload(sheet, info, translations, toLang) {
     const transCell = row.getCell(targetColIndex);
     const labelCell = row.getCell(labelColIndex);
 
-    // 翻訳テキストセット
     const translatedText = (translations[i] || "").replace(/\|\|\|/g, "\n");
+    
     transCell.value = translatedText;
-    transCell.style = srcCell.style; // スタイル完全コピー
+    transCell.style = srcCell.style;
 
-    // ラベル列（右隣）のスタイル設定（空文字を入れることでセルとして認識させる）
     labelCell.value = null; 
-    labelCell.style = srcCell.style; // スタイル完全コピー
+    labelCell.style = srcCell.style;
   });
 
-  // --- 列幅のコピー ---
+  // 列幅コピー
   const srcCol = sheet.getColumn(sourceColIndex);
   const transCol = sheet.getColumn(targetColIndex);
   const labelCol = sheet.getColumn(labelColIndex);
 
   if (srcCol && srcCol.width) {
-    transCol.width = srcCol.width; // 同じ幅
-    labelCol.width = srcCol.width; // 同じ幅
+    transCol.width = srcCol.width;
+    labelCol.width = srcCol.width;
   } else {
     transCol.width = 30;
     labelCol.width = 30;
   }
 
-  // --- ファイル生成 ---
   const buffer = await EXCEL_workbook.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   
   const a = document.createElement("a");
-  // ファイル名末尾に「_翻訳」をつける
   a.href = url;
   a.download = (EXCEL_fileName || "download") + "_翻訳.xlsx";
   document.body.appendChild(a);
@@ -282,11 +285,11 @@ async function handleTranslateClick() {
 
   try {
     toggleUI(true);
-    showLoading(true, 0, 0); // ローディング開始
+    showLoading(true, 0, 0);
 
     const info = collectRowsToTranslate(sheet);
     if (info.rows.length === 0) {
-      throw new Error("翻訳対象のデータが見つかりませんでした");
+      throw new Error("翻訳対象のデータが見つかりませんでした（すべて空白の可能性があります）");
     }
 
     showLoading(true, info.rows.length, 0);
@@ -300,8 +303,6 @@ async function handleTranslateClick() {
     
     showLoading(false);
     setStatus("完了");
-    
-    // 完了ポップアップ
     alert("翻訳が完了しました。\nファイルがダウンロードされます。");
 
   } catch (e) {
