@@ -148,7 +148,9 @@ function collectRowsToTranslate(sheet) {
   const targetColIndex = maxCol + 1;
 
   const rows = [];
-  const rowIndices = [];
+  // 翻訳対象の元のExcel行番号と、そのAIへの送信インデックスを紐づけるマップ
+  // { '元の行番号': AIへの送信インデックス }
+  const rowNumToTranslationIndex = {}; 
 
   sheet.eachRow((row, rowNumber) => {
     if (rowNumber >= startRowVal) {
@@ -160,20 +162,16 @@ function collectRowsToTranslate(sheet) {
         text = String(cell.value || "");
       }
       
-      // 改行コードの置換
       text = text.replace(/\n/g, "|||");
       
-      // ★ここが重要修正：空白のセルはリストに入れない（ズレ防止）
-      if (text.trim() === "") {
-        return; // スキップ
+      if (text.trim() !== "") { // 空白でないセルのみ翻訳リストに追加
+        rowNumToTranslationIndex[rowNumber] = rows.length; // AIへの送信インデックスを記録
+        rows.push(text);
       }
-
-      rows.push(text);
-      rowIndices.push(rowNumber);
     }
   });
 
-  return { rows, rowIndices, sourceColIndex, targetColIndex, headerRow: headerRowVal };
+  return { rows, rowNumToTranslationIndex, sourceColIndex, targetColIndex, headerRow: headerRowVal };
 }
 
 // ====== API呼び出し ======
@@ -198,7 +196,6 @@ async function callExcelTranslateAPI(rows, toLang, onProgress) {
     }
     const data = await res.json();
     
-    // バッチごとの整合性チェック
     if (!data.translations || data.translations.length !== batch.length) {
        throw new Error(`翻訳エラー：送信数(${batch.length})と受信数(${data.translations?.length})が一致しません。`);
     }
@@ -213,7 +210,7 @@ async function callExcelTranslateAPI(rows, toLang, onProgress) {
 // ====== 書き込み & ダウンロード ======
 
 async function writeAndDownload(sheet, info, translations, toLang) {
-  const { rowIndices, sourceColIndex, targetColIndex, headerRow } = info;
+  const { rowNumToTranslationIndex, sourceColIndex, targetColIndex, headerRow } = info;
 
   const headerRowObj = sheet.getRow(headerRow);
   
@@ -229,24 +226,7 @@ async function writeAndDownload(sheet, info, translations, toLang) {
   labelHeaderCell.value = toLang === "ja" ? "スリーアール" : "メーカー";
   labelHeaderCell.style = srcHeaderCell.style;
 
-  // データ書き込み（リストにある行だけ書き込む＝空白行は無視して飛ばす）
-  rowIndices.forEach((rowNum, i) => {
-    const row = sheet.getRow(rowNum);
-    const srcCell = row.getCell(sourceColIndex);
-    
-    const transCell = row.getCell(targetColIndex);
-    const labelCell = row.getCell(labelColIndex);
-
-    const translatedText = (translations[i] || "").replace(/\|\|\|/g, "\n");
-    
-    transCell.value = translatedText;
-    transCell.style = srcCell.style;
-
-    labelCell.value = null; 
-    labelCell.style = srcCell.style;
-  });
-
-  // 列幅コピー
+  // 列幅コピー（ヘッダーより先に設定しておく）
   const srcCol = sheet.getColumn(sourceColIndex);
   const transCol = sheet.getColumn(targetColIndex);
   const labelCol = sheet.getColumn(labelColIndex);
@@ -257,6 +237,34 @@ async function writeAndDownload(sheet, info, translations, toLang) {
   } else {
     transCol.width = 30;
     labelCol.width = 30;
+  }
+
+  // --- 全ての対象行に対して処理 ---
+  // sheet.eachRow はデータのある行だけでなく、空行も走査できるようにする
+  // 厳密にはシートの最大行まで走査
+  const maxRow = sheet.actualRowCount > headerRow ? sheet.actualRowCount : headerRow + 10; // データの最大行か、見出し行+α
+  
+  for (let rowNum = headerRow + 1; rowNum <= maxRow; rowNum++) {
+    const row = sheet.getRow(rowNum);
+    const srcCell = row.getCell(sourceColIndex);
+    
+    const transCell = row.getCell(targetColIndex);
+    const labelCell = row.getCell(labelColIndex);
+
+    // ★すべてのセルに元のセルのスタイルをコピー
+    transCell.style = srcCell.style;
+    labelCell.style = srcCell.style;
+    
+    // 翻訳が必要な行の場合のみ値を設定
+    const translationIndex = rowNumToTranslationIndex[rowNum];
+    if (translationIndex !== undefined) { // 翻訳対象の行であれば
+      const translatedText = (translations[translationIndex] || "").replace(/\|\|\|/g, "\n");
+      transCell.value = translatedText;
+    } else {
+      transCell.value = null; // 翻訳対象でなければ空にする
+    }
+    
+    labelCell.value = null; // ラベル列は常に空（ヘッダー以外）
   }
 
   const buffer = await EXCEL_workbook.xlsx.writeBuffer();
@@ -289,7 +297,14 @@ async function handleTranslateClick() {
 
     const info = collectRowsToTranslate(sheet);
     if (info.rows.length === 0) {
-      throw new Error("翻訳対象のデータが見つかりませんでした（すべて空白の可能性があります）");
+      // 翻訳対象のデータが1つもない場合も、エラーとせず処理を進める
+      // →空の翻訳列とラベル列（スタイル付き）が生成される
+      setStatus("翻訳対象のデータはありませんが、ファイルを作成します。");
+      await writeAndDownload(sheet, info, [], toLang); // 空の翻訳結果で書き込み
+      showLoading(false);
+      setStatus("完了");
+      alert("翻訳対象のデータがなかったため、空の翻訳列とラベル列を作成しました。\nファイルがダウンロードされます。");
+      return;
     }
 
     showLoading(true, info.rows.length, 0);
