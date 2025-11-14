@@ -11,7 +11,7 @@ async function startTranslation(button, inputId, outputId, fromLang, toLang) {
         return;
     }
 
-    setButtonLoading(button, true); // ★ローディング開始
+    setButtonLoading(button, true); // ローディング開始
     outputEl.value = ""; // 訳文欄をクリア
 
     try {
@@ -42,7 +42,7 @@ async function startTranslation(button, inputId, outputId, fromLang, toLang) {
         showToast(`エラー: ${err.message}`);
         outputEl.value = `翻訳エラーが発生しました: ${err.message}`;
     } finally {
-        setButtonLoading(button, false); // ★ローディング終了
+        setButtonLoading(button, false); // ローディング終了
     }
 }
 
@@ -57,7 +57,7 @@ async function startReverseTranslation(button) {
         return;
     }
 
-    setButtonLoading(button, true); // ★ローディング開始
+    setButtonLoading(button, true); // ローディング開始
 
     try {
         // 中国語 → 日本語 への翻訳
@@ -76,22 +76,25 @@ async function startReverseTranslation(button) {
         }
 
         const reversedText = data.translatedText.trim();
+        
+        // ★修正点：原文入力欄（jp-input）を、逆翻訳の結果で上書きする
+        originalInput.value = reversedText;
 
-        // 比較ログに「逆翻訳の結果」を追記
-        updateComparisonLog(originalInput.value, textToReverse, reversedText);
-        showToast("逆翻訳が完了しました。比較ログを確認してください。");
+        // 比較ログにも追記
+        updateComparisonLog(reversedText, textToReverse, "(↑ 逆翻訳後の日本語)");
+        showToast("逆翻訳が完了しました。");
 
     } catch (err) {
         console.error("逆翻訳エラー:", err);
         showToast(`エラー: ${err.message}`);
     } finally {
-        setButtonLoading(button, false); // ★ローディング終了
+        setButtonLoading(button, false); // ローディング終了
     }
 }
 
 // ====== UIヘルパー関数 ======
 
-// ★ローディング表示を切り替える関数（新設）
+// ローディング表示を切り替える関数
 function setButtonLoading(button, isLoading) {
     if (isLoading) {
         button.disabled = true;
@@ -157,7 +160,8 @@ function updateComparisonLog(jpText, cnText, reversedJpText = null) {
     let logContent = `【日本語原文】\n${jpText}\n\n【中国語訳文】\n${cnText}`;
     
     if (reversedJpText !== null) {
-        logContent += `\n\n【逆翻訳（中→日）】\n${reversedJpText}`;
+        // 逆翻訳のログをわかりやすく変更
+        logContent = `【逆翻訳（中→日）】\n${jpText}\n\n【中国語（元）】\n${cnText}`;
     }
     
     logTextEl.textContent = logContent;
