@@ -103,7 +103,7 @@
             grid-column: 3 / 4;
             justify-self: end;
         }
-        /* ★変更点: クリアボタンを左寄せにする */
+        /* クリアボタンを左寄せにする */
         .header-spacer-left {
             grid-column: 1 / 2;
             justify-self: start;
@@ -157,9 +157,10 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
             padding: 0 8px;
-            gap: 50px; 
+            /* ★変更点: justify-content を space-between に変更 */
+            justify-content: space-between; 
+            /* gap: 50px; ← これを削除 */
         }
         
         .translate-btn {
@@ -192,14 +193,14 @@
             cursor: not-allowed;
         }
 
-        /* ★変更点: クリアボタンのサイズ */
+        /* クリアボタンのサイズ */
         .section-clear-btn {
             background-color: #ef4444;
             color: white;
             border: none;
             border-radius: 8px;
             padding: 12px 24px;   
-            min-width: 190px;     /* ★横幅を半分 (380px -> 190px) に変更 */
+            min-width: 190px;     
             box-sizing: border-box;
             text-align: center;
             font-size: 1.1rem;   
@@ -211,12 +212,12 @@
             background-color: #dc2626;
         }
 
-        /* ★変更点: コピーボタンのサイズ */
+        /* コピーボタンのサイズ */
         .copy-btn-large {
             background-color: #3b82f6;
             color: white;
             padding: 12px 24px;  
-            min-width: 380px;     /* 横幅は 380px のまま */
+            min-width: 380px;     
             box-sizing: border-box;
             text-align: center;
             border: none;
@@ -462,3 +463,4 @@
 
 </body>
 </html>
+```http://googleusercontent.com/image_generation_content/1
