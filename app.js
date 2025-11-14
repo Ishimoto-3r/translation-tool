@@ -48,38 +48,70 @@ async function startTranslation(button, inputId, outputId, fromLang, toLang) {
 
 // 逆翻訳ボタン（↻）を押したときの処理
 async function startReverseTranslation(button) {
-    const translatedOutput = document.getElementById('cn-output'); // 日→中 の「訳文（中国語）」
-    const textToReverse = translatedOutput.value;
-
-    if (!textToReverse || textToReverse.trim() === "") {
-        showToast("逆翻訳するテキストがありません（先に日→中 翻訳を行ってください）。");
-        return;
-    }
-
-    // ★修正点：
-    // 2番目のセクション「任意の言語→日本語」の入力欄と出力欄、ボタンを取得します。
+    const originalInput = document.getElementById('jp-input');
+    const translatedOutput = document.getElementById('cn-output');
     const anyInput = document.getElementById('any-input');
     const jpOutput = document.getElementById('jp-output');
     
-    // 2番目のセクションの「➔」ボタンを見つけます
-    // (any-input の親の親の...次の要素...のボタン)
-    const anyTranslateBtn = document.querySelector('button[onclick*="any-input"]');
+    // 1番目のセクションの(➔)ボタン
+    const jpCnBtn = document.querySelector('button[onclick*="jp-input"]');
+    // 2番目のセクションの(➔)ボタン
+    const anyJpBtn = document.querySelector('button[onclick*="any-input"]');
 
-    if (!anyInput || !jpOutput || !anyTranslateBtn) {
-        showError("エラー: 「任意の言語」セクションが見つかりません。");
+    const originalText = originalInput.value;
+    if (!originalText || originalText.trim() === "") {
+        showToast("原文（日本語）を入力してください。");
         return;
     }
 
-    // 1. 中国語を「任意の言語」の入力欄にコピーする
-    anyInput.value = textToReverse;
-    
-    // 2. 「任意の言語→日本語」の翻訳を自動で実行する
-    //    (すでにある startTranslation 関数を、2番目のボタンを対象に呼び出す)
-    showToast("「任意の言語→日本語」セクションで翻訳を開始します。");
-    await startTranslation(anyTranslateBtn, 'any-input', 'jp-output', '入力されたテキスト', '日本語');
-    
-    // 3. 比較ログからは逆翻訳の記述を削除
-    // (startTranslation が自動でログ更新するので、ここでは何もしない)
+    setButtonLoading(button, true); // (↻)ボタンをローディング開始
+
+    try {
+        // --- ステップ1: 日本語 -> 中国語 ---
+        setButtonLoading(jpCnBtn, true); // (➔)ボタンもローディング
+        
+        const systemPrompt1 = `あなたはプロの翻訳者です。以下のテキストを「日本語」から「中国語」に翻訳してください。`;
+        const res1 = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ systemPrompt: systemPrompt1, userPrompt: originalText })
+        });
+        const data1 = await res1.json();
+        if (!res1.ok) throw new Error(data1.error || '日→中 翻訳エラー');
+        
+        const chineseText = data1.translatedText.trim();
+        translatedOutput.value = chineseText; // 中国語欄を更新
+        updateComparisonLog(originalText, chineseText); // ログも更新
+        setButtonLoading(jpCnBtn, false); // (➔)ボタンのローディング解除
+
+        // --- ステップ2: 中国語 -> 日本語 ---
+        anyInput.value = chineseText; // 任意言語欄に中国語をセット
+        setButtonLoading(anyJpBtn, true); // 2番目の(➔)ボタンをローディング
+
+        const systemPrompt2 = "あなたはプロの翻訳者です。以下のテキストを「中国語」から「日本語」に翻訳してください。";
+        const res2 = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ systemPrompt: systemPrompt2, userPrompt: chineseText })
+        });
+        const data2 = await res2.json();
+        if (!res2.ok) throw new Error(data2.error || '中→日 翻訳エラー');
+
+        const reversedText = data2.translatedText.trim();
+        jpOutput.value = reversedText; // 最終的な日本語欄を更新
+        setButtonLoading(anyJpBtn, false); // 2番目の(➔)ボタンのローディング解除
+
+        showToast("ワンクリック逆翻訳が完了しました。");
+
+    } catch (err) {
+        console.error("逆翻訳エラー:", err);
+        showToast(`エラー: ${err.message}`);
+        // エラーが起きたらすべてのボタンをリセット
+        setButtonLoading(jpCnBtn, false);
+        setButtonLoading(anyJpBtn, false);
+    } finally {
+        setButtonLoading(button, false); // (↻)ボタンのローディング解除
+    }
 }
 
 // ====== UIヘルパー関数 ======
@@ -143,7 +175,7 @@ function updateComparisonLog(jpText, cnText) {
     const logTextEl = document.getElementById("comparison-log-text");
     if (!logTextEl) return;
     
-    // ★修正点：逆翻訳のロジックを削除。原文と訳文のみ表示。
+    // 原文と訳文のみ表示
     let logContent = `【日本語原文】\n${jpText}\n\n【中国語訳文】\n${cnText}`;
     
     logTextEl.textContent = logContent;
