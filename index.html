@@ -39,7 +39,7 @@
             font-weight: 600;
         }
 
-        /* ★変更点: コンテナの最大幅を 900px -> 1200px に変更 */
+        /* コンテナ */
         .container {
             max-width: 1200px;
             margin: 2rem auto;
@@ -87,7 +87,6 @@
             align-items: center;
         }
         
-        /* セクションごとの色分けボーダー */
         #jp-cn-header { border-top: 4px solid #2563eb; }
         #any-jp-header { border-top: 4px solid #6b7280; }
         #jp-en-header { border-top: 4px solid #16a34a; }
@@ -108,7 +107,6 @@
             grid-column: 1 / 2;
         }
 
-        /* 入力エリアレイアウト */
         .translation-grid {
             display: flex;
             align-items: stretch;
@@ -135,7 +133,6 @@
 
         textarea {
             width: 100%;
-            /* ★変更点: 高さを 180px -> 300px に変更 */
             height: 300px;
             border: 1px solid #d1d5db;
             border-radius: 8px;
@@ -276,6 +273,20 @@
         .toast.show {
             opacity: 1;
             transform: translateY(0);
+        }
+        
+        /* ★ローダーのCSS (ここに追加しました) */
+        .loader {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #ffffff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
         }
     </style>
 </head>
