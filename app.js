@@ -1,315 +1,204 @@
-/**
- * VercelのバックエンドAPIを呼び出す関数
- * ★ 元の callOpenAIAPI から書き換えています ★
- */
-async function callOpenAIAPI(systemPrompt, userPrompt) {
+// ====== 翻訳メイン処理 ======
+
+// 翻訳ボタンを押したときの処理
+async function startTranslation(button, inputId, outputId, fromLang, toLang) {
+    const inputEl = document.getElementById(inputId);
+    const outputEl = document.getElementById(outputId);
+    const text = inputEl.value;
+
+    if (!text || text.trim() === "") {
+        showToast("原文を入力してください。");
+        return;
+    }
+
+    setButtonLoading(button, true); // ★ローディング開始
+    outputEl.value = ""; // 訳文欄をクリア
+
     try {
-        // Vercelのバックエンド (/api/translate) を呼び出す
-        const response = await fetch('/api/translate', {
+        const systemPrompt = `あなたはプロの翻訳者です。以下のテキストを「${fromLang}」から「${toLang}」に翻訳してください。`;
+        const userPrompt = text;
+
+        const res = await fetch('/api/translate', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                systemPrompt: systemPrompt,
-                userPrompt: userPrompt
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ systemPrompt, userPrompt })
         });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            console.error("バックエンドAPIエラー:", errorData);
-            
-            // Vercelバックエンドからのエラーメッセージをトーストで表示
-            const errorMessage = errorData.error || `APIエラー (Status: ${response.status})`;
-            showToast(errorMessage);
-
-            throw new Error(errorMessage);
-        }
-
-        const data = await response.json();
+        const data = await res.json();
         
-        if (!data.translatedText) {
-             console.error("APIレスポンスの形式が不正です:", data);
-             showToast("APIから予期しない形式の応答がありました。");
-             throw new Error("Invalid API response format");
+        if (!res.ok) {
+            throw new Error(data.error || '翻訳APIエラー');
         }
-        
-        return data.translatedText; // バックエンドが整形した結果を返す
 
-    } catch (error) { 
-        console.error("通信エラー:", error);
-        if (!error.message.startsWith("APIエラー")) { // 既にトーストが表示されているエラーは除く
-             showToast("翻訳サーバーへの通信に失敗しました。");
+        outputEl.value = data.translatedText.trim();
+
+        // 日中翻訳の場合のみ、比較ログを更新
+        if (inputId === 'jp-input') {
+            updateComparisonLog(text, data.translatedText);
         }
-        return null; // エラー時はnullを返す
-    }
-}
 
-/**
- * 通常の翻訳処理
- */
-async function startTranslation(buttonElement, inputId, outputId, sourceLang, targetLang, inputText = null, shouldCopy = true) {
-    const text = inputText ? inputText : document.getElementById(inputId).value;
-    if (!text) return;
-
-    const outputElement = document.getElementById(outputId);
-    outputElement.value = "翻訳中...";
-
-    // --- ローディング開始 ---
-    let originalContent = null;
-    if (buttonElement) {
-        originalContent = buttonElement.innerHTML;
-        buttonElement.disabled = true;
-        buttonElement.innerHTML = '<div class="loader"></div>';
-    }
-    // --- ローディングここまで ---
-
-    try {
-        const systemPrompt = `${sourceLang}を${targetLang}に翻訳してください。余計な解説は付けず、翻訳結果のテキストのみを返してください。`;
-        const translatedText = await callOpenAIAPI(systemPrompt, text);
-
-        if (translatedText) {
-            outputElement.value = translatedText;
-            
-            // --- クリップボードコピーロジック ---
-            // ★★★ 修正: 自動コピー機能をすべて削除 ★★★
-            if (shouldCopy) {
-                if (inputId === 'jp-input') {
-                    updateComparisonLog(translatedText, text);
-                    
-                    // autoCopyToClipboard(translatedText, "訳文 (中国語) をコピーしました");
-                    
-                } else {
-                    // autoCopyToClipboard(translatedText, "訳文をコピーしました");
-                }
-            }
-            // --- コピーロジックここまで ---
-            
-            return translatedText; // 逆翻訳で使うため
-        } else {
-            outputElement.value = "翻訳に失敗しました。";
-            return null;
-        }
-    } catch (error) {
-        console.error("startTranslation内でのエラー:", error);
-        outputElement.value = "翻訳に失敗しました。";
-        return null;
-    } finally {
-        // --- ローディング終了 ---
-        if (buttonElement) {
-            buttonElement.disabled = false;
-            buttonElement.innerHTML = originalContent;
-        }
-    }
-}
-
-/**
- * 逆翻訳（日本語→中国語→日本語）の処理
- */
-async function startReverseTranslation(buttonElement) {
-    const jpInputText = document.getElementById('jp-input').value;
-    if (!jpInputText) return;
-
-    // --- ローディング開始 ---
-    const originalContent = buttonElement.innerHTML;
-    buttonElement.disabled = true;
-    buttonElement.innerHTML = '<div class="loader"></div>';
-
-    let chineseText = null;
-    // --- ローディングここまで ---
-    
-    try {
-        // 1. 日本語 → 中国語
-        const systemPrompt = `${'日本語'}を${'中国語'}に翻訳してください。余計な解説は付けず、翻訳結果のテキストのみを返してください。`;
-        chineseText = await callOpenAIAPI(systemPrompt, jpInputText);
-
-        if (!chineseText) {
-            // ★修正：alertの代わりにトースト通知
-            showToast("最初の翻訳（日本語→中国語）に失敗したため、逆翻訳を中断します。");
-            document.getElementById('cn-output').value = "翻訳に失敗しました。";
-            throw new Error("Initial translation failed.");
-        }
-        
-        document.getElementById('cn-output').value = chineseText;
-
-        // 2. 中国語を「任意の言語→日本語」の入力欄にコピー
-        const anyInputElement = document.getElementById('any-input');
-        anyInputElement.value = chineseText;
-
-        // 3. 中国語 → 日本語（自動実行）
-        document.getElementById('jp-output').value = "逆翻訳中...";
-        
-        // 逆翻訳時は「任意の言語→日本語」のボタン(null)を渡し、
-        // 内部でのクリップボードコピーを無効化 (shouldCopy = false)
-        const reversedJapaneseText = await startTranslation(null, 'any-input', 'jp-output', '中国語', '日本語', chineseText, false);
-
-        // 4. 比較ログの更新（逆翻訳版）
-        if (reversedJapaneseText) {
-            updateComparisonLog(chineseText, reversedJapaneseText);
-
-            // ★★★ 修正: 自動コピー機能をすべて削除 ★★★
-            // autoCopyToClipboard(reversedJapaneseText, "逆翻訳 (日本語) をコピーしました");
-
-        } else {
-            // 比較ログをエラー表示
-            updateComparisonLog(chineseText, "（日本語への再翻訳に失敗しました）");
-            
-            // ★★★ 修正: 自動コピー機能をすべて削除 ★★★
-            // autoCopyToClipboard(chineseText, "訳文 (中国語) をコピーしました");
-        }
-    } catch (error) {
-        console.error("startReverseTranslation内でのエラー:", error);
-        // (エラー処理は内部で実行済み、またはトースト通知が出ている)
-    } finally {
-        // --- 'finally' ブロックを追加してローディングを終了 ---
-        buttonElement.disabled = false;
-        buttonElement.innerHTML = originalContent;
-    }
-}
-
-// --- ユーティリティ関数 ---
-function updateComparisonLog(chineseText, japaneseText) {
-    // ★変更: ログテキスト専用エレメントに書き込む
-    const logTextElement = document.getElementById('comparison-log-text');
-    if (!logTextElement) return;
-    // 常に内容を上書き（過去のログは削除）
-    logTextElement.textContent = `${chineseText}\n\n${japaneseText}`;
-}
-
-
-/**
- * 信頼性の高いクリップボードコピー（自動実行用）
- * @param {string} text - コピーするテキスト
- * @param {string} message - 表示する通知メッセージ
- */
-function autoCopyToClipboard(text, message) {
-    if (text === null || typeof text === 'undefined') return;
-    
-    const textArea = document.createElement("textarea");
-    textArea.value = text;
-    textArea.style.position = "absolute";
-    textArea.style.left = "-9999px"; // 画面外に隠す
-    document.body.appendChild(textArea);
-    textArea.select();
-    
-    try {
-        // document.execCommand('copy') は古いですが、iFrame環境での信頼性が高いため採用
-        document.execCommand('copy');
-        // 成功時の通知
-        if(message) {
-            showToast(message);
-        }
     } catch (err) {
-        console.error('自動クリップボードコピーに失敗しました:', err);
-        // 自動コピー失敗時はアラートを出さない
-        // ★手動コピーボタンから呼ばれた場合を考慮し、トーストで失敗を通知
-        showToast("コピーに失敗しました。");
+        console.error("翻訳エラー:", err);
+        showToast(`エラー: ${err.message}`);
+        outputEl.value = `翻訳エラーが発生しました: ${err.message}`;
+    } finally {
+        setButtonLoading(button, false); // ★ローディング終了
     }
-    document.body.removeChild(textArea);
 }
 
-/**
- * トースト通知を表示する
- */
+// 逆翻訳ボタン（↻）を押したときの処理
+async function startReverseTranslation(button) {
+    const originalInput = document.getElementById('jp-input');
+    const translatedOutput = document.getElementById('cn-output');
+    
+    const textToReverse = translatedOutput.value;
+    if (!textToReverse || textToReverse.trim() === "") {
+        showToast("逆翻訳するテキストがありません（先に日→中 翻訳を行ってください）。");
+        return;
+    }
+
+    setButtonLoading(button, true); // ★ローディング開始
+
+    try {
+        // 中国語 → 日本語 への翻訳
+        const systemPrompt = "あなたはプロの翻訳者です。以下のテキストを「中国語」から「日本語」に翻訳してください。";
+        const userPrompt = textToReverse;
+
+        const res = await fetch('/api/translate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ systemPrompt, userPrompt })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+            throw new Error(data.error || '逆翻訳APIエラー');
+        }
+
+        const reversedText = data.translatedText.trim();
+
+        // 比較ログに「逆翻訳の結果」を追記
+        updateComparisonLog(originalInput.value, textToReverse, reversedText);
+        showToast("逆翻訳が完了しました。比較ログを確認してください。");
+
+    } catch (err) {
+        console.error("逆翻訳エラー:", err);
+        showToast(`エラー: ${err.message}`);
+    } finally {
+        setButtonLoading(button, false); // ★ローディング終了
+    }
+}
+
+// ====== UIヘルパー関数 ======
+
+// ★ローディング表示を切り替える関数（新設）
+function setButtonLoading(button, isLoading) {
+    if (isLoading) {
+        button.disabled = true;
+        // 元のアイコン(➔ や ↻)を記憶
+        button.dataset.originalContent = button.innerHTML;
+        // ローダーに入れ替え
+        button.innerHTML = '<div class="loader"></div>';
+    } else {
+        button.disabled = false;
+        // 記憶していた元のアイコンに戻す
+        if (button.dataset.originalContent) {
+            button.innerHTML = button.dataset.originalContent;
+        }
+    }
+}
+
+// テキストエリアをクリア
+function clearText(ids) {
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = "";
+    });
+    // 日中翻訳の比較ログもクリア
+    if (ids.includes('jp-input')) {
+        updateComparisonLog("", "");
+    }
+    showToast("クリアしました");
+}
+
+// クリップボードにコピー
+function copyToClipboard(elementId, message) {
+    const text = document.getElementById(elementId).value;
+    if (!text) {
+        showToast("コピーする内容がありません");
+        return;
+    }
+    navigator.clipboard.writeText(text).then(() => {
+        showToast(message);
+    }).catch(err => {
+        console.error('コピー失敗:', err);
+        showToast("コピーに失敗しました");
+    });
+}
+
+// 比較ログの表示切り替え
+function toggleComparisonLog() {
+    const logDiv = document.getElementById("comparison-log");
+    const btn = document.getElementById("log-toggle-btn");
+    if (logDiv.style.display === "none") {
+        logDiv.style.display = "block";
+        btn.textContent = "[-]";
+    } else {
+        logDiv.style.display = "none";
+        btn.textContent = "[+]";
+    }
+}
+
+// 比較ログの内容を更新
+function updateComparisonLog(jpText, cnText, reversedJpText = null) {
+    const logTextEl = document.getElementById("comparison-log-text");
+    if (!logTextEl) return;
+    
+    let logContent = `【日本語原文】\n${jpText}\n\n【中国語訳文】\n${cnText}`;
+    
+    if (reversedJpText !== null) {
+        logContent += `\n\n【逆翻訳（中→日）】\n${reversedJpText}`;
+    }
+    
+    logTextEl.textContent = logContent;
+}
+
+// 比較ログをコピー
+function copyComparisonLog() {
+    const text = document.getElementById("comparison-log-text").textContent;
+    if (!text || text.trim() === "") {
+        showToast("コピーするログがありません");
+        return;
+    }
+    navigator.clipboard.writeText(text).then(() => {
+        showToast("比較ログをコピーしました");
+    }).catch(err => {
+        console.error('コピー失敗:', err);
+        showToast("コピーに失敗しました");
+    });
+}
+
+// Toast通知を表示
 function showToast(message) {
     const container = document.getElementById('toast-container');
-    if (!container) return; // コンテナがない場合は何もしない
-    
     const toast = document.createElement('div');
     toast.className = 'toast';
     toast.textContent = message;
-    
+
     container.appendChild(toast);
-    
-    // 表示アニメーション
+
+    // すぐに 'show' クラスを追加してフェードイン開始
     setTimeout(() => {
         toast.classList.add('show');
-    }, 10); // すぐにクラスを追加
+    }, 10);
 
-    // 3秒後に消す
+    // 3秒後にフェードアウトして削除
     setTimeout(() => {
         toast.classList.remove('show');
-        // アニメーション後にDOMから削除
-        setTimeout(() => {
-            if (container.contains(toast)) {
-                container.removeChild(toast);
+        toast.addEventListener('transitionend', () => {
+            if (toast.parentNode) {
+                toast.parentNode.removeChild(toast);
             }
-        }, 500); // CSSのtransition時間と合わせる
+        });
     }, 3000);
-}
-
-/**
- * 手動コピーボタン用（フォールバック付き）
- */
-function copyToClipboard(elementId, message) { // ★message引数を追加
-    const text = document.getElementById(elementId).value;
-    if (text) {
-        // iFrame環境を考慮し、自動コピーと同じロジック(execCommand)を使用
-        // ★渡されたメッセージ、またはデフォルトメッセージを使用
-        autoCopyToClipboard(text, message || "コピーしました");
-    } else {
-        showToast("コピーするテキストがありません。");
-    }
-}
-
-/**
- * ★新設: 比較ログを手動コピーする
- */
-function copyComparisonLog() {
-    const logTextElement = document.getElementById('comparison-log-text');
-    const text = logTextElement ? logTextElement.textContent : null;
-    
-    if (text && text.trim() !== "") {
-        // ★★★ 修正: ボタンの文言変更に伴い、トーストメッセージも変更 ★★★
-        autoCopyToClipboard(text, "コピーしました");
-    } else {
-        showToast("コピーするログ内容がありません。");
-    }
-}
-
-/**
- * ★修正: 複数のテキストエリアを一括クリアする
- * @param {string[]} elementIds - クリアする要素のID配列
- */
-function clearText(elementIds) {
-    let clearedJpInput = false;
-    
-    elementIds.forEach(elementId => {
-        const element = document.getElementById(elementId);
-        if (element) {
-            element.value = "";
-        }
-        
-        // 「日本語→中国語」の原文がクリア対象に含まれていたかチェック
-        if (elementId === 'jp-input') {
-            clearedJpInput = true;
-        }
-    });
-
-    // 「日本語→中国語」の原文を消したらログも消す
-    if (clearedJpInput) {
-        const logTextElement = document.getElementById('comparison-log-text');
-        if (logTextElement) {
-            logTextElement.textContent = "";
-        }
-    }
-}
-
-/**
- * 比較ログの表示/非表示を切り替える
- */
-function toggleComparisonLog() {
-    const logElement = document.getElementById('comparison-log');
-    const btnElement = document.getElementById('log-toggle-btn');
-    
-    if (!logElement || !btnElement) return;
-
-    if (logElement.style.display === 'none') {
-        logElement.style.display = 'block';
-        btnElement.textContent = '[-]';
-    } else {
-        logElement.style.display = 'none';
-        btnElement.textContent = '[+]';
-    }
 }
