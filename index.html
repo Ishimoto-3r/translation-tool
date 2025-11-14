@@ -158,11 +158,13 @@
             flex-direction: column;
             align-items: center;
             padding: 0 8px;
-            /* ★変更点: justify-content を space-between に変更 */
+            /* ★変更点: 翻訳ボタンを中央、逆翻訳ボタンを下に配置 */
             justify-content: space-between; 
-            /* gap: 50px; ← これを削除 */
+            /* gap: 50px; ← 不要になるので削除 */
+            position: relative; /* 子要素の絶対配置の基準 */
+            min-height: 300px; /* textareaの高さに合わせる */
         }
-        
+
         .translate-btn {
             background-color: #3b82f6;
             color: white;
@@ -177,21 +179,39 @@
             justify-content: center;
             transition: background-color 0.2s;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .translate-btn:hover:not(:disabled) {
-            background-color: #2563eb;
-            transform: scale(1.05);
+            /* ★変更点: translate-btn (➔) の位置調整 */
+            position: absolute; /* 絶対配置 */
+            top: 50%; /* 親要素のY座標中央 */
+            left: 50%; /* 親要素のX座標中央 */
+            transform: translate(-50%, -50%); /* 中央揃え調整 */
         }
         .translate-btn.reverse {
             background-color: #10b981;
+            /* ★変更点: reverse-btn (↻) の位置調整 */
+            position: absolute; /* 絶対配置 */
+            bottom: 0; /* 親要素の下辺に固定 */
+            left: 50%; /* 親要素のX座標中央 */
+            transform: translateX(-50%); /* 中央揃え調整 */
+            top: auto; /* 他の top 指定を無効化 */
+        }
+
+        .translate-btn:hover:not(:disabled) {
+            background-color: #2563eb;
+            transform: translate(-50%, -50%) scale(1.05); /* 中央揃えと拡大 */
         }
         .translate-btn.reverse:hover:not(:disabled) {
             background-color: #059669;
+            transform: translateX(-50%) scale(1.05); /* 中央揃えと拡大 */
         }
         .translate-btn:disabled {
             background-color: #9ca3af;
             cursor: not-allowed;
+            transform: translate(-50%, -50%); /* 無効時は拡大なし */
         }
+        .translate-btn.reverse:disabled {
+            transform: translateX(-50%); /* 無効時は拡大なし */
+        }
+
 
         /* クリアボタンのサイズ */
         .section-clear-btn {
@@ -463,4 +483,4 @@
 
 </body>
 </html>
-```http://googleusercontent.com/image_generation_content/1
+```http://googleusercontent.com/image_generation_content/2
