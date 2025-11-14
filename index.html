@@ -124,8 +124,7 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 8px;
-            /* ★変更点: ボタンの高さ分の最小高さを確保 */
-            min-height: 48px; 
+            min-height: 48px; /* ボタンの高さ分の最小高さを確保 */
         }
         .textarea-label {
             font-size: 0.875rem;
@@ -191,13 +190,13 @@
             cursor: not-allowed;
         }
 
-        /* ★変更点: クリアボタンを大型化 */
+        /* ★変更点: クリアボタンのサイズ */
         .section-clear-btn {
             background-color: #ef4444;
             color: white;
             border: none;
             border-radius: 8px;
-            padding: 12px 100px; /* 横幅を大幅に確保 */
+            padding: 12px 100px; /* 横幅は前回のまま */
             font-size: 1.1rem;   /* 文字を大きく */
             font-weight: 600;
             cursor: pointer;
@@ -207,11 +206,11 @@
             background-color: #dc2626;
         }
 
-        /* ★変更点: コピーボタンを大型化 */
+        /* ★変更点: コピーボタンのサイズ（横幅1.3倍） */
         .copy-btn-large {
             background-color: #3b82f6;
             color: white;
-            padding: 12px 100px; /* 横幅を大幅に確保 */
+            padding: 12px 130px; /* 横幅を 100px -> 130px (1.3倍) に変更 */
             border: none;
             border-radius: 8px;
             font-size: 1.1rem;   /* 文字を大きく */
@@ -233,17 +232,11 @@
             background: #f9fafb;
             border-top: 1px solid #e5e7eb;
             padding: 10px 20px;
-            display: grid; /* ★変更: グリッドレイアウト適用 */
-            grid-template-columns: auto 1fr auto; /* ★変更 */
+            display: flex;
+            justify-content: space-between;
             align-items: center;
             font-weight: 600;
             color: #374151;
-        }
-        #comparison-log-header span:first-child { /* (比較用) のテキスト */
-            justify-self: start;
-        }
-        #comparison-log-header span[id="log-toggle-btn"] { /* [+] ボタン */
-            justify-self: end;
         }
         #comparison-log-header:hover {
             background-color: #f3f4f6;
@@ -253,15 +246,16 @@
             border: 1px solid #e5e7eb;
             padding: 16px;
             margin: 16px;
+            margin-top: 0; /* ★マージン調整 */
             border-radius: 8px;
             white-space: pre-wrap;
             font-family: monospace;
             min-height: 50px;
             font-size: 0.9rem;
         }
+        /* ★変更点: ログコピーボタンの位置 */
         .log-copy-btn-area {
-            padding: 16px;
-            padding-top: 0;
+            padding: 16px; /* テキストの上に余白 */
             text-align: right;
         }
 
@@ -349,14 +343,14 @@
             </div>
         </div>
         
-        <div id="comparison-log-header">
-            <span onclick="toggleComparisonLog()" style="cursor: pointer; justify-self: start;">中国語＋日本語 (比較用)</span>
-            <div class="header-right-content">
-                <button class="copy-btn-large" onclick="copyComparisonLog()">コピー</button>
-            </div>
-            <span id="log-toggle-btn" onclick="toggleComparisonLog()" style="cursor: pointer; justify-self: end;">[+]</span>
+        <div id="comparison-log-header" onclick="toggleComparisonLog()">
+            <span>中国語＋日本語 (比較用)</span>
+            <span id="log-toggle-btn">[+]</span>
         </div>
         <div id="comparison-log" style="display: none;">
+            <div class="log-copy-btn-area">
+                <button class="copy-btn-large" onclick="copyComparisonLog()">コピー</button>
+            </div>
             <div id="comparison-log-text"></div>
         </div>
     </div>
