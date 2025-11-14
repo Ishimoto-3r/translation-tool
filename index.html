@@ -103,8 +103,10 @@
             grid-column: 3 / 4;
             justify-self: end;
         }
+        /* ★変更点: クリアボタンを左寄せにする */
         .header-spacer-left {
             grid-column: 1 / 2;
+            justify-self: start;
         }
 
         .translation-grid {
@@ -196,11 +198,11 @@
             color: white;
             border: none;
             border-radius: 8px;
-            padding: 12px 24px;   /* 縦横の余白 */
-            min-width: 380px;     /* ★横幅を2倍 (190px -> 380px) に変更 */
+            padding: 12px 24px;   
+            min-width: 190px;     /* ★横幅を半分 (380px -> 190px) に変更 */
             box-sizing: border-box;
             text-align: center;
-            font-size: 1.1rem;    /* 文字を大きく */
+            font-size: 1.1rem;   
             font-weight: 600;
             cursor: pointer;
             transition: background-color 0.2s;
@@ -213,13 +215,13 @@
         .copy-btn-large {
             background-color: #3b82f6;
             color: white;
-            padding: 12px 24px;   /* 縦横の余白 */
-            min-width: 380px;     /* ★横幅を2倍 (190px -> 380px) に変更 */
+            padding: 12px 24px;  
+            min-width: 380px;     /* 横幅は 380px のまま */
             box-sizing: border-box;
             text-align: center;
             border: none;
             border-radius: 8px;
-            font-size: 1.1rem;    /* 文字を大きく */
+            font-size: 1.1rem;    
             font-weight: 600;
             cursor: pointer;
             transition: background-color 0.2s;
@@ -244,10 +246,10 @@
             font-weight: 600;
             color: #374151;
         }
-        #comparison-log-header span:first-child { /* (比較用) のテキスト */
+        #comparison-log-header span:first-child { 
             justify-self: start;
         }
-        #comparison-log-header span[id="log-toggle-btn"] { /* [+] ボタン */
+        #comparison-log-header span[id="log-toggle-btn"] { 
             justify-self: end;
         }
         #comparison-log-header:hover {
@@ -328,11 +330,12 @@
 
     <div class="section">
         <div class="section-header" id="jp-cn-header">
-            <div class="header-spacer-left"></div>
-            <span class="header-title">日本語 → 中国語</span>
-            <div class="header-right-content">
+            <div class="header-spacer-left">
                 <button class="section-clear-btn" title="一括クリア" onclick="clearText(['jp-input', 'cn-output'])">クリア</button>
             </div>
+            <span class="header-title">日本語 → 中国語</span>
+            <div class="header-right-content">
+                </div>
         </div>
         <div class="translation-grid">
             <div class="textarea-container">
@@ -368,10 +371,11 @@
 
     <div class="section">
         <div class="section-header" id="any-jp-header">
-            <div class="header-spacer-left"></div>
+            <div class="header-spacer-left">
+                <button class="section-clear-btn" title="一括クリア" onclick="clearText(['any-input', 'jp-output'])">クリア</button>
+            </div>
             <span class="header-title">任意の言語 → 日本語</span>
             <div class="header-right-content">
-                <button class="section-clear-btn" title="一括クリア" onclick="clearText(['any-input', 'jp-output'])">クリア</button>
             </div>
         </div>
         <div class="translation-grid">
@@ -396,10 +400,11 @@
 
     <div class="section">
         <div class="section-header" id="jp-en-header">
-            <div class="header-spacer-left"></div>
+            <div class="header-spacer-left">
+                <button class="section-clear-btn" title="一括クリア" onclick="clearText(['jp-en-input', 'en-output'])">クリア</button>
+            </div>
             <span class="header-title">日本語 → 英語</span>
             <div class="header-right-content">
-                <button class="section-clear-btn" title="一括クリア" onclick="clearText(['jp-en-input', 'en-output'])">クリア</button>
             </div>
         </div>
         <div class="translation-grid">
@@ -424,10 +429,11 @@
 
     <div class="section">
         <div class="section-header" id="jp-kr-header">
-            <div class="header-spacer-left"></div>
+            <div class="header-spacer-left">
+                <button class="section-clear-btn" title="一括クリア" onclick="clearText(['jp-kr-input', 'kr-output'])">クリア</button>
+            </div>
             <span class="header-title">日本語 → 韓国語</span>
             <div class="header-right-content">
-                <button class="section-clear-btn" title="一括クリア" onclick="clearText(['jp-kr-input', 'kr-output'])">クリア</button>
             </div>
         </div>
         <div class="translation-grid">
