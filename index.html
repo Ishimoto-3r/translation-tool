@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale:1.0">
     <title>AI翻訳ツール (GPT-5)</title>
     <style>
         /* 共通レイアウト */
@@ -93,7 +93,8 @@
         #jp-kr-header { border-top: 4px solid #f59e0b; }
 
         .header-title {
-            font-size: 1.25rem;
+            /* ★変更点: 文字サイズを 1.25rem -> 1.875rem に変更 */
+            font-size: 1.875rem; 
             font-weight: 700;
             text-align: center;
             grid-column: 2 / 3;
@@ -103,7 +104,6 @@
             grid-column: 3 / 4;
             justify-self: end;
         }
-        /* クリアボタンを左寄せにする */
         .header-spacer-left {
             grid-column: 1 / 2;
             justify-self: start;
@@ -126,7 +126,7 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 8px;
-            min-height: 48px; /* ボタンの高さ分の最小高さを確保 */
+            min-height: 48px; 
         }
         .textarea-label {
             font-size: 0.875rem;
@@ -158,13 +158,13 @@
             flex-direction: column;
             align-items: center;
             padding: 0 8px;
-            /* ★変更点: 翻訳ボタンを中央、逆翻訳ボタンを下に配置 */
             justify-content: space-between; 
-            /* gap: 50px; ← 不要になるので削除 */
-            position: relative; /* 子要素の絶対配置の基準 */
-            min-height: 300px; /* textareaの高さに合わせる */
+            position: relative; 
+            min-height: 300px; 
+            /* ★変更点: ボタンの幅(65px)より広い最小幅を確保 */
+            min-width: 80px; 
         }
-
+        
         .translate-btn {
             background-color: #3b82f6;
             color: white;
@@ -179,41 +179,37 @@
             justify-content: center;
             transition: background-color 0.2s;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            /* ★変更点: translate-btn (➔) の位置調整 */
-            position: absolute; /* 絶対配置 */
-            top: 50%; /* 親要素のY座標中央 */
-            left: 50%; /* 親要素のX座標中央 */
-            transform: translate(-50%, -50%); /* 中央揃え調整 */
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
         }
         .translate-btn.reverse {
             background-color: #10b981;
-            /* ★変更点: reverse-btn (↻) の位置調整 */
-            position: absolute; /* 絶対配置 */
-            bottom: 0; /* 親要素の下辺に固定 */
-            left: 50%; /* 親要素のX座標中央 */
-            transform: translateX(-50%); /* 中央揃え調整 */
-            top: auto; /* 他の top 指定を無効化 */
+            position: absolute; 
+            bottom: 0; 
+            left: 50%; 
+            transform: translateX(-50%); 
+            top: auto; 
         }
 
         .translate-btn:hover:not(:disabled) {
             background-color: #2563eb;
-            transform: translate(-50%, -50%) scale(1.05); /* 中央揃えと拡大 */
+            transform: translate(-50%, -50%) scale(1.05); 
         }
         .translate-btn.reverse:hover:not(:disabled) {
             background-color: #059669;
-            transform: translateX(-50%) scale(1.05); /* 中央揃えと拡大 */
+            transform: translateX(-50%) scale(1.05); 
         }
         .translate-btn:disabled {
             background-color: #9ca3af;
             cursor: not-allowed;
-            transform: translate(-50%, -50%); /* 無効時は拡大なし */
+            transform: translate(-50%, -50%); 
         }
         .translate-btn.reverse:disabled {
-            transform: translateX(-50%); /* 無効時は拡大なし */
+            transform: translateX(-50%); 
         }
 
-
-        /* クリアボタンのサイズ */
         .section-clear-btn {
             background-color: #ef4444;
             color: white;
@@ -232,7 +228,6 @@
             background-color: #dc2626;
         }
 
-        /* コピーボタンのサイズ */
         .copy-btn-large {
             background-color: #3b82f6;
             color: white;
@@ -483,4 +478,3 @@
 
 </body>
 </html>
-```http://googleusercontent.com/image_generation_content/2
