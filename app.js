@@ -1,6 +1,6 @@
 // ====== 翻訳メイン処理 ======
 
-// 翻訳ボタンを押したときの処理
+// 翻訳ボタン（➔）を押したときの処理
 async function startTranslation(button, inputId, outputId, fromLang, toLang) {
     const inputEl = document.getElementById(inputId);
     const outputEl = document.getElementById(outputId);
@@ -12,7 +12,7 @@ async function startTranslation(button, inputId, outputId, fromLang, toLang) {
     }
 
     setButtonLoading(button, true); // ローディング開始
-    outputEl.value = ""; // 訳文欄をクリア
+    outputEl.value = ""; 
 
     try {
         const systemPrompt = `あなたはプロの翻訳者です。以下のテキストを「${fromLang}」から「${toLang}」に翻訳してください。`;
@@ -48,48 +48,38 @@ async function startTranslation(button, inputId, outputId, fromLang, toLang) {
 
 // 逆翻訳ボタン（↻）を押したときの処理
 async function startReverseTranslation(button) {
-    const originalInput = document.getElementById('jp-input');
-    const translatedOutput = document.getElementById('cn-output');
-    
+    const translatedOutput = document.getElementById('cn-output'); // 日→中 の「訳文（中国語）」
     const textToReverse = translatedOutput.value;
+
     if (!textToReverse || textToReverse.trim() === "") {
         showToast("逆翻訳するテキストがありません（先に日→中 翻訳を行ってください）。");
         return;
     }
 
-    setButtonLoading(button, true); // ローディング開始
+    // ★修正点：
+    // 2番目のセクション「任意の言語→日本語」の入力欄と出力欄、ボタンを取得します。
+    const anyInput = document.getElementById('any-input');
+    const jpOutput = document.getElementById('jp-output');
+    
+    // 2番目のセクションの「➔」ボタンを見つけます
+    // (any-input の親の親の...次の要素...のボタン)
+    const anyTranslateBtn = document.querySelector('button[onclick*="any-input"]');
 
-    try {
-        // 中国語 → 日本語 への翻訳
-        const systemPrompt = "あなたはプロの翻訳者です。以下のテキストを「中国語」から「日本語」に翻訳してください。";
-        const userPrompt = textToReverse;
-
-        const res = await fetch('/api/translate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ systemPrompt, userPrompt })
-        });
-
-        const data = await res.json();
-        if (!res.ok) {
-            throw new Error(data.error || '逆翻訳APIエラー');
-        }
-
-        const reversedText = data.translatedText.trim();
-        
-        // ★修正点：原文入力欄（jp-input）を、逆翻訳の結果で上書きする
-        originalInput.value = reversedText;
-
-        // 比較ログにも追記
-        updateComparisonLog(reversedText, textToReverse, "(↑ 逆翻訳後の日本語)");
-        showToast("逆翻訳が完了しました。");
-
-    } catch (err) {
-        console.error("逆翻訳エラー:", err);
-        showToast(`エラー: ${err.message}`);
-    } finally {
-        setButtonLoading(button, false); // ローディング終了
+    if (!anyInput || !jpOutput || !anyTranslateBtn) {
+        showError("エラー: 「任意の言語」セクションが見つかりません。");
+        return;
     }
+
+    // 1. 中国語を「任意の言語」の入力欄にコピーする
+    anyInput.value = textToReverse;
+    
+    // 2. 「任意の言語→日本語」の翻訳を自動で実行する
+    //    (すでにある startTranslation 関数を、2番目のボタンを対象に呼び出す)
+    showToast("「任意の言語→日本語」セクションで翻訳を開始します。");
+    await startTranslation(anyTranslateBtn, 'any-input', 'jp-output', '入力されたテキスト', '日本語');
+    
+    // 3. 比較ログからは逆翻訳の記述を削除
+    // (startTranslation が自動でログ更新するので、ここでは何もしない)
 }
 
 // ====== UIヘルパー関数 ======
@@ -98,13 +88,10 @@ async function startReverseTranslation(button) {
 function setButtonLoading(button, isLoading) {
     if (isLoading) {
         button.disabled = true;
-        // 元のアイコン(➔ や ↻)を記憶
         button.dataset.originalContent = button.innerHTML;
-        // ローダーに入れ替え
         button.innerHTML = '<div class="loader"></div>';
     } else {
         button.disabled = false;
-        // 記憶していた元のアイコンに戻す
         if (button.dataset.originalContent) {
             button.innerHTML = button.dataset.originalContent;
         }
@@ -117,7 +104,6 @@ function clearText(ids) {
         const el = document.getElementById(id);
         if (el) el.value = "";
     });
-    // 日中翻訳の比較ログもクリア
     if (ids.includes('jp-input')) {
         updateComparisonLog("", "");
     }
@@ -153,16 +139,12 @@ function toggleComparisonLog() {
 }
 
 // 比較ログの内容を更新
-function updateComparisonLog(jpText, cnText, reversedJpText = null) {
+function updateComparisonLog(jpText, cnText) {
     const logTextEl = document.getElementById("comparison-log-text");
     if (!logTextEl) return;
     
+    // ★修正点：逆翻訳のロジックを削除。原文と訳文のみ表示。
     let logContent = `【日本語原文】\n${jpText}\n\n【中国語訳文】\n${cnText}`;
-    
-    if (reversedJpText !== null) {
-        // 逆翻訳のログをわかりやすく変更
-        logContent = `【逆翻訳（中→日）】\n${jpText}\n\n【中国語（元）】\n${cnText}`;
-    }
     
     logTextEl.textContent = logContent;
 }
@@ -191,12 +173,10 @@ function showToast(message) {
 
     container.appendChild(toast);
 
-    // すぐに 'show' クラスを追加してフェードイン開始
     setTimeout(() => {
         toast.classList.add('show');
     }, 10);
 
-    // 3秒後にフェードアウトして削除
     setTimeout(() => {
         toast.classList.remove('show');
         toast.addEventListener('transitionend', () => {
