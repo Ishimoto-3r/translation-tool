@@ -157,7 +157,8 @@
             align-items: center;
             justify-content: center;
             padding: 0 8px;
-            gap: 12px;
+            /* ★変更点: ボタン間の隙間を広げる */
+            gap: 20px; 
         }
         
         .translate-btn {
@@ -165,9 +166,10 @@
             color: white;
             border: none;
             border-radius: 50%;
-            width: 44px;
-            height: 44px;
-            font-size: 20px;
+            /* ★変更点: アイコン大型化に伴いボタンサイズ変更 */
+            width: 52px;
+            height: 52px;
+            font-size: 30px; /* ★変更点: アイコンサイズ 1.5倍 */
             cursor: pointer;
             display: flex;
             align-items: center;
@@ -196,8 +198,11 @@
             color: white;
             border: none;
             border-radius: 8px;
-            padding: 12px 100px; /* 横幅は前回のまま */
-            font-size: 1.1rem;   /* 文字を大きく */
+            padding: 12px 24px;   /* 縦横の余白 */
+            min-width: 190px;     /* ★最小幅を190pxに設定 */
+            box-sizing: border-box;
+            text-align: center;
+            font-size: 1.1rem;    /* 文字を大きく */
             font-weight: 600;
             cursor: pointer;
             transition: background-color 0.2s;
@@ -206,14 +211,17 @@
             background-color: #dc2626;
         }
 
-        /* ★変更点: コピーボタンのサイズ（横幅2.0倍） */
+        /* ★変更点: コピーボタンのサイズ */
         .copy-btn-large {
             background-color: #3b82f6;
             color: white;
-            padding: 12px 200px; /* 横幅を 100px -> 200px (2.0倍) に変更 */
+            padding: 12px 24px;   /* 縦横の余白 */
+            min-width: 190px;     /* ★最小幅を190pxに設定 */
+            box-sizing: border-box;
+            text-align: center;
             border: none;
             border-radius: 8px;
-            font-size: 1.1rem;   /* 文字を大きく */
+            font-size: 1.1rem;    /* 文字を大きく */
             font-weight: 600;
             cursor: pointer;
             transition: background-color 0.2s;
@@ -232,11 +240,17 @@
             background: #f9fafb;
             border-top: 1px solid #e5e7eb;
             padding: 10px 20px;
-            display: flex;
-            justify-content: space-between;
+            display: grid;
+            grid-template-columns: auto 1fr auto;
             align-items: center;
             font-weight: 600;
             color: #374151;
+        }
+        #comparison-log-header span:first-child { /* (比較用) のテキスト */
+            justify-self: start;
+        }
+        #comparison-log-header span[id="log-toggle-btn"] { /* [+] ボタン */
+            justify-self: end;
         }
         #comparison-log-header:hover {
             background-color: #f3f4f6;
@@ -246,16 +260,15 @@
             border: 1px solid #e5e7eb;
             padding: 16px;
             margin: 16px;
-            margin-top: 0; /* ★マージン調整 */
+            margin-top: 0;
             border-radius: 8px;
             white-space: pre-wrap;
             font-family: monospace;
             min-height: 50px;
             font-size: 0.9rem;
         }
-        /* ★変更点: ログコピーボタンの位置 */
         .log-copy-btn-area {
-            padding: 16px; /* テキストの上に余白 */
+            padding: 16px;
             text-align: right;
         }
 
@@ -445,5 +458,3 @@
 
 </body>
 </html>
-
-
