@@ -39,7 +39,7 @@
             font-weight: 600;
         }
 
-        /* ★変更点: コンテナの最大幅を 900px -> 1200px に変更 */
+        /* コンテナ */
         .container {
             max-width: 1200px;
             margin: 2rem auto;
@@ -87,7 +87,6 @@
             align-items: center;
         }
         
-        /* セクションごとの色分けボーダー */
         #jp-cn-header { border-top: 4px solid #2563eb; }
         #any-jp-header { border-top: 4px solid #6b7280; }
         #jp-en-header { border-top: 4px solid #16a34a; }
@@ -108,7 +107,6 @@
             grid-column: 1 / 2;
         }
 
-        /* 入力エリアレイアウト */
         .translation-grid {
             display: flex;
             align-items: stretch;
@@ -121,11 +119,13 @@
             flex-direction: column;
         }
         
+        /* ★変更点: コントロールエリアのレイアウト */
         .controls {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 8px;
+            min-height: 38px; /* ボタンの高さ分の最小高さを確保 */
         }
         .textarea-label {
             font-size: 0.875rem;
@@ -135,7 +135,6 @@
 
         textarea {
             width: 100%;
-            /* ★変更点: 高さを 180px -> 300px に変更 */
             height: 300px;
             border: 1px solid #d1d5db;
             border-radius: 8px;
@@ -206,15 +205,17 @@
             background-color: #dc2626;
         }
 
+        /* ★変更点: コピーボタンを大きく、押しやすく */
         .copy-btn-large {
             background-color: #3b82f6;
             color: white;
-            padding: 4px 12px;
+            padding: 8px 16px; /* サイズアップ */
             border: none;
-            border-radius: 6px;
-            font-size: 0.8rem;
+            border-radius: 8px; /* 角丸を統一 */
+            font-size: 0.9rem; /* 文字サイズアップ */
             font-weight: 600;
             cursor: pointer;
+            transition: background-color 0.2s;
         }
         .copy-btn-large:hover {
             background-color: #2563eb;
@@ -251,7 +252,7 @@
             font-size: 0.9rem;
         }
         .log-copy-btn-area {
-            padding: 0 16px;
+            padding: 0 16px 16px; /* マージン調整 */
             text-align: right;
         }
 
@@ -277,6 +278,20 @@
             opacity: 1;
             transform: translateY(0);
         }
+        
+        /* ★ローダーのCSS (ここに追加しました) */
+        .loader {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #ffffff;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -297,6 +312,7 @@
         <h1>AI翻訳ツール (GPT-5)</h1>
     </div>
 
+    <!-- 日本語 → 中国語 -->
     <div class="section">
         <div class="section-header" id="jp-cn-header">
             <div class="header-spacer-left"></div>
@@ -307,16 +323,19 @@
         </div>
         <div class="translation-grid">
             <div class="textarea-container">
+                <!-- ★変更点: 原文側の .controls にも高さを確保 -->
                 <div class="controls">
                     <label for="jp-input" class="textarea-label">原文 (日本語)</label>
+                    <!-- (ボタンの高さ分の空白が暗黙的に確保される) -->
                 </div>
                 <textarea id="jp-input" placeholder="ここに日本語を入力"></textarea>
             </div>
             <div class="button-container">
                 <button class="translate-btn" title="翻訳" onclick="startTranslation(this, 'jp-input', 'cn-output', '日本語', '中国語')">➔</button>
-                <button class="translate-btn reverse" title="逆翻訳 (日→中→日)" onclick="startReverseTranslation(this)">↻</button>
+                <button class="translate-btn reverse" title="逆翻訳 (中→日)" onclick="startReverseTranslation(this)">↻</button>
             </div>
             <div class="textarea-container">
+                <!-- ★変更点: 訳文側の .controls にボタンを移動 -->
                 <div class="controls">
                     <label for="cn-output" class="textarea-label">訳文 (中国語)</label>
                     <button class="copy-btn-large" onclick="copyToClipboard('cn-output', '訳文 (中国語) をコピーしました')">コピー</button>
@@ -337,6 +356,7 @@
         </div>
     </div>
 
+    <!-- 任意の言語 → 日本語 -->
     <div class="section">
         <div class="section-header" id="any-jp-header">
             <div class="header-spacer-left"></div>
@@ -365,6 +385,7 @@
         </div>
     </div>
 
+    <!-- 日本語 → 英語 -->
     <div class="section">
         <div class="section-header" id="jp-en-header">
             <div class="header-spacer-left"></div>
@@ -393,6 +414,7 @@
         </div>
     </div>
 
+    <!-- 日本語 → 韓国語 -->
     <div class="section">
         <div class="section-header" id="jp-kr-header">
             <div class="header-spacer-left"></div>
