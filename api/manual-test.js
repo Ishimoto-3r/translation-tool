@@ -1,4 +1,12 @@
 // api/manual-test.js
+
+
+// ★ これを追加（Node ランタイムを明示）
+export const config = {
+  runtime: "nodejs20.x",
+};
+
+
 export default async function handler(req, res) {
   try {
     // STEP 1: アクセストークン取得
