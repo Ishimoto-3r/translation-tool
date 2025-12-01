@@ -1,11 +1,9 @@
 // api/manual-test.js
 
-
 // ★ これを追加（Node ランタイムを明示）
 export const config = {
   runtime: "nodejs20.x",
 };
-
 
 export default async function handler(req, res) {
   try {
@@ -43,7 +41,9 @@ export default async function handler(req, res) {
     const fileUrl = process.env.MANUAL_SHAREPOINT_FILE_URL;
 
     const graphResponse = await fetch(
-      `https://graph.microsoft.com/v1.0/shares/u!${Buffer.from(fileUrl).toString("base64").replace(/=+$/, "")}/driveItem/content`,
+      `https://graph.microsoft.com/v1.0/shares/u!${Buffer.from(fileUrl)
+        .toString("base64")
+        .replace(/=+$/, "")}/driveItem/content`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
