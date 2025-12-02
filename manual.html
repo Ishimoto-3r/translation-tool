@@ -213,21 +213,23 @@
             border:1px solid #fff;
         }
 
-        .image-drop-zone {
-            border:2px dashed #a78bfa;
-            background:#faf5ff;
-            transition:.2s;
-            text-align:center;
-            padding:8px;
-            border-radius:6px;
-            cursor:pointer;
-            position:relative;
-            min-height:60px;
-            display:flex;
-            flex-direction:column;
-            justify-content:center;
-            margin-bottom:8px;
-        }
+     .image-drop-zone {
+    border:2px dashed #a78bfa;
+    background:#faf5ff;
+    transition:.2s;
+    text-align:center;
+    padding:12px;          /* 8 → 12 */
+    border-radius:6px;
+    cursor:pointer;
+    position:relative;
+    min-height:120px;      /* 60 → 120 でだいぶ大きく */
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;    /* 横方向も中央寄せ */
+    margin-bottom:10px;    /* 少し余白を増やす */
+}
+
         .image-drop-zone.dragover {
             background:#f3e8ff;
             border-color:#7c3aed;
@@ -283,6 +285,35 @@
     overflow-y:visible;
 }
 
+/* --- フォント全体を少し大きくする --- */
+body {
+    font-family: "Meiryo UI", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;   /* ベースフォントアップ */
+}
+
+/* Tailwind の text-[10px], text-[11px] を上書きして少し大きくする */
+.text-\[10px\] {
+    font-size: 0.8rem !important;   /* だいたい 12.8px 相当 */
+}
+.text-\[11px\] {
+    font-size: 0.85rem !important;
+}
+
+/* ラベルなども少し大きく */
+.section-label {
+    font-size: 0.8rem;
+}
+.genre-group-header {
+    font-size: 0.8rem;
+}
+.checkbox-card {
+    font-size: 0.8rem;
+}
+.company-card {
+    font-size: 0.85rem;
+}
+
+        
 
         #toast {
             position:fixed;
@@ -324,19 +355,7 @@
 <div class="flex-1 container mx-auto max-w-full px-4 py-3 grid-layout">
     <!-- 左カラム -->
     <div class="col-panel bg-white rounded-lg shadow-sm">
-<div class="mb-6">
-    <h3 class="section-label border-green-500 text-green-700">1. 原本Excel読込</h3>
-    <div class="border border-dashed border-green-300 rounded bg-green-50 px-3 py-2 text-[11px] leading-relaxed">
-        SharePoint 上のテンプレート Excel を自動で読み込みます。<br>
-        状態：
-        <span id="excelStatus" class="font-bold text-green-700">読込待ち...</span>
-        <button type="button"
-                onclick="loadExcelFromServer()"
-                class="ml-2 px-2 py-0.5 text-[10px] border rounded bg-white hover:bg-green-100">
-            再読込
-        </button>
-    </div>
-</div>
+
 
 
         <div class="mb-6">
@@ -430,11 +449,13 @@
                 <button onclick="clearChecks('genreArea')"
                         class="text-[10px] text-red-500 hover:underline">全解除</button>
             </div>
-            <div id="genreArea" class="genre-wrap-area border rounded flex-1 mb-3">
-                <div class="w-full text-center text-xs text-gray-400 py-10">
-                    Excelを読み込んでください
-                </div>
-            </div>
+<div id="genreArea" class="genre-wrap-area border rounded flex-1 mb-3">
+    <div class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
+        <i class="fas fa-spinner fa-spin text-xl text-blue-500"></i>
+        <div>SharePoint から原本 Excel を読み込んでいます...</div>
+    </div>
+</div>
+
 
 
         </div>
@@ -641,115 +662,57 @@ window.onload = () => {
 };
 
 
-// ---- Excel をサーバ経由で自動取得する（列位置自動判定版） ----
 async function loadExcelFromServer() {
   const statusEl = document.getElementById("excelStatus");
+  const gArea = document.getElementById("genreArea");
+
+  // 左側のメッセージが残っていれば更新（削除されていたら無視）
   if (statusEl) statusEl.innerText = "SharePoint から読み込み中...";
+
+  // ★ 安全・注意ジャンルの中央に「読み込み中」表示
+  if (gArea) {
+    gArea.innerHTML = `
+      <div class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
+        <i class="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
+        <div>SharePoint から原本 Excel を読み込んでいます...</div>
+      </div>`;
+  }
 
   try {
     const res = await fetch("/api/manual-test");
-    if (!res.ok) {
-      const txt = await res.text();
-      console.error("[loadExcelFromServer] manual-test error:", txt);
-      if (statusEl) statusEl.innerText = "読み込みエラー";
-      alert("Excel の取得に失敗しました。\n" + txt);
-      return;
+    const data = await res.json();
+
+    console.log("[loadExcelFromServer] response:", data);
+
+    // 左欄が残っていれば
+    if (statusEl) {
+      statusEl.innerText = `読込完了: ${data.rows.length}件`;
+      statusEl.classList.add("text-green-600");
     }
 
-    const json = await res.json();
-    console.log("[loadExcelFromServer] response:", json);
+    // 全行データを保持
+    RAW_DATA = data.rows || [];
 
-    const data = json.rows || json.previewFirst10Rows;
-    if (!Array.isArray(data) || data.length === 0) {
-      if (statusEl) statusEl.innerText = "データなし";
-      alert("Excel データが空です。");
-      return;
-    }
+    // チェックボックス描画
+    renderCheckboxes(RAW_DATA);
 
-    // 1 行を配列に揃えるヘルパ
-    const toCellsArray = (row) => {
-      if (!row) return [];
-      if (Array.isArray(row)) return row;              // [A,B,C,...]
-      if (Array.isArray(row.values)) return row.values; // Graph { values:[...] }
-      if (typeof row === "object") return Object.values(row); // {A:"",B:"",C:""}
-      return [];
-    };
-
-    // --- B列 or C列、どちらが「危険/警告/注意/使用上の」を多く含むかで
-    //     カテゴリ列を自動判定する ---
-    let safetyInCol1 = 0; // index 1
-    let safetyInCol2 = 0; // index 2
-    const sampleCount = Math.min(30, data.length);
-
-    for (let i = 0; i < sampleCount; i++) {
-      const cells = toCellsArray(data[i]);
-      const b = (cells[1] || "").toString();
-      const c = (cells[2] || "").toString();
-      if (SAFETY_KEYS.some(k => b.includes(k))) safetyInCol1++;
-      if (SAFETY_KEYS.some(k => c.includes(k))) safetyInCol2++;
-    }
-
-    // デフォルトは A,B,C（0,1,2）だが、
-    // 「B列よりC列のほうが安全キーワードが多い」なら
-    // 「空,B,C,D」パターンとみなし、1,2,3 列を使う
-    let idxLabel = 0;
-    let idxCategory = 1;
-    let idxContent = 2;
-
-    if (safetyInCol2 > safetyInCol1) {
-      console.log("[loadExcelFromServer] detected leading empty column. use 1,2,3.");
-      idxLabel = 1;    // ラベル
-      idxCategory = 2; // 項目名（危険/警告/注意…）
-      idxContent = 3;  // 内容
-    } else {
-      console.log("[loadExcelFromServer] use default 0,1,2 columns.");
-    }
-
-    let lastLabel = "";
-    RAW_DATA = data
-      .map((row, idx) => {
-        const cells = toCellsArray(row);
-
-        const labelCell    = cells[idxLabel];
-        const categoryCell = cells[idxCategory];
-        const contentCell  = cells[idxContent];
-
-        let label      = (labelCell    || "").toString().trim();
-        const category = (categoryCell || "").toString().trim();
-        const content  = (contentCell  || "").toString().trim();
-
-        if (!content) return null;
-
-        if (!label) label = lastLabel;
-        else lastLabel = label;
-
-        // 完全なヘッダ行っぽいものは除外
-        if (
-          (category === "項目名" || category === "カテゴリ") &&
-          /内容|テキスト|文章|記載内容/.test(content)
-        ) {
-          return null;
-        }
-
-        return { id: idx, label, category, content };
-      })
-      .filter(r =>
-        r &&
-        r.label &&
-        r.content &&
-        r.label !== "項目名"
-      );
-
-    console.log("[loadExcelFromServer] RAW_DATA length:", RAW_DATA.length);
-    renderCheckboxes();
-    if (statusEl) statusEl.innerText = `完了: ${RAW_DATA.length}件`;
   } catch (err) {
     console.error("[loadExcelFromServer] error:", err);
+
     if (statusEl) statusEl.innerText = "読込エラー";
+
+    // ★ 読込失敗時の表示
+    if (gArea) {
+      gArea.innerHTML = `
+        <div class="w-full text-center text-red-500 text-sm py-10">
+          原本 Excel の読み込みに失敗しました。<br>
+          ページを再読み込みして再度お試しください。
+        </div>`;
+    }
+
     alert("Excel 読み込みエラー: " + err.message);
   }
 }
-
 
 
 
