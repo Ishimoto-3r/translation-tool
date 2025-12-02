@@ -1511,6 +1511,12 @@ window.regenPartNames = async function(idx, silent){
   const img = PARTS_IMAGES[idx];
   if (!img) return;
 
+  // ★ ここで「この画像にバッジがあるか」を確認する
+  if (!img.badges || !img.badges.length) {
+    alert(`画像${idx + 1} にナンバリングがありません。\n先に右クリックで番号を付けてください。`);
+    return;
+  }
+
   // ★ここから先は元のまま（coordsText / callAI など）
   const coordLines = coordsText(img);
   const hint = img.nameHint ? `（名称表現の要望：${img.nameHint}）\n` : "";
@@ -1533,9 +1539,12 @@ window.regenPartNames = async function(idx, silent){
     console.error(e);
     if (!silent) alert("名称案生成中にエラーが起きました: " + e.message);
   } finally {
-    if (!silent) document.getElementById("loadingOverlay").style.display = "none";
+    if (!silent) {
+      document.getElementById("loadingOverlay").style.display = "none";
+    }
   }
 };
+
 
 
 // 既存ドラフトと意味が近い文をできるだけ除外
