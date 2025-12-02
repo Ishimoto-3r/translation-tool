@@ -452,7 +452,7 @@ body {
 <div id="genreArea" class="genre-wrap-area border rounded flex-1 mb-3">
     <div class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
         <i class="fas fa-spinner fa-spin text-xl text-blue-500"></i>
-        <div>SharePoint から原本 Excel を読み込んでいます...</div>
+        <div>SharePoint からManual-databaseを読み込んでいます...</div>
     </div>
 </div>
 
@@ -667,14 +667,14 @@ async function loadExcelFromServer() {
   const gArea = document.getElementById("genreArea");
 
   // 左側のメッセージが残っていれば更新（削除されていたら無視）
-  if (statusEl) statusEl.innerText = "SharePoint から読み込み中...";
+  if (statusEl) statusEl.innerText = "SharePoint からManual-datebaseを読み込み中...";
 
   // ★ 安全・注意ジャンルの中央に「読み込み中」表示
   if (gArea) {
     gArea.innerHTML = `
       <div class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
         <i class="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
-        <div>SharePoint から原本 Excel を読み込んでいます...</div>
+        <div>SharePoint からManual-databaseを読み込んでいます...</div>
       </div>`;
   }
 
@@ -1138,52 +1138,55 @@ img.names = newLines.join("\n");
 function normalizeNameText(text){
     if (!text) return "";
 
-    // ① 行ごとに分割
+    // 行単位に分割
     const rawLines = text.split(/\r?\n/);
 
-    // ② 「画像の部品名称～」のような前置き文を 1 行だけスキップ
     const lines = [];
-    let skippedDesc = false;
+
     for (const raw of rawLines) {
-        const t = raw.trim();
-        if (
-            !skippedDesc &&
-            t &&
-            /画像の部品名称|部品名称\(上面から見えるもの\)を特定/.test(t)
-        ) {
-            skippedDesc = true;
-            continue;   // この行は名称案から除外
+        let t = raw.trim();
+        if (!t) continue;
+
+        // 「1」「1.」「１．」 など数字で始まらない行は
+        // 説明文とみなして全部捨てる
+        if (!/^\d+/.test(t)) {
+            continue;
         }
-        lines.push(raw);
+
+        // 正規化（全角→半角など）
+        let l = raw.normalize("NFKC");
+
+        // 行頭の空白を削除
+        l = l.replace(/^[\s\u3000\u00A0\uFEFF]+/, "");
+
+        // 先頭の番号表記を「1. 」形式にそろえる
+        // 例）「１）」「1）」「No.1  」→「1. 」
+        l = l.replace(
+            /^[^\d]*?(\d+)[\s\u3000\.。、．)）]*\s*/,
+            "$1. "
+        );
+
+        // Markdown の ** を削除
+        l = l.replace(/\*\*/g, "");
+
+        // （）内の説明文を削除
+        l = l.replace(/[（\(][^）\)]*[）\)]/g, "");
+
+        // 「- 説明文」以降を削除（名前の後ろの長い説明を捨てる）
+        // 例）「1. サイドボタン - 左側面にある…」→「1. サイドボタン」
+        l = l.replace(/\s*[-－–—]\s*.+$/, "");
+
+        // 余計な空白を圧縮
+        l = l.replace(/[\s\u3000]{2,}/g, " ");
+
+        l = l.trim();
+        if (!l) continue;
+
+        lines.push(l);
     }
 
-    // ③ 各行を整形
-    return lines
-        .map(line => {
-            if (!line.trim()) return "";
-
-            // 全角→半角などの正規化
-            let l = line.normalize("NFKC");
-
-            // 行頭の空白類をすべて削除
-            l = l.replace(/^[\s\u3000\u00A0\uFEFF]+/, "");
-
-            // 「※1）」「● １. 」などを「1. 」形式にそろえる
-            l = l.replace(
-                /^[^\d]*?(\d+)[\s\u3000\.。、．)）]*\s*/,
-                "$1. "
-            );
-
-            // （）内の説明文を削除（全角・半角どちらも）
-            l = l.replace(/[（\(][^）\)]*[）\)]/g, "");
-
-            // 2 個以上の空白を 1 個に
-            l = l.replace(/[\s\u3000]{2,}/g, " ");
-
-            return l.trim();
-        })
-        .filter(l => l !== "")
-        .join("\n");
+    // 「1. 名称」だけの行を返す
+    return lines.join("\n");
 }
 
 
