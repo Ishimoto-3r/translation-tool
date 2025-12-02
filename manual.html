@@ -666,8 +666,45 @@ async function loadExcelFromServer() {
       return;
     }
 
-    // --- 1行目をヘッダとして列位置を自動判定 ---
-    const header = (data[0] || []).map(v => (v || "").toString().trim());
+    // ---- Excel をサーバ経由で自動取得する（ヘッダ名から列を判定） ----
+async function loadExcelFromServer() {
+  const statusEl = document.getElementById("excelStatus");
+  if (statusEl) statusEl.innerText = "SharePoint から読み込み中...";
+
+  try {
+    const res = await fetch("/api/manual-test");
+    if (!res.ok) {
+      const txt = await res.text();
+      console.error("[loadExcelFromServer] manual-test error:", txt);
+      if (statusEl) statusEl.innerText = "読み込みエラー";
+      alert("Excel の取得に失敗しました。\n" + txt);
+      return;
+    }
+
+    const json = await res.json();
+    console.log("[loadExcelFromServer] response:", json);
+
+    const data = json.rows || json.previewFirst10Rows;
+    if (!Array.isArray(data) || data.length === 0) {
+      if (statusEl) statusEl.innerText = "データなし";
+      alert("Excel データが空です。");
+      return;
+    }
+
+    // --- 1行目を「配列」に正規化 ---
+    const toCellsArray = (row) => {
+      if (!row) return [];
+      // 既に配列
+      if (Array.isArray(row)) return row;
+      // Graph系: { values:[...]} 形式
+      if (Array.isArray(row.values)) return row.values;
+      // 列名キーのオブジェクト {A:"ラベル", B:"項目名", ...}
+      if (typeof row === "object") return Object.values(row);
+      return [];
+    };
+
+    const headerRow = toCellsArray(data[0]);
+    const header = headerRow.map(v => (v || "").toString().trim());
     console.log("[loadExcelFromServer] header:", header);
 
     const idxLabel = header.findIndex(h =>
@@ -686,11 +723,11 @@ async function loadExcelFromServer() {
 
     let lastLabel = "";
     RAW_DATA = data.slice(1).map((row, idx) => {
-      if (!row) return null;
+      const cells = toCellsArray(row);   // ← ここでも配列に直す
 
-      const labelCell    = idxLabel    >= 0 ? row[idxLabel]    : "";
-      const categoryCell = idxCategory >= 0 ? row[idxCategory] : "";
-      const contentCell  = idxContent  >= 0 ? row[idxContent]  : "";
+      const labelCell    = idxLabel    >= 0 ? cells[idxLabel]    : "";
+      const categoryCell = idxCategory >= 0 ? cells[idxCategory] : "";
+      const contentCell  = idxContent  >= 0 ? cells[idxContent]  : "";
 
       let label   = (labelCell || "").toString().trim();
       const category = (categoryCell || "").toString().trim();
@@ -718,6 +755,7 @@ async function loadExcelFromServer() {
     alert("Excel 読み込みエラー: " + err.message);
   }
 }
+
 
 
 
