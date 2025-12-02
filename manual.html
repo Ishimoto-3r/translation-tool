@@ -316,10 +316,7 @@
             <i class="fas fa-check-circle text-green-600"></i> マニュアル作成 Tool
         </h1>
         <div class="flex gap-2 items-center">
-            <input type="password" id="apiKey" placeholder="OpenAI API Key"
-                   class="border rounded px-2 py-1 text-sm w-48" />
-            <button onclick="saveKey()"
-                    class="bg-gray-700 text-white px-2 py-1 rounded text-xs">設定</button>
+
         </div>
     </div>
 </div>
@@ -327,15 +324,20 @@
 <div class="flex-1 container mx-auto max-w-full px-4 py-3 grid-layout">
     <!-- 左カラム -->
     <div class="col-panel bg-white rounded-lg shadow-sm">
-        <div class="mb-6">
-            <h3 class="section-label border-green-500 text-green-700">1. 原本Excel読込</h3>
-            <div class="drop-zone" id="excelDrop">
-                <i class="fas fa-file-excel text-3xl text-green-500 mb-2"></i>
-                <p class="text-sm font-bold text-gray-600">Excelをドロップ</p>
-                <input type="file" id="excelInput" accept=".xlsx,.xls" class="file-overlay" />
-            </div>
-            <div id="excelStatus" class="text-[10px] mt-1 text-center text-green-600 font-bold h-4"></div>
-        </div>
+<div class="mb-6">
+    <h3 class="section-label border-green-500 text-green-700">1. 原本Excel読込</h3>
+    <div class="border border-dashed border-green-300 rounded bg-green-50 px-3 py-2 text-[11px] leading-relaxed">
+        SharePoint 上のテンプレート Excel を自動で読み込みます。<br>
+        状態：
+        <span id="excelStatus" class="font-bold text-green-700">読込待ち...</span>
+        <button type="button"
+                onclick="loadExcelFromServer()"
+                class="ml-2 px-2 py-0.5 text-[10px] border rounded bg-white hover:bg-green-100">
+            再読込
+        </button>
+    </div>
+</div>
+
 
         <div class="mb-6">
     <h3 class="section-label border-blue-500 text-blue-700">2. 製品情報</h3>
@@ -626,10 +628,84 @@ window.onload = () => {
     renderImageEditors();
 
 
-  // ★ ここを新規追加：ページ表示時に自動で Excel を読み込む
-  loadExcelFromServer();
+// ---- Excel をサーバ経由で自動取得する（ヘッダ名から列を判定） ----
+async function loadExcelFromServer() {
+  const statusEl = document.getElementById("excelStatus");
+  if (statusEl) statusEl.innerText = "SharePoint から読み込み中...";
 
-};
+  try {
+    const res = await fetch("/api/manual-test");
+    if (!res.ok) {
+      const txt = await res.text();
+      console.error("[loadExcelFromServer] manual-test error:", txt);
+      if (statusEl) statusEl.innerText = "読み込みエラー";
+      alert("Excel の取得に失敗しました。\n" + txt);
+      return;
+    }
+
+    const json = await res.json();
+    console.log("[loadExcelFromServer] response:", json);
+
+    const data = json.rows || json.previewFirst10Rows;
+    if (!Array.isArray(data) || data.length === 0) {
+      if (statusEl) statusEl.innerText = "データなし";
+      alert("Excel データが空です。");
+      return;
+    }
+
+    // --- 1行目をヘッダとして列位置を自動判定 ---
+    const header = (data[0] || []).map(v => (v || "").toString().trim());
+    console.log("[loadExcelFromServer] header:", header);
+
+    const idxLabel = header.findIndex(h =>
+      /ラベル|分類|グループ/i.test(h)
+    );
+    const idxCategory = header.findIndex(h =>
+      /項目名|項目|カテゴリ/i.test(h)
+    );
+    const idxContent = header.findIndex(h =>
+      /内容|テキスト|文章|記載内容/i.test(h)
+    );
+
+    if (idxContent === -1) {
+      throw new Error("Excel のヘッダ行から『内容』列を特定できませんでした。");
+    }
+
+    let lastLabel = "";
+    RAW_DATA = data.slice(1).map((row, idx) => {
+      if (!row) return null;
+
+      const labelCell    = idxLabel    >= 0 ? row[idxLabel]    : "";
+      const categoryCell = idxCategory >= 0 ? row[idxCategory] : "";
+      const contentCell  = idxContent  >= 0 ? row[idxContent]  : "";
+
+      let label   = (labelCell || "").toString().trim();
+      const category = (categoryCell || "").toString().trim();
+      const content  = (contentCell  || "").toString().trim();
+
+      if (!content) return null;
+
+      if (!label) label = lastLabel;
+      else lastLabel = label;
+
+      return { id: idx, label, category, content };
+    }).filter(r =>
+      r &&
+      r.label &&
+      r.content &&
+      r.label !== "項目名"
+    );
+
+    console.log("[loadExcelFromServer] RAW_DATA length:", RAW_DATA.length);
+    renderCheckboxes();
+    if (statusEl) statusEl.innerText = `完了: ${RAW_DATA.length}件`;
+  } catch (err) {
+    console.error("[loadExcelFromServer] error:", err);
+    if (statusEl) statusEl.innerText = "読込エラー";
+    alert("Excel 読み込みエラー: " + err.message);
+  }
+}
+
 
 
 
