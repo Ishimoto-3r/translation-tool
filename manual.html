@@ -641,7 +641,7 @@ window.onload = () => {
 };
 
 
-// ---- Excel をサーバ経由で自動取得する（列位置固定版） ----
+// ---- Excel をサーバ経由で自動取得する（列位置自動判定版） ----
 async function loadExcelFromServer() {
   const statusEl = document.getElementById("excelStatus");
   if (statusEl) statusEl.innerText = "SharePoint から読み込み中...";
@@ -669,29 +669,57 @@ async function loadExcelFromServer() {
     // 1 行を配列に揃えるヘルパ
     const toCellsArray = (row) => {
       if (!row) return [];
-      if (Array.isArray(row)) return row;          // [A,B,C,...]
+      if (Array.isArray(row)) return row;              // [A,B,C,...]
       if (Array.isArray(row.values)) return row.values; // Graph { values:[...] }
       if (typeof row === "object") return Object.values(row); // {A:"",B:"",C:""}
       return [];
     };
+
+    // --- B列 or C列、どちらが「危険/警告/注意/使用上の」を多く含むかで
+    //     カテゴリ列を自動判定する ---
+    let safetyInCol1 = 0; // index 1
+    let safetyInCol2 = 0; // index 2
+    const sampleCount = Math.min(30, data.length);
+
+    for (let i = 0; i < sampleCount; i++) {
+      const cells = toCellsArray(data[i]);
+      const b = (cells[1] || "").toString();
+      const c = (cells[2] || "").toString();
+      if (SAFETY_KEYS.some(k => b.includes(k))) safetyInCol1++;
+      if (SAFETY_KEYS.some(k => c.includes(k))) safetyInCol2++;
+    }
+
+    // デフォルトは A,B,C（0,1,2）だが、
+    // 「B列よりC列のほうが安全キーワードが多い」なら
+    // 「空,B,C,D」パターンとみなし、1,2,3 列を使う
+    let idxLabel = 0;
+    let idxCategory = 1;
+    let idxContent = 2;
+
+    if (safetyInCol2 > safetyInCol1) {
+      console.log("[loadExcelFromServer] detected leading empty column. use 1,2,3.");
+      idxLabel = 1;    // ラベル
+      idxCategory = 2; // 項目名（危険/警告/注意…）
+      idxContent = 3;  // 内容
+    } else {
+      console.log("[loadExcelFromServer] use default 0,1,2 columns.");
+    }
 
     let lastLabel = "";
     RAW_DATA = data
       .map((row, idx) => {
         const cells = toCellsArray(row);
 
-        const labelCell    = cells[0]; // A列: ラベル
-        const categoryCell = cells[1]; // B列: 項目名
-        const contentCell  = cells[2]; // C列: 内容
+        const labelCell    = cells[idxLabel];
+        const categoryCell = cells[idxCategory];
+        const contentCell  = cells[idxContent];
 
-        let label   = (labelCell    || "").toString().trim();
+        let label      = (labelCell    || "").toString().trim();
         const category = (categoryCell || "").toString().trim();
         const content  = (contentCell  || "").toString().trim();
 
-        // 内容が空ならスキップ
         if (!content) return null;
 
-        // ラベルの引き継ぎ
         if (!label) label = lastLabel;
         else lastLabel = label;
 
