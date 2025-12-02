@@ -1,21 +1,13 @@
-// api/manual-test.js
+import * as XLSX from "xlsx";
 
 export default async function handler(req, res) {
   try {
-    // --- 1. 環境変数の取得 ---
     const tenantId = process.env.MANUAL_TENANT_ID;
     const clientId = process.env.MANUAL_CLIENT_ID;
     const clientSecret = process.env.MANUAL_CLIENT_SECRET;
     const fileUrl = process.env.MANUAL_SHAREPOINT_FILE_URL;
 
-    if (!tenantId || !clientId || !clientSecret || !fileUrl) {
-      return res.status(500).json({
-        error: "EnvError",
-        detail: "MANUAL_* 系の環境変数が不足しています。",
-      });
-    }
-
-    // --- 2. アクセストークン取得 (client_credentials) ---
+    // --- Token取得 ---
     const tokenResponse = await fetch(
       `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
       {
@@ -31,60 +23,48 @@ export default async function handler(req, res) {
     );
 
     const tokenData = await tokenResponse.json();
-
-    if (!tokenResponse.ok || !tokenData.access_token) {
-      return res.status(500).json({
-        error: "TokenError",
-        status: tokenResponse.status,
-        detail: tokenData,
-      });
-    }
-
     const accessToken = tokenData.access_token;
 
-    // --- 3. 共有リンク(URL) → base64url 変換 ---
-    //   Graph の /shares/{id} 形式にするためのお約束
+    if (!accessToken) {
+      return res.status(500).json({ error: "TokenError", detail: tokenData });
+    }
+
+    // --- 共有リンク → base64url ---
     const base64 = Buffer.from(fileUrl).toString("base64");
-    const base64url = base64
-      .replace(/\+/g, "-")
-      .replace(/\//g, "_")
-      .replace(/=+$/, "");
+    const base64url = base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     const shareId = `u!${base64url}`;
 
-    // --- 4. Graph API でファイル本体を取得 ---
+    // --- ファイル取得 ---
     const graphResponse = await fetch(
       `https://graph.microsoft.com/v1.0/shares/${shareId}/driveItem/content`,
       {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        headers: { Authorization: `Bearer ${accessToken}` },
       }
     );
 
     if (!graphResponse.ok) {
       const text = await graphResponse.text();
-      return res.status(graphResponse.status).json({
-        error: "GraphError",
-        status: graphResponse.status,
-        detail: text,
-      });
+      return res.status(500).json({ error: "GraphError", detail: text });
     }
 
-    // 実ファイルはバイナリなので、ここでは長さなどのメタ情報だけ返す
-    const arrayBuffer = await graphResponse.arrayBuffer();
-    const byteLength = arrayBuffer.byteLength;
-    const contentType = graphResponse.headers.get("content-type");
+    const buffer = Buffer.from(await graphResponse.arrayBuffer());
+
+    // --- ここから Excel 解析 ---
+    const workbook = XLSX.read(buffer, { type: "buffer" });
+
+    const sheetNames = workbook.SheetNames;
+    const firstSheet = workbook.Sheets[sheetNames[0]];
+
+    const json = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
 
     return res.status(200).json({
-      message: "Success: File retrieved from SharePoint.",
-      byteLength,
-      contentType,
+      message: "Excel parsed successfully",
+      sheets: sheetNames,
+      firstSheetName: sheetNames[0],
+      previewFirst10Rows: json.slice(0, 10),
     });
+
   } catch (err) {
-    return res.status(500).json({
-      error: "UnexpectedError",
-      detail: err.toString(),
-    });
+    return res.status(500).json({ error: "UnexpectedError", detail: err.toString() });
   }
 }
