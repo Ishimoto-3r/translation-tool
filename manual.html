@@ -641,7 +641,7 @@ window.onload = () => {
 };
 
 
-// ---- Excel をサーバ経由で自動取得する（行形式に依存しない版） ----
+// ---- Excel をサーバ経由で自動取得する（列位置固定版） ----
 async function loadExcelFromServer() {
   const statusEl = document.getElementById("excelStatus");
   if (statusEl) statusEl.innerText = "SharePoint から読み込み中...";
@@ -659,9 +659,6 @@ async function loadExcelFromServer() {
     const json = await res.json();
     console.log("[loadExcelFromServer] response:", json);
 
-    // manual-test の返却形式：
-    // - rows:          実データ（フル）
-    // - previewFirst10Rows: プレビュー用
     const data = json.rows || json.previewFirst10Rows;
     if (!Array.isArray(data) || data.length === 0) {
       if (statusEl) statusEl.innerText = "データなし";
@@ -669,61 +666,51 @@ async function loadExcelFromServer() {
       return;
     }
 
-    // 1行を「セルの配列」に正規化するヘルパ
+    // 1 行を配列に揃えるヘルパ
     const toCellsArray = (row) => {
       if (!row) return [];
-      // 既に配列
-      if (Array.isArray(row)) return row;
-      // Graph 形式 { values:[...] }
-      if (Array.isArray(row.values)) return row.values;
-      // {A:"ラベル",B:"項目名",...} 形式
-      if (typeof row === "object") return Object.values(row);
+      if (Array.isArray(row)) return row;          // [A,B,C,...]
+      if (Array.isArray(row.values)) return row.values; // Graph { values:[...] }
+      if (typeof row === "object") return Object.values(row); // {A:"",B:"",C:""}
       return [];
     };
 
-    // --- 1行目をヘッダとして列位置を自動判定 ---
-    const headerRow = toCellsArray(data[0]);
-    const header = headerRow.map(v => (v || "").toString().trim());
-    console.log("[loadExcelFromServer] header:", header);
-
-    const idxLabel = header.findIndex(h =>
-      /ラベル|分類|グループ/i.test(h)
-    );
-    const idxCategory = header.findIndex(h =>
-      /項目名|項目|カテゴリ/i.test(h)
-    );
-    const idxContent = header.findIndex(h =>
-      /内容|テキスト|文章|記載内容/i.test(h)
-    );
-
-    if (idxContent === -1) {
-      throw new Error("Excel のヘッダ行から『内容』列を特定できませんでした。");
-    }
-
     let lastLabel = "";
-    RAW_DATA = data.slice(1).map((row, idx) => {
-      const cells = toCellsArray(row);  // ここでも配列に揃える
+    RAW_DATA = data
+      .map((row, idx) => {
+        const cells = toCellsArray(row);
 
-      const labelCell    = idxLabel    >= 0 ? cells[idxLabel]    : "";
-      const categoryCell = idxCategory >= 0 ? cells[idxCategory] : "";
-      const contentCell  = idxContent  >= 0 ? cells[idxContent]  : "";
+        const labelCell    = cells[0]; // A列: ラベル
+        const categoryCell = cells[1]; // B列: 項目名
+        const contentCell  = cells[2]; // C列: 内容
 
-      let label   = (labelCell || "").toString().trim();
-      const category = (categoryCell || "").toString().trim();
-      const content  = (contentCell  || "").toString().trim();
+        let label   = (labelCell    || "").toString().trim();
+        const category = (categoryCell || "").toString().trim();
+        const content  = (contentCell  || "").toString().trim();
 
-      if (!content) return null;
+        // 内容が空ならスキップ
+        if (!content) return null;
 
-      if (!label) label = lastLabel;
-      else lastLabel = label;
+        // ラベルの引き継ぎ
+        if (!label) label = lastLabel;
+        else lastLabel = label;
 
-      return { id: idx, label, category, content };
-    }).filter(r =>
-      r &&
-      r.label &&
-      r.content &&
-      r.label !== "項目名"
-    );
+        // 完全なヘッダ行っぽいものは除外
+        if (
+          (category === "項目名" || category === "カテゴリ") &&
+          /内容|テキスト|文章|記載内容/.test(content)
+        ) {
+          return null;
+        }
+
+        return { id: idx, label, category, content };
+      })
+      .filter(r =>
+        r &&
+        r.label &&
+        r.content &&
+        r.label !== "項目名"
+      );
 
     console.log("[loadExcelFromServer] RAW_DATA length:", RAW_DATA.length);
     renderCheckboxes();
@@ -734,6 +721,7 @@ async function loadExcelFromServer() {
     alert("Excel 読み込みエラー: " + err.message);
   }
 }
+
 
 
 
