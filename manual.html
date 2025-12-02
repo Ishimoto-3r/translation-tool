@@ -903,63 +903,7 @@ function loadExcel(files){
 }
 
 
-// ---- Excel をサーバ経由で自動取得する ----
-async function loadExcelFromServer() {
-  const statusEl = document.getElementById("excelStatus");
-  if (statusEl) statusEl.innerText = "SharePoint から読み込み中...";
 
-  try {
-    const res = await fetch("/api/manual-test");
-    if (!res.ok) {
-      const txt = await res.text();
-      console.error("[loadExcelFromServer] manual-test error:", txt);
-      if (statusEl) statusEl.innerText = "読み込みエラー";
-      alert("Excel の取得に失敗しました。\n" + txt);
-      return;
-    }
-
-    const json = await res.json();
-    console.log("[loadExcelFromServer] response:", json);
-
-    // ★ サーバ側の戻り値に合わせてここを調整してください
-    // rows: [[ラベル, 項目名, 内容], ...] の 2次元配列を想定。
-    // もし rows がなく previewFirst10Rows だけなら、そこを使います。
-    const data = json.rows || json.previewFirst10Rows;
-    if (!Array.isArray(data) || data.length === 0) {
-      if (statusEl) statusEl.innerText = "データなし";
-      alert("Excel データが空です。");
-      return;
-    }
-
-    let lastLabel = "";
-    RAW_DATA = data.slice(1).map((row, idx) => {
-      if (!row || (row[1] == null && row[2] == null)) return null;
-
-      // 0列: ラベル、1列: 項目名（カテゴリ）、2列: 内容 を想定
-      let label = (row[0] || "").toString().trim();
-      if (label === "") label = lastLabel;
-      else lastLabel = label;
-
-      const category = (row[1] || "").toString().trim();
-      const content  = (row[2] || "").toString().trim();
-
-      return { id: idx, label, category, content };
-    }).filter(r =>
-      r !== null &&
-      r.label &&
-      r.content &&
-      r.label !== "項目名"
-    );
-
-    console.log("[loadExcelFromServer] RAW_DATA length:", RAW_DATA.length);
-    renderCheckboxes();
-    if (statusEl) statusEl.innerText = `完了: ${RAW_DATA.length}件`;
-  } catch (err) {
-    console.error("[loadExcelFromServer] error:", err);
-    if (statusEl) statusEl.innerText = "読込エラー";
-    alert("Excel 読み込みエラー: " + err.message);
-  }
-}
 
 
 
