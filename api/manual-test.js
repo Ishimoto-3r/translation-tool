@@ -1,21 +1,22 @@
 // api/manual-test.js
-import * as XLSX from "xlsx";
+import xlsx from "xlsx";
 
 export default async function handler(req, res) {
   try {
-    // STEP1: アクセストークン取得 ---------------------------------
+    // 1) Azure AD でアクセストークン取得
     const tenantId = process.env.MANUAL_TENANT_ID;
     const clientId = process.env.MANUAL_CLIENT_ID;
     const clientSecret = process.env.MANUAL_CLIENT_SECRET;
+    const fileUrl = process.env.MANUAL_SHAREPOINT_FILE_URL;
 
-    if (!tenantId || !clientId || !clientSecret) {
+    if (!tenantId || !clientId || !clientSecret || !fileUrl) {
       return res.status(500).json({
-        error: "EnvError",
-        detail: "MANUAL_TENANT_ID / MANUAL_CLIENT_ID / MANUAL_CLIENT_SECRET が設定されていません。",
+        error: "ConfigError",
+        detail: "MANUAL_* 系の環境変数が不足しています。",
       });
     }
 
-    const tokenResponse = await fetch(
+    const tokenRes = await fetch(
       `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
       {
         method: "POST",
@@ -29,9 +30,8 @@ export default async function handler(req, res) {
       }
     );
 
-    const tokenData = await tokenResponse.json();
-
-    if (!tokenResponse.ok || !tokenData.access_token) {
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) {
       return res.status(500).json({
         error: "TokenError",
         detail: tokenData,
@@ -40,75 +40,51 @@ export default async function handler(req, res) {
 
     const accessToken = tokenData.access_token;
 
-    // STEP2: SharePoint からファイル本体を取得 ------------------------
-    const fileUrl = process.env.MANUAL_SHAREPOINT_FILE_URL;
-    if (!fileUrl) {
-      return res.status(500).json({
-        error: "EnvError",
-        detail: "MANUAL_SHAREPOINT_FILE_URL が設定されていません。",
-      });
-    }
+    // 2) SharePoint の Excel を取得
+    const shareId = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");
+    const graphRes = await fetch(
+      `https://graph.microsoft.com/v1.0/shares/u!${shareId}/driveItem/content`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
 
-    // Graph の "shares/u!<base64url>" 形式に変換
-    const base64 = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");
-    const graphUrl = `https://graph.microsoft.com/v1.0/shares/u!${base64}/driveItem/content`;
-
-    const graphResponse = await fetch(graphUrl, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-    if (!graphResponse.ok) {
-      const errorDetail = await graphResponse.text();
-      return res.status(graphResponse.status).json({
+    if (!graphRes.ok) {
+      const txt = await graphRes.text();
+      return res.status(graphRes.status).json({
         error: "GraphError",
-        status: graphResponse.status,
-        detail: errorDetail,
+        status: graphRes.status,
+        detail: txt,
       });
     }
 
-    const arrayBuffer = await graphResponse.arrayBuffer();
-    const excelBuffer = Buffer.from(arrayBuffer);
-    const contentType =
-      graphResponse.headers.get("content-type") ||
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const arrayBuffer = await graphRes.arrayBuffer();
+    const buf = Buffer.from(arrayBuffer);
 
-    // STEP3: xlsx で Excel を読み込む -------------------------------
-    const workbook = XLSX.read(excelBuffer, { type: "buffer" });
-    const sheets = workbook.SheetNames;
+    // 3) xlsx でパース（1枚目のシート）
+    const wb = xlsx.read(buf, { type: "buffer" });
+    const firstSheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[firstSheetName];
+    const json = xlsx.utils.sheet_to_json(sheet); // 見出し行をヘッダに
 
-    if (sheets.length === 0) {
-      return res.status(400).json({
-        error: "NoSheets",
-        detail: "ブック内にシートがありません。",
-      });
-    }
+    // 期待する列名: 「ラベル」「項目名」「内容」
+    const rows = json
+      .map((row, idx) => ({
+        id: idx,
+        label: row["ラベル"] ?? "",
+        category: row["項目名"] ?? "",
+        content: row["内容"] ?? "",
+      }))
+      .filter(r => (r.label || r.category || r.content));
 
-    const firstSheetName = sheets[0]; // とりあえず先頭シートを採用（例：「原本」）
-    const firstSheet = workbook.Sheets[firstSheetName];
-
-    // ★ここが「プレビュー10行」-------------------------------
-    const previewFirst10Rows = XLSX.utils
-      .sheet_to_json(firstSheet, { defval: "" })
-      .slice(0, 10);
-
-    // ★ここが今回追加した「全行」-------------------------------
-    const rows = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
-    const rowCount = rows.length;
-
-    // STEP4: レスポンス ------------------------------------------
     return res.status(200).json({
       message: "Excel parsed successfully",
-      byteLength: excelBuffer.byteLength,
-      contentType,
-      sheets,              // 全シート名一覧
-      firstSheetName,      // 実際に使ったシート名（例：「原本」）
-      previewFirst10Rows,  // デバッグ用プレビュー
-      rowCount,            // 行数
-      rows,                // ★マニュアル生成で本当に使う全行データ
+      sheetNames: wb.SheetNames,
+      firstSheetName,
+      rows,
     });
   } catch (err) {
+    console.error(err);
     return res.status(500).json({
       error: "UnexpectedError",
       detail: err.toString(),
