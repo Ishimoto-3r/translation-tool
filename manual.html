@@ -685,7 +685,6 @@ async function loadExcelFromServer() {
   }
 
   try {
-    // SharePoint → /api/manual-test → Excel 取得
     const res = await fetch("/api/manual-test");
     if (!res.ok) {
       throw new Error("HTTP " + res.status + " " + res.statusText);
@@ -694,28 +693,19 @@ async function loadExcelFromServer() {
     const data = await res.json();
     console.log("[loadExcelFromServer] response:", data);
 
-    // rows をグローバルに保持
-    RAW_DATA = Array.isArray(data.rows) ? data.rows : [];
+    // ★ここを追加
+    RAW_DATA   = Array.isArray(data.rows)      ? data.rows      : [];
+    TEMPLATES  = Array.isArray(data.templates) ? data.templates : [];
 
-    // チェックボックス描画
+    // （デバッグ用に一度だけ中身を見るなら）
+    console.log("TEMPLATES:", TEMPLATES);
+
     renderCheckboxes();
 
   } catch (err) {
-    console.error("[loadExcelFromServer] error:", err);
-
-    if (gArea) {
-      gArea.innerHTML = `
-        <div class="w-full text-center text-red-500 text-sm py-10">
-          Manual-databaseの読み込みに失敗しました。<br>
-          ページを再読み込みしても解決しない場合は、エラー内容を Ishimoto さんに共有してください。<br>
-          <span class="text-xs text-gray-400">Error: ${err.message}</span>
-        </div>`;
-    }
-
-    alert("Manual-databaseの読み込みに失敗しました: " + err.message);
+    ...
   }
 }
-
 
 
 
