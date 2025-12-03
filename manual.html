@@ -2003,37 +2003,43 @@ ${safetyBody}
     }
 }
 
-/* ---- Draft構築 ---- */
 function buildDraft(){
-    const pName = document.getElementById("productName").value;
-    const mNum  = document.getElementById("modelNumber").value;
+    const pName   = document.getElementById("productName").value;
+    const mNum    = document.getElementById("modelNumber").value;
     const warranty = document.getElementById("warrantyPeriod").value;
-    const isSol = SELECTED_COMPANY === "3RS";
 
-    // ★ここから追加（定型文グループ）
-    const introTpl      = getTemplateTexts("Intro");        // 挨拶文
-    const commonNoteTpl = getTemplateTexts("CommonNote");   // ※万一〜 など
-    // ★ここまで追加
+    // --- 定型文（テンプレ）グループ ----
+    const introTpl        = getTemplateTexts("Intro");        // 冒頭あいさつ
+    const commonNoteTpl   = getTemplateTexts("CommonNote");   // 共通注意書き
+    const maintDefaultTpl = getTemplateTexts("DefaultMaint"); // デフォルトお手入れ
+    const support3RTpl    = getTemplateTexts("Support_3R");
+    const support3RSTpl   = getTemplateTexts("Support_3RS");
+    const supportOtherTpl = getTemplateTexts("Support_OTHER");
+    const supportCommonTpl= getTemplateTexts("SupportCommon"); // ★保証期間の直下
+    const partsRulesTpl   = getTemplateTexts("PartsRules");
+    const editionTpl      = getTemplateTexts("Edition");
 
     const checked = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
         .map(c => c.value);
     const hasLi = checked.some(s => s.includes("リチウム"));
 
-    const rows = RAW_DATA.filter(r => {
-        if(r.label.includes("共通") || r.label.includes("一般")) return true;
-        if(r.category.includes("廃棄") && !hasLi && !checked.includes(r.label)) return false;
-        return checked.includes(r.label);
-    }).sort((a,b) => {
-        const aT = a.label.includes("共通冒頭");
-        const bT = b.label.includes("共通冒頭");
-        if(aT && !bT) return -1;
-        if(!aT && bT) return 1;
-        const aB = a.label.includes("共通末尾");
-        const bB = b.label.includes("共通末尾");
-        if(aB && !bB) return 1;
-        if(!aB && bB) return -1;
-        return a.id - b.id;
-    });
+    const rows = RAW_DATA
+        .filter(r => {
+            if (r.label.includes("共通") || r.label.includes("一般")) return true;
+            if (r.category.includes("廃棄") && !hasLi && !checked.includes(r.label)) return false;
+            return checked.includes(r.label);
+        })
+        .sort((a,b) => {
+            const aT = a.label.includes("共通冒頭");
+            const bT = b.label.includes("共通冒頭");
+            if (aT && !bT) return -1;
+            if (!aT && bT) return 1;
+            const aB = a.label.includes("共通末尾");
+            const bB = b.label.includes("共通末尾");
+            if (aB && !bB) return 1;
+            if (!aB && bB) return -1;
+            return a.id - b.id;
+        });
 
     const s = {
         Intro:[], Danger:[], Warning:[], Caution:[],
@@ -2045,177 +2051,126 @@ function buildDraft(){
     rows.forEach(r => {
         let t = r.content;
         TERMINOLOGY.forEach(x => t = t.replace(x.p, x.r));
-        if(seen.has(t)) return;
+        if (seen.has(t)) return;
         seen.add(t);
 
-        const c = r.category;
-        if(c.includes("技適")) s.Giteki.push(t);
-        else if(c.includes("電波")) s.Radio.push(t);
-        else if(c.includes("危険")) s.Danger.push(t);
-        else if(c.includes("警告")) s.Warning.push(t);
-        else if(c.includes("注意") && !c.includes("使用")) s.Caution.push(t);
-        else if(c.includes("使用")) s.UsageC.push(t);
-        else if(c.includes("各部")) s.Parts.push(t);
-        else if(c.includes("使用方法")) s.Usage.push(t);
-        else if(c.includes("お手入れ")) s.Maint.push(t);
-        else if(c.includes("廃棄")) s.Disp.push(t);
-        else if(c.includes("仕様")) s.Spec.push(t);
-        else if(r.label.includes("共通冒頭")) s.Intro.push(t);
+        const c = r.category || "";
+        if (c.includes("技適")) s.Giteki.push(t);
+        else if (c.includes("電波")) s.Radio.push(t);
+        else if (c.includes("危険")) s.Danger.push(t);
+        else if (c.includes("警告")) s.Warning.push(t);
+        else if (c.includes("注意") && !c.includes("使用")) s.Caution.push(t);
+        else if (c.includes("使用")) s.UsageC.push(t);
+        else if (c.includes("各部")) s.Parts.push(t);
+        else if (c.includes("使用方法")) s.Usage.push(t);
+        else if (c.includes("お手入れ")) s.Maint.push(t);
+        else if (c.includes("廃棄")) s.Disp.push(t);
+        else if (c.includes("仕様")) s.Spec.push(t);
+        else if (r.label.includes("共通冒頭")) s.Intro.push(t);
         else s.Other.push(t);
     });
 
-      const L = [
+    const L = [
         "使用画像リンク",
         `商品名：${pName}`,
         `型番：${mNum}`,
         "製品写真",
-        // ★ Intro グループ（なければ従来文）
-        ...(introTpl.length ? introTpl : [
-            "このたびは、本製品をお買い上げいただき誠にありがとうございます。",
-            "安全にご使用いただくためにも本取扱説明書を必ずお読みになり、内容を理解してからご使用ください。",
-            "また、本取扱説明書はいつでもご覧になれる場所に大切に保管してください。",
-            "本取扱説明書の内容の一部もしくは全部を無断で複写、転載することはおやめください。"
-        ]),
-        // ★ CommonNote グループ（なければ従来文）
-        ...(commonNoteTpl.length ? commonNoteTpl : [
-            "※万一、足りないものがございましたら、弊社お問い合わせ窓口にご連絡ください。",
-            "※デザイン及び仕様については、改良のため予告なしに変更する場合がございます。",
-            "※本書に記載している製品名、サービス名等は各社の登録商標です。"
-        ]),
+        // ★ 冒頭・共通注意はテンプレのみ（フォールバックなし）
+        ...introTpl,
+        ...commonNoteTpl,
         ...s.Intro,
         ""
     ];
 
-
-
-    const support3RTpl   = getTemplateTexts("Support_3R");
-    const support3RSTpl  = getTemplateTexts("Support_3RS");
-
-    
-
+    // ■安全上のご注意
     L.push("■安全上のご注意");
-    if(s.Danger.length)  L.push("<危険>", ...s.Danger.map(t=>"・"+t));
-    if(s.Warning.length) L.push("<警告>", ...s.Warning.map(t=>"・"+t));
-    if(s.Caution.length) L.push("<注意>",  ...s.Caution.map(t=>"・"+t));
+    if (s.Danger.length)  L.push("<危険>", ...s.Danger.map(t => "・" + t));
+    if (s.Warning.length) L.push("<警告>", ...s.Warning.map(t => "・" + t));
+    if (s.Caution.length) L.push("<注意>", ...s.Caution.map(t => "・" + t));
     L.push("");
 
-    if(s.UsageC.length){
-        L.push("■使用上のご注意", ...s.UsageC.map(t=>"・"+t), "");
+    // ■使用上のご注意
+    if (s.UsageC.length){
+        L.push("■使用上のご注意", ...s.UsageC.map(t => "・" + t), "");
     }
-    if(s.Giteki.length){
+    if (s.Giteki.length){
         L.push("■技適マーク", ...s.Giteki, "");
     }
-    if(s.Radio.length){
+    if (s.Radio.length){
         L.push("■電波に関する注意事項", ...s.Radio, "");
     }
 
-    L.push(
-        "■各部の名称",
-        "※※表記ルール注意※※",
-        "「センサー」→「センサ」",
-        "「モニター」→「モニタ」",
-        "「バッテリー」→「バッテリ」",
-        "※※使用した画像は別途保存してデザイナーへ共有すること※※",
-        ...s.Parts.map(t=>"・"+t),
-        ""
-    );
+    // ■各部の名称（ルールは PartsRules テンプレからのみ）
+    L.push("■各部の名称");
+    if (partsRulesTpl.length){
+        L.push(...partsRulesTpl);
+    }
+    L.push(...s.Parts.map(t => "・" + t), "");
 
-    L.push("■使用方法", ...s.Usage.map(t=>"・"+t), "");
+    // ■使用方法（ここは従来通り Excel 由来）
+    L.push("■使用方法", ...s.Usage.map(t => "・" + t), "");
 
+    // ■お手入れ方法
     L.push("■お手入れ方法");
-    if(s.Maint.length){
+    if (s.Maint.length){
         L.push(...s.Maint);
-    }else{
-        L.push(
-            "必ず本体の電源をオフにしてください。",
-            "柔らかい布に、お湯または水を含ませ固く絞ってから拭いてください。",
-            "※本製品を水でぬらさないでください。"
-        );
+    } else if (maintDefaultTpl.length){
+        // デフォルトお手入れはテンプレがあれば利用
+        L.push(...maintDefaultTpl);
     }
     L.push("");
 
-    if(s.Disp.length){
+    // ■廃棄
+    if (s.Disp.length){
         L.push("■ご使用済みの製品の廃棄に関して", ...s.Disp, "");
     }
 
-         L.push(
+    // ■仕様（中身は別ロジックで後から挿入）
+    L.push(
         "■仕様",
         "※付属品は末尾にします※",
         `商品名：${pName}`,
-        `型番：${mNum}`
+        `型番：${mNum}`,
+        ""
     );
-    // Excel 由来の仕様文（s.Spec）はここでは使わず、
-    // 参考マニュアルから AI / 参考マニュアルで再構成した内容を後から挿入する
-    L.push("");
 
-
-
-    if(s.Other.length){
-        L.push("■その他", ...s.Other.map(t=>"・"+t), "");
+    if (s.Other.length){
+        L.push("■その他", ...s.Other.map(t => "・" + t), "");
     }
 
     // ■サポート・企業情報
-    if (SELECTED_COMPANY === "OTHER") {
-        // その他名義：シンプルなブロック（そのまま）
-        L.push(
-            "■サポート・企業情報",
-            `保証期間　${warranty}`,
-            "",
-            "対象の企業情報を記載"
-        );
-    } else {
-        // スリーアール／ソリューション共通ヘッダ
-        L.push(
-            "■サポート・企業情報",
-            `保証期間　${warranty}`,
-            "※注文確認メール、あるいは店頭購入の場合は販売店の納品書やレシートなど、購入日がわかる書面の保管をお願い致します。",
-            "製品に関するお問い合わせ先",
-            "下記お問い合わせ窓口もしくは販売店へお問い合わせください。"
-        );
+    L.push(
+        "■サポート・企業情報",
+        `保証期間　${warranty}`
+    );
 
+    // ★ SupportCommon：保証期間の直下
+    if (supportCommonTpl.length){
+        L.push(...supportCommonTpl);
+    }
+
+    if (SELECTED_COMPANY === "OTHER") {
+        // OTHER 名義：Support_OTHER テンプレのみ
+        if (supportOtherTpl.length){
+            L.push(...supportOtherTpl);
+        }
+    } else {
+        // 3R / 3RS 名義
         if (SELECTED_COMPANY === "3RS") {
-            // ソリューション名義：定型文があればそちらを優先
-            if (support3RSTpl.length) {
+            if (support3RSTpl.length){
                 L.push(...support3RSTpl);
-            } else {
-                // フォールバック（これまでの固定文）
-                L.push(
-                    "Mail product-support@3rrr-hd.jp",
-                    "TEL 092-260-3031",
-                    "FAX 092-260-4077",
-                    "※製品の不具合によるお問い合わせにつきましては、内容確認のため画像が必要な場合があります。",
-                    "メールでお問い合わせいただけますとスムーズです。",
-                    "スリーアールソリューション株式会社",
-                    "〒 812-0008",
-                    "福岡市博多区東光二丁目8-30 高光第一ビル2階",
-                    "Web https://3rrr-hd.jp/"
-                );
             }
-        } else {
-            // スリーアール名義：定型文があればそちらを優先
-            if (support3RTpl.length) {
+        } else { // "3R"
+            if (support3RTpl.length){
                 L.push(...support3RTpl);
-            } else {
-                // フォールバック（これまでの固定文）
-                L.push(
-                    "Mail product-support@3rrr-hd.jp",
-                    "TEL 092-260-3031",
-                    "FAX 092-260-4077",
-                    "※製品の不具合によるお問い合わせにつきましては、内容確認のため画像が必要な場合があります。",
-                    "メールでお問い合わせいただけますとスムーズです。",
-                    "スリーアール株式会社",
-                    "THREE R CORP. JAPAN",
-                    "THREE R ロゴ",
-                    "〒 812-0008",
-                    "福岡市博多区東光二丁目8-30 高光第一ビル2階",
-                    "Web https://3rrr-hd.jp/"
-                );
             }
         }
     }
 
-    L.push("第1版");
-
+    // 版数（Edition もテンプレのみ）
+    if (editionTpl.length){
+        L.push(...editionTpl);
+    }
 
     return L.join("\n");
 }
