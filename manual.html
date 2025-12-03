@@ -673,53 +673,48 @@ window.onload = () => {
 
 
 async function loadExcelFromServer() {
-  const statusEl = document.getElementById("excelStatus");
   const gArea = document.getElementById("genreArea");
 
-  if (statusEl) statusEl.innerText = "SharePoint からManual-databaseを読み込み中..."; // ★ typo 修正
-
+  // 読み込み中の表示
   if (gArea) {
     gArea.innerHTML = `
       <div class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
-        <i class="fas fa-spinner fa-spin text-2xl text-blue-500"></i>
+        <i class="fas fa-spinner fa-spin text-xl text-blue-500"></i>
         <div>SharePoint からManual-databaseを読み込んでいます...</div>
       </div>`;
   }
 
   try {
+    // SharePoint → /api/manual-test → Excel 取得
     const res = await fetch("/api/manual-test");
-    const data = await res.json();
-
-    console.log("[loadExcelFromServer] response:", data);
-
-    if (statusEl) {
-      statusEl.innerText = `読込完了: ${data.rows.length}件`;
-      statusEl.classList.add("text-green-600");
+    if (!res.ok) {
+      throw new Error("HTTP " + res.status + " " + res.statusText);
     }
 
-    // ★ ここを追加
-    RAW_DATA   = data.rows || [];
-    TEMPLATES  = data.templates || [];   // ← 定型文を保持
-    console.log("[loadExcelFromServer] templates:", TEMPLATES.length);
+    const data = await res.json();
+    console.log("[loadExcelFromServer] response:", data);
 
-    renderCheckboxes(RAW_DATA);
+    // rows をグローバルに保持
+    RAW_DATA = Array.isArray(data.rows) ? data.rows : [];
+
+    // チェックボックス描画
+    renderCheckboxes();
+
   } catch (err) {
     console.error("[loadExcelFromServer] error:", err);
-
-    if (statusEl) statusEl.innerText = "読込エラー";
 
     if (gArea) {
       gArea.innerHTML = `
         <div class="w-full text-center text-red-500 text-sm py-10">
           Manual-databaseの読み込みに失敗しました。<br>
-          ページを再読み込みして再度お試しください。
+          ページを再読み込みしても解決しない場合は、エラー内容を Ishimoto さんに共有してください。<br>
+          <span class="text-xs text-gray-400">Error: ${err.message}</span>
         </div>`;
     }
 
-    alert("Excel 読み込みエラー: " + err.message);
+    alert("Manual-databaseの読み込みに失敗しました: " + err.message);
   }
 }
-
 
 
 
