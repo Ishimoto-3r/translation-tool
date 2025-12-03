@@ -16,12 +16,10 @@ export default async function handler(req, res) {
     }
 
     // =========================
-    // 1) AAD トークン取得（SharePoint v1 エンドポイント）
+    // 1) Graph v2.0 トークン取得（元に戻す）
     // =========================
-    const spOrigin = new URL(fileUrl).origin; // 例: https://xxxx.sharepoint.com
-
     const tokenRes = await fetch(
-      `https://login.microsoftonline.com/${tenantId}/oauth2/token`,
+      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -29,7 +27,7 @@ export default async function handler(req, res) {
           grant_type: "client_credentials",
           client_id: clientId,
           client_secret: clientSecret,
-          resource: spOrigin, // ← Graph ではなく SharePoint 用リソース
+          scope: "https://graph.microsoft.com/.default",
         }).toString(),
       }
     );
@@ -54,7 +52,7 @@ export default async function handler(req, res) {
     }
 
     // =========================
-    // 2) SharePoint から Excel ダウンロード
+    // 2) fileUrl から Excel をダウンロード（元の方式）
     // =========================
     const fileRes = await fetch(fileUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -78,7 +76,7 @@ export default async function handler(req, res) {
 
     // --- メインシート（安全・注意など） ---
     const mainSheet =
-      wb.Sheets["原本"] || wb.Sheets[wb.SheetNames[0]]; // 念のためフォールバック
+      wb.Sheets["原本"] || wb.Sheets[wb.SheetNames[0]];
     if (!mainSheet) {
       return res.status(500).json({
         error: "SheetError",
@@ -91,7 +89,6 @@ export default async function handler(req, res) {
       defval: "",
     });
 
-    // 1 行目はヘッダ想定
     let lastLabel = "";
     const rows = mainRaw
       .slice(1)
@@ -117,10 +114,10 @@ export default async function handler(req, res) {
           r !== null &&
           r.label &&
           r.content &&
-          r.label !== "項目名" // 念のためヘッダ行を除外
+          r.label !== "項目名"
       );
 
-    // --- 定型文シート ---
+    // --- 定型文シート（新機能） ---
     const tmplSheet = wb.Sheets["定型文"];
     let templates = [];
     if (tmplSheet) {
@@ -128,6 +125,7 @@ export default async function handler(req, res) {
         header: 1,
         defval: "",
       });
+
       // 1 行目ヘッダ: Group / Key / Order / Text
       templates = tmplRaw
         .slice(1)
@@ -139,7 +137,7 @@ export default async function handler(req, res) {
           if (!group || !key || !text) return null;
           return { group, key, order, text };
         })
-        .filter((x) => x);
+        .filter(Boolean);
     }
 
     console.log(
