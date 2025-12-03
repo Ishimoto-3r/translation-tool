@@ -602,6 +602,15 @@ const TERMINOLOGY = [
 const SPEC_WARNING_LINE =
 "※上記仕様値は参考元の取扱説明書に記載された情報であり、本製品の最終仕様とは異なる場合があります。必ず最新の仕様をご確認ください。";
 
+    // ★ここから追加
+function getTemplateTexts(group) {
+    if (!Array.isArray(TEMPLATES)) return [];
+    return TEMPLATES
+        .filter(t => t.group === group)
+        .sort((a, b) => (a.order || 0) - (b.order || 0))
+        .map(t => t.text);
+}
+// ★ここまで追加
 
 /* ---- 初期化 ---- */
 window.onload = () => {
@@ -2011,6 +2020,10 @@ function buildDraft(){
     const warranty = document.getElementById("warrantyPeriod").value;
     const isSol = SELECTED_COMPANY === "3RS";
 
+    // ★ここから追加（定型文グループ）
+    const introTpl      = getTemplateTexts("Intro");        // 挨拶文
+    const commonNoteTpl = getTemplateTexts("CommonNote");   // ※万一〜 など
+    // ★ここまで追加
 
     const checked = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
         .map(c => c.value);
@@ -2061,21 +2074,35 @@ function buildDraft(){
         else s.Other.push(t);
     });
 
-    const L = [
+      const L = [
         "使用画像リンク",
         `商品名：${pName}`,
         `型番：${mNum}`,
         "製品写真",
-        "このたびは、本製品をお買い上げいただき誠にありがとうございます。",
-        "安全にご使用いただくためにも本取扱説明書を必ずお読みになり、内容を理解してからご使用ください。",
-        "また、本取扱説明書はいつでもご覧になれる場所に大切に保管してください。",
-        "本取扱説明書の内容の一部もしくは全部を無断で複写、転載することはおやめください。",
-        "※万一、足りないものがございましたら、弊社お問い合わせ窓口にご連絡ください。",
-        "※デザイン及び仕様については、改良のため予告なしに変更する場合がございます。",
-        "※本書に記載している製品名、サービス名等は各社の登録商標です。",
+        // ★ Intro グループ（なければ従来文）
+        ...(introTpl.length ? introTpl : [
+            "このたびは、本製品をお買い上げいただき誠にありがとうございます。",
+            "安全にご使用いただくためにも本取扱説明書を必ずお読みになり、内容を理解してからご使用ください。",
+            "また、本取扱説明書はいつでもご覧になれる場所に大切に保管してください。",
+            "本取扱説明書の内容の一部もしくは全部を無断で複写、転載することはおやめください。"
+        ]),
+        // ★ CommonNote グループ（なければ従来文）
+        ...(commonNoteTpl.length ? commonNoteTpl : [
+            "※万一、足りないものがございましたら、弊社お問い合わせ窓口にご連絡ください。",
+            "※デザイン及び仕様については、改良のため予告なしに変更する場合がございます。",
+            "※本書に記載している製品名、サービス名等は各社の登録商標です。"
+        ]),
         ...s.Intro,
         ""
     ];
+
+    const introTpl      = getTemplateTexts("Intro");
+    const commonNoteTpl = getTemplateTexts("CommonNote");
+
+    const support3RTpl   = getTemplateTexts("Support_3R");
+    const support3RSTpl  = getTemplateTexts("Support_3RS");
+
+    
 
     L.push("■安全上のご注意");
     if(s.Danger.length)  L.push("<危険>", ...s.Danger.map(t=>"・"+t));
@@ -2138,57 +2165,67 @@ function buildDraft(){
         L.push("■その他", ...s.Other.map(t=>"・"+t), "");
     }
 
-   // ■サポート・企業情報
-if (SELECTED_COMPANY === "OTHER") {
-    // その他名義：シンプルなブロック
-    L.push(
-        "■サポート・企業情報",
-        `保証期間　${warranty}`,
-        "",
-        "対象の企業情報を記載"
-    );
-} else {
-    // スリーアール／ソリューション名義：従来どおり
-    L.push(
-        "■サポート・企業情報",
-        `保証期間　${warranty}`,
-        "※注文確認メール、あるいは店頭購入の場合は販売店の納品書やレシートなど、購入日がわかる書面の保管をお願い致します。",
-        "製品に関するお問い合わせ先",
-        "下記お問い合わせ窓口もしくは販売店へお問い合わせください。"
-    );
-
-    if (SELECTED_COMPANY === "3RS") {
-        // ソリューション名義
+    // ■サポート・企業情報
+    if (SELECTED_COMPANY === "OTHER") {
+        // その他名義：シンプルなブロック（そのまま）
         L.push(
-            "Mail product-support@3rrr-hd.jp",
-            "TEL 092-260-3031",
-            "FAX 092-260-4077",
-            "※製品の不具合によるお問い合わせにつきましては、内容確認のため画像が必要な場合があります。",
-            "メールでお問い合わせいただけますとスムーズです。",
-            "スリーアールソリューション株式会社",
-            "〒 812-0008",
-            "福岡市博多区東光二丁目8-30 高光第一ビル2階",
-            "Web https://3rrr-hd.jp/"
+            "■サポート・企業情報",
+            `保証期間　${warranty}`,
+            "",
+            "対象の企業情報を記載"
         );
     } else {
-        // スリーアール名義
+        // スリーアール／ソリューション共通ヘッダ
         L.push(
-            "Mail product-support@3rrr-hd.jp",
-            "TEL 092-260-3031",
-            "FAX 092-260-4077",
-            "※製品の不具合によるお問い合わせにつきましては、内容確認のため画像が必要な場合があります。",
-            "メールでお問い合わせいただけますとスムーズです。",
-            "スリーアール株式会社",
-            "THREE R CORP. JAPAN",
-            "THREE R ロゴ",
-            "〒 812-0008",
-            "福岡市博多区東光二丁目8-30 高光第一ビル2階",
-            "Web https://3rrr-hd.jp/"
+            "■サポート・企業情報",
+            `保証期間　${warranty}`,
+            "※注文確認メール、あるいは店頭購入の場合は販売店の納品書やレシートなど、購入日がわかる書面の保管をお願い致します。",
+            "製品に関するお問い合わせ先",
+            "下記お問い合わせ窓口もしくは販売店へお問い合わせください。"
         );
-    }
-}
 
-L.push("第1版");
+        if (SELECTED_COMPANY === "3RS") {
+            // ソリューション名義：定型文があればそちらを優先
+            if (support3RSTpl.length) {
+                L.push(...support3RSTpl);
+            } else {
+                // フォールバック（これまでの固定文）
+                L.push(
+                    "Mail product-support@3rrr-hd.jp",
+                    "TEL 092-260-3031",
+                    "FAX 092-260-4077",
+                    "※製品の不具合によるお問い合わせにつきましては、内容確認のため画像が必要な場合があります。",
+                    "メールでお問い合わせいただけますとスムーズです。",
+                    "スリーアールソリューション株式会社",
+                    "〒 812-0008",
+                    "福岡市博多区東光二丁目8-30 高光第一ビル2階",
+                    "Web https://3rrr-hd.jp/"
+                );
+            }
+        } else {
+            // スリーアール名義：定型文があればそちらを優先
+            if (support3RTpl.length) {
+                L.push(...support3RTpl);
+            } else {
+                // フォールバック（これまでの固定文）
+                L.push(
+                    "Mail product-support@3rrr-hd.jp",
+                    "TEL 092-260-3031",
+                    "FAX 092-260-4077",
+                    "※製品の不具合によるお問い合わせにつきましては、内容確認のため画像が必要な場合があります。",
+                    "メールでお問い合わせいただけますとスムーズです。",
+                    "スリーアール株式会社",
+                    "THREE R CORP. JAPAN",
+                    "THREE R ロゴ",
+                    "〒 812-0008",
+                    "福岡市博多区東光二丁目8-30 高光第一ビル2階",
+                    "Web https://3rrr-hd.jp/"
+                );
+            }
+        }
+    }
+
+    L.push("第1版");
 
 
     return L.join("\n");
