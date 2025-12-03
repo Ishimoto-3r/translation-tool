@@ -40,7 +40,7 @@ export default async function handler(req, res) {
 
     const accessToken = tokenData.access_token;
 
-    // 2) SharePoint の Excel を取得（Graph API）
+    // 2) SharePoint の Excel を取得
     const shareId = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");
     const graphRes = await fetch(
       `https://graph.microsoft.com/v1.0/shares/u!${shareId}/driveItem/content`,
@@ -64,13 +64,20 @@ export default async function handler(req, res) {
     // 3) xlsx でパース
     const wb = xlsx.read(buf, { type: "buffer" });
 
-    // --- 原本シート（安全・注意など） ---
-    const firstSheetName = wb.SheetNames[0]; // 想定: 「原本」
-    const sheet = wb.Sheets[firstSheetName];
-    const json = xlsx.utils.sheet_to_json(sheet); // 見出し行をヘッダに
+    // --- メインシート（安全・注意など） ---
+    const firstSheetName = wb.SheetNames[0];
+    const mainSheet = wb.Sheets["原本"] || wb.Sheets[firstSheetName];
+    if (!mainSheet) {
+      return res.status(500).json({
+        error: "SheetError",
+        detail: "原本シート（または先頭シート）が見つかりません。",
+      });
+    }
+
+    const mainJson = xlsx.utils.sheet_to_json(mainSheet); // 見出し行をヘッダに
 
     // 期待する列名: 「ラベル」「項目名」「内容」
-    const rows = json
+    const rows = mainJson
       .map((row, idx) => ({
         id: idx,
         label: row["ラベル"] ?? "",
@@ -79,7 +86,7 @@ export default async function handler(req, res) {
       }))
       .filter((r) => r.label || r.category || r.content);
 
-    // --- 定型文シート（Group / Key / Order / Text） ---
+    // --- 定型文シートの読み込み ---
     const tmplSheet = wb.Sheets["定型文"];
     let templates = [];
 
@@ -88,7 +95,7 @@ export default async function handler(req, res) {
         header: 1,
         defval: "",
       });
-      // 1行目はヘッダ: [Group, Key, Order, Text]
+      // 1行目: Group / Key / Order / Text を想定
       templates = tmplRaw
         .slice(1)
         .map((row) => {
@@ -96,11 +103,19 @@ export default async function handler(req, res) {
           const key = (row[1] || "").toString().trim();
           const order = Number(row[2]) || 0;
           const text = (row[3] || "").toString();
-          if (!group || !key || !text) return null; // text が空の行は無視
+          if (!group || !key || !text) return null;
           return { group, key, order, text };
         })
         .filter((x) => x);
     }
+
+    console.log(
+      "[manual-test] parsed:",
+      "rows=",
+      rows.length,
+      "templates=",
+      templates.length
+    );
 
     return res.status(200).json({
       message: "Excel parsed successfully",
