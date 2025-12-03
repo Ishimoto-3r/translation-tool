@@ -693,17 +693,22 @@ async function loadExcelFromServer() {
     const data = await res.json();
     console.log("[loadExcelFromServer] response:", data);
 
-    // ★ここを追加
+    // rows / templates を格納
     RAW_DATA   = Array.isArray(data.rows)      ? data.rows      : [];
     TEMPLATES  = Array.isArray(data.templates) ? data.templates : [];
 
-    // （デバッグ用に一度だけ中身を見るなら）
     console.log("TEMPLATES:", TEMPLATES);
-
     renderCheckboxes();
 
   } catch (err) {
-    ...
+    console.error("[loadExcelFromServer] error:", err);
+    if (gArea) {
+      gArea.innerHTML = `
+        <div class="w-full text-center text-sm text-red-500 py-10">
+          SharePoint からのデータ読み込みに失敗しました。<br>
+          ${err.message}
+        </div>`;
+    }
   }
 }
 
