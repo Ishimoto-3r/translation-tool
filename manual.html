@@ -1511,6 +1511,14 @@ window.regenPartNames = async function(idx, silent){
   const img = PARTS_IMAGES[idx];
   if (!img) return;
 
+  // ★ 追加：この画像にナンバリングが無ければ注意を出して終了
+  if (!img.badges || img.badges.length === 0) {
+    if (!silent) {
+      alert("この画像にナンバリングがありません。\n右クリックで番号を付けてから名称案を生成してください。");
+    }
+    return;
+  }
+
   const coordLines = coordsText(img);
   const hint = img.nameHint
     ? `【名称表現に関する要望】\n${img.nameHint}\n`
@@ -1573,7 +1581,6 @@ ${hint || ""}
 
   try {
     const raw = await callAI(prompt, img.dataUrl);
-    // 文章・カッコ等を削る正規化は既存関数で実施
     img.names = normalizeNameText(raw);
 
     // 番号は 1 から振り直し
@@ -1592,7 +1599,6 @@ ${hint || ""}
     }
   }
 };
-
 
 
 
