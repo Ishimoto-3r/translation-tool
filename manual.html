@@ -1072,6 +1072,11 @@ function buildAiCheckPrompt() {
 - チェック対象は、ユーザーが独自に追加・編集したと考えられる部分を優先してください。
 - 「表記ルール」に反する表記（例：バッテリー → バッテリ）を見つけた場合は、
   問題の行の次の行に、統一表記の提案を【AI指摘】行として挿入してください。
+- 次の点については、たとえ差があっても指摘してはいけません。
+  ・行頭や行末の空白、インデントの違い
+  ・全角と半角の違い（スペース、英数字、括弧、記号など）
+  ・コロン（：/ :）、カンマ、ピリオドなどの有無や全角・半角の違い
+  ・段落中の1文字だけの全角/半角の違い
 
 出力フォーマット（厳守）：
 - 入力されたマニュアル本文を、基本的に行単位でそのまま出力してください。
@@ -1109,6 +1114,38 @@ ${manual}
 `.trim();
 }
 
+// テンプレート由来の行に対する【AI指摘】コメントを削除する
+function suppressTemplateComments(text) {
+    if (!text) return text;
+
+    // テンプレ文（database 由来）のセット
+    const tmplSet = new Set(
+        (TEMPLATES || [])
+            .map(t => (t.text || "").trim())
+            .filter(Boolean)
+    );
+
+    const lines = text.split(/\r?\n/);
+    const out = [];
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // 【AI指摘】行で、直前の行がテンプレ文なら捨てる
+        if (trimmed.startsWith("【AI指摘】") && i > 0) {
+            const prev = lines[i - 1].trim();
+            if (tmplSet.has(prev)) {
+                continue;
+            }
+        }
+
+        out.push(line);
+    }
+
+    return out.join("\n");
+}
+
 
 async function runAiCheck() {
     if (!AICHECK_TEXT.trim()) {
@@ -1130,7 +1167,10 @@ async function runAiCheck() {
             return;
         }
 
-        await exportAiCheckedWord(aiText, AICHECK_FILENAME);
+        // database テンプレ由来の行に対するコメントを削除
+        const cleaned = suppressTemplateComments(aiText);
+
+        await exportAiCheckedWord(cleaned, AICHECK_FILENAME);
         showToast("AIチェック結果のWordファイルを作成しました");
     } catch (e) {
         console.error(e);
@@ -1141,22 +1181,28 @@ async function runAiCheck() {
     }
 }
 
-// AIチェック結果 → Word（赤字行 = 【AI指摘】）
+
+// AIチェック結果 → Word（赤字行 = 【AI指摘】。■総評ブロックも赤字）
 async function exportAiCheckedWord(text, originalName) {
     const lines = (text || "").split(/\r?\n/);
     const children = [];
 
+    // 「■総評」セクション内かどうか
+    let inGeneralComment = false;
+
     for (const raw of lines) {
         const trimmed = raw.trim();
 
-        // 空行
+        // 空行はパラグラフを作らずスキップ
         if (!trimmed) {
-            children.push(new docx.Paragraph({ text: "" }));
             continue;
         }
 
         // 見出し（■〜）
         if (trimmed.startsWith("■")) {
+            // 「■総評」のときだけ以降を赤字扱いにする
+            inGeneralComment = (trimmed === "■総評");
+
             children.push(
                 new docx.Paragraph({
                     children: [
@@ -1164,7 +1210,9 @@ async function exportAiCheckedWord(text, originalName) {
                             text: trimmed,
                             font: "Meiryo UI",
                             bold: true,
-                            size: 24
+                            size: 24,
+                            // 総評見出し自体も赤字にする
+                            color: inGeneralComment ? "FF0000" : undefined
                         })
                     ],
                     spacing: { before: 200, after: 100 }
@@ -1192,15 +1240,20 @@ async function exportAiCheckedWord(text, originalName) {
             continue;
         }
 
-        // 通常行
+        // 通常行（総評ブロック内は赤字、それ以外は黒）
+        const runProps = {
+            text: raw,
+            font: "Meiryo UI",
+            size: 21
+        };
+        if (inGeneralComment) {
+            runProps.color = "FF0000";
+        }
+
         children.push(
             new docx.Paragraph({
                 children: [
-                    new docx.TextRun({
-                        text: raw,
-                        font: "Meiryo UI",
-                        size: 21
-                    })
+                    new docx.TextRun(runProps)
                 ],
                 spacing: { after: 50 }
             })
