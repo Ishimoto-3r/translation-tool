@@ -1072,11 +1072,14 @@ function buildAiCheckPrompt() {
 - チェック対象は、ユーザーが独自に追加・編集したと考えられる部分を優先してください。
 - 「表記ルール」に反する表記（例：バッテリー → バッテリ）を見つけた場合は、
   問題の行の次の行に、統一表記の提案を【AI指摘】行として挿入してください。
-- 次の点については、たとえ差があっても指摘してはいけません。
-  ・行頭や行末の空白、インデントの違い
-  ・全角と半角の違い（スペース、英数字、括弧、記号など）
-  ・コロン（：/ :）、カンマ、ピリオドなどの有無や全角・半角の違い
-  ・段落中の1文字だけの全角/半角の違い
+- 体裁やレイアウトに関する指摘は絶対にしてはいけません。
+  特に次のような内容は指摘禁止です：
+  ・行頭や行末の空白、インデント（字下げ）の違い
+  ・空白スペースの有無や数の違い
+  ・全角と半角の違い（スペース、英数字、括弧、記号、コロンなど）
+  ・「：」と「:」の違い、句読点・カンマ・ピリオドの有無の違い
+  ・段落の揃え方や余白、レイアウト、装飾に関するコメント
+- 上記禁止事項に関するコメントは、「問題があっても書かない」こと。
 
 出力フォーマット（厳守）：
 - 入力されたマニュアル本文を、基本的に行単位でそのまま出力してください。
@@ -1088,6 +1091,7 @@ function buildAiCheckPrompt() {
 
 - 複数の指摘がある場合も、同じ行の次の行にまとめて1行で記載してください。
 - コメント行では、「どこをどう直すべきか」が具体的にわかるように書いてください。
+- 「問題ありません」「このままで問題ありません」など、問題がないことを伝えるだけのコメントは書かないでください。
 - 全体に対するコメントは、本文の末尾に
   「■総評」という見出しを作り、その下に数行でまとめてください。
 
@@ -1114,7 +1118,9 @@ ${manual}
 `.trim();
 }
 
-// テンプレート由来の行に対する【AI指摘】コメントを削除する
+
+// テンプレ由来の行・インデント/空白/全角半角系・問題なし系など
+// 不要な【AI指摘】コメントを削除する
 function suppressTemplateComments(text) {
     if (!text) return text;
 
@@ -1128,23 +1134,88 @@ function suppressTemplateComments(text) {
     const lines = text.split(/\r?\n/);
     const out = [];
 
+    let seenRealLine = false;  // 最初の「元の行」を見たかどうか
+
+    // 「インデント」「空白」「全角/半角」など、捨てたいキーワード
+    const ngKeywords = [
+        "インデント",
+        "字下げ",
+        "スペース",
+        "空白",
+        "空白スペース",
+        "余分なスペース",
+        "余計なスペース",
+        "全角",
+        "半角",
+        "全角・半角",
+        "全角/半角",
+        "全角／半角",
+        "コロン",
+        "：",
+        " : ",
+        "体裁",
+        "レイアウト"
+    ];
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const trimmed = line.trim();
 
-        // 【AI指摘】行で、直前の行がテンプレ文なら捨てる
-        if (trimmed.startsWith("【AI指摘】") && i > 0) {
-            const prev = lines[i - 1].trim();
-            if (tmplSet.has(prev)) {
-                continue;
+        // 何も書いていない行は、最初の「元の行」以前なら捨てる
+        if (!trimmed) {
+            if (seenRealLine) {
+                out.push(line);
             }
+            continue;
         }
 
+        // 【AI指摘】行の処理
+        if (trimmed.startsWith("【AI指摘】")) {
+            const content = trimmed;
+
+            // ② 最初の【AI指摘】（1行目など、まだ元の行が一つも出ていない場合）は捨てる
+            if (!seenRealLine) {
+                continue;
+            }
+
+            // ①・⑤ インデント／空白／全角半角／コロンなどに関するコメントは捨てる
+            if (ngKeywords.some(k => content.includes(k))) {
+                continue;
+            }
+
+            // ③ 「問題ありません」「修正の必要はありません」など、問題なしコメントは捨てる
+            if (
+                content.includes("問題ありません") ||
+                content.includes("問題はありません") ||
+                content.includes("問題はない") ||
+                content.includes("修正の必要はありません") ||
+                content.includes("修正の必要はない") ||
+                (content.includes("このままで") && content.includes("問題"))
+            ) {
+                continue;
+            }
+
+            // ④ database テンプレ行に対するコメントは捨てる
+            if (out.length > 0) {
+                const prevTrim = out[out.length - 1].trim();
+                if (tmplSet.has(prevTrim)) {
+                    continue;
+                }
+            }
+
+            // 上記すべてに当てはまらない【AI指摘】だけ残す
+            out.push(line);
+            continue;
+        }
+
+        // ここまで来たら「元の行」
+        seenRealLine = true;
         out.push(line);
     }
 
     return out.join("\n");
 }
+
 
 
 async function runAiCheck() {
@@ -1153,27 +1224,39 @@ async function runAiCheck() {
         return;
     }
 
-    document.getElementById("loadingOverlay").style.display = "flex";
+    const statusEl = document.getElementById("aiCheckStatus");
     const btn = document.getElementById("aiCheckBtn");
+
+    document.getElementById("loadingOverlay").style.display = "flex";
     btn.disabled = true;
 
     try {
+        // 1/3 プロンプト準備中
+        statusEl.textContent = "1/3：AIチェック用の指示文を準備しています…";
         const prompt = buildAiCheckPrompt();
-        // manual-ai をそのまま再利用（画像は不要なので null）
+
+        // 2/3 AI応答待ち
+        statusEl.textContent = "2/3：AIに送信中（応答待ち）…";
         const aiText = await callAI(prompt, null);
 
         if (!aiText || !aiText.trim()) {
+            statusEl.textContent = "AIから有効な結果が返ってきませんでした。";
             alert("AIチェック結果が取得できませんでした。");
             return;
         }
 
-        // database テンプレ由来の行に対するコメントを削除
+        // 3/3 整形＋Word出力
+        statusEl.textContent = "3/3：結果を整形し、Wordファイルを作成しています…";
+
+        // 不要なコメントを削除
         const cleaned = suppressTemplateComments(aiText);
 
         await exportAiCheckedWord(cleaned, AICHECK_FILENAME);
         showToast("AIチェック結果のWordファイルを作成しました");
+        statusEl.textContent = "完了：AIチェック付きWordファイルをダウンロードしました。";
     } catch (e) {
         console.error(e);
+        statusEl.textContent = "エラーが発生しました。詳細はコンソールを確認してください。";
         alert("AIチェック中にエラーが発生しました: " + e.message);
     } finally {
         document.getElementById("loadingOverlay").style.display = "none";
