@@ -230,6 +230,27 @@
     margin-bottom:10px;    /* 少し余白を増やす */
 }
 
+/* === マニュアルAIチェック用ドロップゾーン === */
+.ai-check-drop {
+    border: 2px dashed #f97316;   /* オレンジ系 */
+    background: #fff7ed;
+    border-radius: 6px;
+    padding: 10px;
+    position: relative;
+    cursor: pointer;
+    min-height: 80px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+.ai-check-drop.dragover {
+    border-color: #ea580c;
+    background: #ffedd5;
+}
+
+
+
+        
         .image-drop-zone.dragover {
             background:#f3e8ff;
             border-color:#7c3aed;
@@ -472,22 +493,75 @@ body {
         </button>
     </div>
 
-    <!-- 右カラム -->
+       <!-- 右カラム：上 = プレビュー / 下 = AIチェック -->
     <div class="col-panel bg-white rounded-lg shadow-sm flex flex-col">
-        <div class="flex justify-between items-center mb-2">
-            <h3 class="font-bold text-sm text-gray-700">プレビュー</h3>
-            <div class="flex gap-2">
-                <button onclick="document.getElementById('previewArea').value=''"
-                        class="text-xs bg-gray-200 px-2 py-1 rounded hover:bg-gray-300">クリア</button>
-                <button onclick="exportToWord()"
-                        class="text-xs bg-blue-600 text-white px-3 py-1 rounded font-bold hover:bg-blue-700">
-                    <i class="fas fa-file-word"></i> Word保存
-                </button>
+        <!-- プレビューエリア（高さを少し縮める） -->
+        <div class="flex flex-col mb-3 flex-[0_0_55%] min-h-[260px]">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="font-bold text-sm text-gray-700">プレビュー</h3>
+                <div class="flex gap-2">
+                    <button onclick="document.getElementById('previewArea').value=''"
+                            class="text-xs bg-gray-200 px-2 py-1 rounded hover:bg-gray-300">クリア</button>
+                    <button onclick="exportToWord()"
+                            class="text-xs bg-blue-600 text-white px-3 py-1 rounded font-bold hover:bg-blue-700">
+                        <i class="fas fa-file-word"></i> Word保存
+                    </button>
+                </div>
+            </div>
+            <textarea id="previewArea"
+                      class="flex-1 w-full border rounded p-3 font-mono text-xs resize-none bg-gray-50 leading-relaxed"></textarea>
+        </div>
+
+        <!-- ▼▼ 新機能：マニュアル原稿AIチェック ▼▼ -->
+        <div class="mt-1 flex-1">
+            <div class="border border-amber-400 rounded-lg bg-amber-50 p-3 h-full flex flex-col">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-400 text-white text-xs font-bold">AI</span>
+                        <div>
+                            <div class="text-sm font-bold text-amber-800">マニュアル原稿AIチェック</div>
+                            <div class="text-[10px] text-amber-800">
+                                作成済みマニュアルの日本語表現・表記ゆれをAIがダブルチェックします。
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ドロップゾーン -->
+                <div id="aiCheckDrop"
+                     class="ai-check-drop mb-2">
+                    <div class="text-[10px] font-bold text-amber-800 mb-1">
+                        マニュアル原稿ファイルをドラッグ＆ドロップ（.docx / .txt）
+                    </div>
+                    <div class="text-[10px] text-amber-700">
+                        既存のマニュアル Word ファイルをここにドロップしてください。<br>
+                        database由来の定型文は自動で判別し、指摘対象から除外します。
+                    </div>
+                    <input type="file" id="aiCheckFile" accept=".docx,.txt" class="file-overlay">
+                </div>
+
+                <!-- ステータス表示 -->
+                <div id="aiCheckStatus" class="text-[10px] text-amber-800 mb-2 h-10 overflow-hidden">
+                    ファイル未選択
+                </div>
+
+                <!-- ボタン群 -->
+                <div class="mt-auto flex flex-col gap-1">
+                    <button id="aiCheckBtn"
+                            onclick="runAiCheck()"
+                            class="w-full text-xs font-bold py-2 rounded bg-amber-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-700">
+                        <i class="fas fa-magnifying-glass-check mr-1"></i> AIチェックを実行してWordダウンロード
+                    </button>
+                    <div class="text-[10px] text-amber-900">
+                        ・チェックコメントは問題の行の「次の行」に <span class="font-bold">【AI指摘】</span> 付き赤字で挿入します。<br>
+                        ・総合的なコメントは末尾に「総評」として追記します。
+                    </div>
+                </div>
             </div>
         </div>
-        <textarea id="previewArea"
-                  class="flex-1 w-full border rounded p-3 font-mono text-xs resize-none bg-gray-50 leading-relaxed"></textarea>
+        <!-- ▲▲ 新機能ここまで ▲▲ -->
     </div>
+
 </div>
 
 <canvas id="processCanvas" style="display:none;"></canvas>
@@ -501,7 +575,11 @@ let USAGE_IMAGES = [];
 let REF_TEXT = "";
 let LIB_READY = false;
 let toastTimer = null;
-let TEMPLATES = [];   // ★ 追加：定型文用
+let TEMPLATES = [];        // 定型文
+let AI_TERM_RULES = [];    // 表記ルール（表記ゆれ用）
+let AICHECK_TEXT = "";     // AIチェック対象のマニュアル本文
+let AICHECK_FILENAME = ""; // 元ファイル名
+
 
 /* ---- 定数 ---- */
 const TERMINOLOGY = [
