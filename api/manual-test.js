@@ -132,12 +132,37 @@ export default async function handler(req, res) {
         .filter((x) => x);
     }
 
+    // --- 表記ルールシートの読み込み（新規） ---
+    // シート名：「表記ルール」
+    // 1列目：元の表記（例：バッテリー）
+    // 2列目：統一表記（例：バッテリ）
+    const ruleSheet = wb.Sheets["表記ルール"];
+    let termRules = [];
+
+    if (ruleSheet) {
+      const raw = xlsx.utils.sheet_to_json(ruleSheet, {
+        header: 1,
+        defval: "",
+      });
+      termRules = raw
+        .slice(1)
+        .map((row) => {
+          const from = (row[0] || "").toString().trim();
+          const to = (row[1] || "").toString().trim();
+          if (!from || !to) return null;
+          return { from, to };
+        })
+        .filter((x) => x);
+    }
+
     console.log(
       "[manual-test] parsed:",
       "rows=",
       rows.length,
       "templates=",
-      templates.length
+      templates.length,
+      "termRules=",
+      termRules.length
     );
 
     return res.status(200).json({
@@ -145,8 +170,10 @@ export default async function handler(req, res) {
       sheetNames: wb.SheetNames,
       firstSheetName,
       rows,
-      templates, // ★ 追加
+      templates,
+      termRules,   // ★ 追加
     });
+
   } catch (err) {
     console.error(err);
     return res.status(500).json({
