@@ -77,13 +77,36 @@ export default async function handler(req, res) {
     const mainJson = xlsx.utils.sheet_to_json(mainSheet); // 見出し行をヘッダに
 
     // 期待する列名: 「ラベル」「項目名」「内容」
+    // 追加列: 「ジャンル名」「ジャンル表示順」「ジャンル内表示順」「ジャンル表示対象外」
     const rows = mainJson
-      .map((row, idx) => ({
-        id: idx,
-        label: row["ラベル"] ?? "",
-        category: row["項目名"] ?? "",
-        content: row["内容"] ?? "",
-      }))
+      .map((row, idx) => {
+        const label    = row["ラベル"] ?? "";
+        const category = row["項目名"] ?? "";
+        const content  = row["内容"] ?? "";
+
+        // ★ UI 用のジャンル情報
+        const uiGenre = row["ジャンル名"] ?? "";
+
+        let uiGenreOrder = Number(row["ジャンル表示順"]);
+        if (Number.isNaN(uiGenreOrder)) uiGenreOrder = null;
+
+        let uiItemOrder = Number(row["ジャンル内表示順"]);
+        if (Number.isNaN(uiItemOrder)) uiItemOrder = null;
+
+        const hiddenRaw = (row["ジャンル表示対象外"] ?? "").toString().trim();
+        const uiHidden = hiddenRaw !== "" && hiddenRaw !== "0";
+
+        return {
+          id: idx,
+          label,
+          category,
+          content,
+          uiGenre,
+          uiGenreOrder,
+          uiItemOrder,
+          uiHidden,
+        };
+      })
       .filter((r) => r.label || r.category || r.content);
 
     // --- 定型文シートの読み込み ---
