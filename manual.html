@@ -504,92 +504,6 @@ let toastTimer = null;
 let TEMPLATES = [];   // ★ 追加：定型文用
 
 /* ---- 定数 ---- */
-const SAFETY_KEYS = ["危険","警告","注意","使用上の"];
-const EXCLUDE = ["お手入れ方法","スリーアール","企業情報"];
-
-const UI_GENRES = [
-    {
-        title: "🏠 生活家電・空調・嗜好品",
-        color: "#f97316",
-        keywords: [
-            "扇風機","ファン","掃除機","クリーナー","加湿","除湿","ヒーター","暖房",
-            "乾燥","アイロン","モスキート","蚊","セルカ","フィルター",
-            "タバコ","アイコス","IQOS","電子タバコ","vape","喫煙",
-            "冷風扇","冷風機","スポットクーラー",
-            "空気清浄機","空気清浄器","空気清浄"
-        ]
-    },
-    {
-        title: "🔋 電源・電池・充電",
-        color: "#ef4444",
-        keywords: [
-            "リチウム","充電池","乾電池","電池","バッテリー","充電",
-            "AC","アダプタ","電源","プラグ","コンセント","USB","電圧",
-            "配線","コード","ケーブル","電力","ショート","静電気","雷",
-            "カーチャージャー","シガー"
-        ]
-    },
-    {
-        title: "📡 通信・PC・無線",
-        color: "#8b5cf6",
-        keywords: [
-            "無線LAN","Wi-Fi","Bluetooth","無線","通信","電波","ペアリング",
-            "イヤホン","PCスタンド","マウス","キーボード","PC","スマホ","アプリ",
-            "メモリ","SD","データ","記録","IC","チップ"
-        ]
-    },
-    {
-        title: "👁️ 光学・計測・精密",
-        color: "#eab308",
-        keywords: [
-            "工業用内視鏡","内視鏡","カメラ","レンズ","光","LED","レーザー","UV",
-            "直視","網膜","顕微鏡","測定","計測","精密","磁気",
-            "ライト","照明","投光器","懐中電灯",
-            "拡大鏡","ルーペ",
-            "CO2モニタ","CO2モニター","CO₂","二酸化炭素濃度計",
-            "アルコールチェッカー","アルコール検知器","アルコールセンサー"
-        ]
-    },
-    {
-        title: "🛠️ 本体・設置・構造",
-        color: "#64748b",
-        keywords: [
-            "スマホリング","スタンド","アーム","ホルダー","マウント","ケース","ストラップ",
-            "本体","筐体","固定","吸盤","粘着","分解","改造","修理","落下","衝撃",
-            "可動","隙間","指","挟","荷重","鋭利","ガラス","転倒",
-            "ルーバー"
-        ]
-    },
-    {
-        title: "💧 水・熱・環境",
-        color: "#3b82f6",
-        keywords: [
-            "水","液体","濡","湿気","結露","防水","雨","浴室","薬品","洗剤","油","腐食",
-            "温度","高温","低温","凍結","火気","直射日光","保管","屋外","ガス","引火",
-            "発熱","過熱","燃え","爆発",
-            "テント","タープ","アウトドア"
-        ]
-    },
-    {
-        title: "👶 健康・安全",
-        color: "#ec4899",
-        keywords: [
-            "子供","幼児","乳幼児","ペット","誤飲","窒息","怪我","皮膚","身体",
-            "アレルギー","低温やけど","医療","ペースメーカー"
-        ]
-    },
-    {
-        title: "⚖️ 法規・異常・その他",
-        color: "#4b5563",
-        keywords: [
-            "技適","法令","法律","廃棄","リサイクル","ゴミ","公序良俗","マナー","免責",
-            "責任","損害","権利","著作","譲渡","紛失","盗難","煙","異臭","異音",
-            "故障","事故","中止","異常","安全","用途","点検","寿命"
-        ]
-    }
-];
-
-
 const TERMINOLOGY = [
     {p:/センサー/g,r:"センサ"},
     {p:/モニター/g,r:"モニタ"},
@@ -1011,85 +925,118 @@ REF_TEXT += `\n【参考:${f.name}】\n${txt}\n`;
     }
 }
 
-/* ---- 安全ジャンル描画 ---- */
-function normalizeForGenre(text){
-    return text.toLowerCase()
-        .replace(/[‐\-–—ー_－\s]/g,"")
-        .replace(/・/g,"");
-}
+/* ---- 安全ジャンル描画（Excel側でジャンル指定版） ---- */
 
+/**
+ * RAW_DATA には /api/manual-test から
+ *  { id, label, category, content,
+ *    uiGenre, uiGenreOrder, uiItemOrder, uiHidden }
+ * が入っている前提
+ */
 function renderCheckboxes() {
     const gArea = document.getElementById("genreArea");
     const fArea = document.getElementById("funcArea");   // 無い場合もある
     gArea.innerHTML = "";
     if (fArea) fArea.innerHTML = "";
 
-    // ラベルごとに「安全系かどうか」を判定
-    const map = new Map();
+    if (!Array.isArray(RAW_DATA) || !RAW_DATA.length) {
+        gArea.innerHTML = `
+          <div class="w-full text-center text-sm text-gray-500 py-10">
+            データが読み込まれていません。
+          </div>`;
+        return;
+    }
+
+    // 1) ラベル単位にまとめる（表示対象のみ）
+    const labelMap = new Map();
     RAW_DATA.forEach(r => {
-        if (
-            r.label.includes("共通") ||
-            r.label.includes("スリーアール") ||
-            EXCLUDE.some(e => r.label.includes(e)) ||
-            r.category === "お手入れ方法"
-        ) {
-            return;
-        }
-        if (!map.has(r.label)) map.set(r.label, { isSafe: false, category: r.category || "" });
-        if (r.category && SAFETY_KEYS.some(k => r.category.includes(k))) {
-            map.get(r.label).isSafe = true;
-        }
-    });
+        if (r.uiHidden) return;            // 表示対象外はスキップ
+        const key = r.label || "";
+        if (!key) return;
 
-    const buckets = {};
-    UI_GENRES.forEach(g => buckets[g.title] = []);
-    const funcs = [];
-
-    map.forEach((v, k) => {
-        if (v.isSafe) {
-            const norm = normalizeForGenre(k + " " + (v.category || ""));
-            let matched = false;
-            for (const g of UI_GENRES) {
-                if (g.keywords.some(kw => norm.includes(normalizeForGenre(kw)))) {
-                    buckets[g.title].push(k);
-                    matched = true;
-                    break;
-                }
-            }
-            if (!matched) {
-                const last = UI_GENRES[UI_GENRES.length - 1];
-                buckets[last.title].push(k);
-            }
-        } else {
-            funcs.push(k);
+        if (!labelMap.has(key)) {
+            labelMap.set(key, {
+                label: key,
+                uiGenre: r.uiGenre || "その他",
+                uiGenreOrder: (typeof r.uiGenreOrder === "number" && !isNaN(r.uiGenreOrder))
+                    ? r.uiGenreOrder
+                    : 999,
+                uiItemOrder: (typeof r.uiItemOrder === "number" && !isNaN(r.uiItemOrder))
+                    ? r.uiItemOrder
+                    : 9999
+            });
         }
     });
 
-    // 安全ジャンル側
-    UI_GENRES.forEach(g => {
-        const list = buckets[g.title];
-        if (list && list.length) {
-            const div = document.createElement("div");
-            div.className = "genre-group";
-            div.innerHTML = `
-                <div class="genre-group-header" style="border-top-color:${g.color}">
-                    <span>${g.title}</span>
-                    <span onclick="toggleGroup(this)" class="cursor-pointer text-blue-600 text-[10px]">
-                        解除
-                    </span>
-                </div>`;
-            const body = document.createElement("div");
-            body.className = "genre-group-content";
-            list.sort().forEach(l => body.appendChild(createCheck(l)));
-            div.appendChild(body);
-            gArea.appendChild(div);
+    if (!labelMap.size) {
+        gArea.innerHTML = `
+          <div class="w-full text-center text-sm text-gray-500 py-10">
+            表示対象のラベルがありません。
+          </div>`;
+        return;
+    }
+
+    // 2) ジャンルごとにグルーピング
+    const genreMap = new Map();  // key: uiGenre
+    labelMap.forEach(info => {
+        const gName = info.uiGenre || "その他";
+        if (!genreMap.has(gName)) {
+            genreMap.set(gName, {
+                name: gName,
+                order: info.uiGenreOrder ?? 999,
+                labels: []
+            });
         }
+        genreMap.get(gName).labels.push(info);
     });
 
-    // 構成・その他側は今は画面に無いので何もしない
-    // （fArea が存在する環境でだけ使いたくなったらここで append）
+    // 3) ジャンルの並び順でソート
+    const genreList = Array.from(genreMap.values())
+        .sort((a, b) => {
+            const ao = a.order ?? 999;
+            const bo = b.order ?? 999;
+            if (ao !== bo) return ao - bo;
+            return a.name.localeCompare(b.name, "ja");
+        });
+
+    // 4) ジャンル内のラベルも「ジャンル内表示順 → ラベル名」でソート
+    genreList.forEach(g => {
+        g.labels.sort((a, b) => {
+            const ao = a.uiItemOrder ?? 9999;
+            const bo = b.uiItemOrder ?? 9999;
+            if (ao !== bo) return ao - bo;
+            return a.label.localeCompare(b.label, "ja");
+        });
+    });
+
+    // 5) UI を実際に描画
+    genreList.forEach(g => {
+        const div = document.createElement("div");
+        div.className = "genre-group";
+
+        div.innerHTML = `
+            <div class="genre-group-header">
+                <span>${g.name}</span>
+                <span onclick="toggleGroup(this)"
+                      class="cursor-pointer text-blue-600 text-[10px]">
+                    解除
+                </span>
+            </div>
+        `;
+
+        const body = document.createElement("div");
+        body.className = "genre-group-content";
+
+        g.labels.forEach(info => {
+            body.appendChild(createCheck(info.label));
+        });
+
+        div.appendChild(body);
+        gArea.appendChild(div);
+    });
 }
 
+/** ラベル用チェックボックスを 1 個つくる */
 function createCheck(label){
     const l = document.createElement("label");
     l.className = "checkbox-card";
