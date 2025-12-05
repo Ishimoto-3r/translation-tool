@@ -977,26 +977,7 @@ async function loadRefs(files){
                 continue;  // 画像はここで終わり
             }
 
-            // 画像以外 → テキスト化して REF_TEXT に追記
-            let txt = "";
-            if (f.name.endsWith(".pdf")) {
-                const ab  = await f.arrayBuffer();
-                const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    const page    = await pdf.getPage(i);
-                    const content = await page.getTextContent();
-                    txt += content.items.map(s => s.str).join(" ");
-                }
-            } else if (f.name.endsWith(".docx")) {
-                const res = await mammoth.extractRawText({
-                    arrayBuffer: await f.arrayBuffer()
-                });
-                txt = res.value;
-            } else {
-                // .txt など
-                txt = await f.text();
-            }
-
+         
             // ★全文を保持する（トークン量はプロンプト側で制限する）
             REF_TEXT += `\n【参考:${f.name}】\n${txt}\n`;
 
@@ -1242,38 +1223,7 @@ async function exportAiCheckedWord(text, originalName) {
 
 
             
-            // 画像以外 → テキスト化して REF_TEXT に追記
-            let txt = "";
-            if (f.name.endsWith(".pdf")) {
-                const ab = await f.arrayBuffer();
-                const pdf = await pdfjsLib.getDocument(ab).promise;
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const content = await page.getTextContent();
-                    txt += content.items.map(s => s.str).join(" ");
-                }
-            } else if (f.name.endsWith(".docx")) {
-                const res = await mammoth.extractRawText({ arrayBuffer: await f.arrayBuffer() });
-                txt = res.value;
-            } else {
-                txt = await f.text();
-            }
-
-            // ★全文を保持する（トークン量はプロンプト側で制限する）
-REF_TEXT += `\n【参考:${f.name}】\n${txt}\n`;
-
-
-            el.innerHTML += `
-                <div class="file-item text-[10px] flex items-center gap-1">
-                    <span>[文書] ${f.name}</span>
-                    <i class="fas fa-check text-green-500"></i>
-                </div>`;
-        } catch(e) {
-            console.error(e);
-            alert("ファイル読込失敗: " + f.name);
-        }
-    }
-}
+            
 
 /* ---- 安全ジャンル描画（Excel側でジャンル指定版） ---- */
 
