@@ -358,8 +358,9 @@ body {
 <body class="bg-gray-100 text-gray-800">
 <div id="loadingOverlay">
     <div class="spinner"></div>
-    <div class="mt-4 text-blue-600 font-bold text-lg">処理中...</div>
+    <div id="loadingText" class="mt-4 text-blue-600 font-bold text-lg">処理中...</div>
 </div>
+
 <div id="toast"></div>
 
 <div class="flex-none bg-white shadow z-10 p-3 border-b relative">
@@ -552,10 +553,11 @@ body {
                             class="w-full text-xs font-bold py-2 rounded bg-amber-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-700">
                         <i class="fas fa-magnifying-glass-check mr-1"></i> AIチェックを実行してWordダウンロード
                     </button>
-                    <div class="text-[10px] text-amber-900">
-                        ・チェックコメントは問題の行の「次の行」に <span class="font-bold">【AI指摘】</span> 付き赤字で挿入します。<br>
-                        ・総合的なコメントは末尾に「総評」として追記します。
-                    </div>
+          <div class="text-[10px] text-amber-900">
+    ・チェックコメントは問題の行の「次の行」に <span class="font-bold">【コメント】</span> 付き赤字で挿入します。<br>
+    ・総合的なコメントは末尾に「総評」として追記します。
+</div>
+
                 </div>
             </div>
         </div>
@@ -1071,7 +1073,7 @@ function buildAiCheckPrompt() {
 - テンプレート由来の文は、必ずそのまま残し、修正案も付けないでください。
 - チェック対象は、ユーザーが独自に追加・編集したと考えられる部分を優先してください。
 - 「表記ルール」に反する表記（例：バッテリー → バッテリ）を見つけた場合は、
-  問題の行の次の行に、統一表記の提案を【AI指摘】行として挿入してください。
+  問題の行の次の行に、統一表記の提案を【コメント】行として挿入してください。
 - 体裁やレイアウトに関する指摘は絶対にしてはいけません。
   特に次のような内容は指摘禁止です：
   ・行頭や行末の空白、インデント（字下げ）の違い
@@ -1084,10 +1086,10 @@ function buildAiCheckPrompt() {
 出力フォーマット（厳守）：
 - 入力されたマニュアル本文を、基本的に行単位でそのまま出力してください。
 - 問題がある行については「元の行」をそのまま出力した直後の行に、
-  【AI指摘】から始まるコメント行を1行だけ挿入してください。
+  【コメント】から始まるコメント行を1行だけ挿入してください。
   例：
   （元の行）
-  【AI指摘】ここは「○○」ではなく「△△」とする方が一般的です。
+  【コメント】ここは「○○」ではなく「△△」とする方が一般的です。
 
 - 複数の指摘がある場合も、同じ行の次の行にまとめて1行で記載してください。
 - コメント行では、「どこをどう直すべきか」が具体的にわかるように書いてください。
@@ -1100,12 +1102,12 @@ function buildAiCheckPrompt() {
 「各部の名称」に関するチェック：
 - マニュアル本文内の「■各部の名称」セクションと、それ以外の本文を比較し、
   名称の表記ゆれ（例：本体側面ボタン / 側面ボタン）や未使用の名称がないか確認してください。
-- 表記ゆれや未使用があれば、その行または最も関連の深い行の次に【AI指摘】行でコメントしてください。
+- 表記ゆれや未使用があれば、その行または最も関連の深い行の次に【コメント】行でコメントしてください。
 
 「■使用方法」セクションに関するチェック：
 - 「■使用方法」から次の「■」見出しまでを1つのブロックとみなし、
   手順の抜け・順番の不自然さ・ユーザーが迷いそうな点を確認してください。
-- 問題があれば、該当行の直後に【AI指摘】行で提案してください。
+- 問題があれば、該当行の直後に【コメント】行で提案してください。
 
 表記ルール一覧（統一ルール。これに反していても database テンプレは例外扱い）：
 ${ruleLines || "（ルールなし）"}
@@ -1113,14 +1115,15 @@ ${ruleLines || "（ルールなし）"}
 テンプレート文章一覧（database 由来。これらの文は原則として指摘しない）：
 ${tmplLines || "（なし）"}
 
-マニュアル本文（これを行単位でそのまま出力し、必要に応じて【AI指摘】行を差し込んでください）：
+マニュアル本文（これを行単位でそのまま出力し、必要に応じて【コメント】行を差し込んでください）：
 ${manual}
 `.trim();
 }
 
 
-// テンプレ由来の行・インデント/空白/全角半角系・問題なし系など
-// 不要な【AI指摘】コメントを削除する
+
+// テンプレ由来の行・レイアウト系・問題なし系など
+// 不要な「コメント」行を削除する
 function suppressTemplateComments(text) {
     if (!text) return text;
 
@@ -1136,7 +1139,7 @@ function suppressTemplateComments(text) {
 
     let seenRealLine = false;  // 最初の「元の行」を見たかどうか
 
-    // 「インデント」「空白」「全角/半角」など、捨てたいキーワード
+    // レイアウト調整・表記揃え系のコメントで使われがちなキーワード群
     const ngKeywords = [
         "インデント",
         "字下げ",
@@ -1145,6 +1148,7 @@ function suppressTemplateComments(text) {
         "空白スペース",
         "余分なスペース",
         "余計なスペース",
+        "余白",
         "全角",
         "半角",
         "全角・半角",
@@ -1152,9 +1156,30 @@ function suppressTemplateComments(text) {
         "全角／半角",
         "コロン",
         "：",
-        " : ",
         "体裁",
-        "レイアウト"
+        "レイアウト",
+        "行頭をそろえ",
+        "行頭を揃え",
+        "先頭をそろえ",
+        "先頭を揃え",
+        "表記をそろえ",
+        "表記を揃え",
+        "表記を統一",
+        "書式をそろえ",
+        "書式を揃え",
+        "書式を統一",
+        "スタイルをそろえ",
+        "スタイルを揃え",
+        "スタイルを統一",
+        "他項目と同じスタイル",
+        "他項目と同じ書式",
+        "他項目と同様に揃え",
+        "他の行と同じように揃え",
+        "フォントサイズ",
+        "フォントをそろえ",
+        "フォントを揃え",
+        "見た目をそろえ",
+        "見た目を揃え"
     ];
 
     for (let i = 0; i < lines.length; i++) {
@@ -1169,21 +1194,21 @@ function suppressTemplateComments(text) {
             continue;
         }
 
-        // 【AI指摘】行の処理
-        if (trimmed.startsWith("【AI指摘】")) {
+        // コメント行（【コメント】〜）
+        if (trimmed.startsWith("【コメント】")) {
             const content = trimmed;
 
-            // ② 最初の【AI指摘】（1行目など、まだ元の行が一つも出ていない場合）は捨てる
+            // 文頭にいきなりコメントが来た場合（前に元の行が無い）は捨てる
             if (!seenRealLine) {
                 continue;
             }
 
-            // ①・⑤ インデント／空白／全角半角／コロンなどに関するコメントは捨てる
+            // レイアウト系キーワードを含むコメントは捨てる
             if (ngKeywords.some(k => content.includes(k))) {
                 continue;
             }
 
-            // ③ 「問題ありません」「修正の必要はありません」など、問題なしコメントは捨てる
+            // 「問題ありません」「修正不要」など問題なしコメントは捨てる
             if (
                 content.includes("問題ありません") ||
                 content.includes("問題はありません") ||
@@ -1195,7 +1220,7 @@ function suppressTemplateComments(text) {
                 continue;
             }
 
-            // ④ database テンプレ行に対するコメントは捨てる
+            // 直前行がテンプレ文ならコメントを捨てる
             if (out.length > 0) {
                 const prevTrim = out[out.length - 1].trim();
                 if (tmplSet.has(prevTrim)) {
@@ -1203,7 +1228,7 @@ function suppressTemplateComments(text) {
                 }
             }
 
-            // 上記すべてに当てはまらない【AI指摘】だけ残す
+            // 上記以外のコメントだけ残す
             out.push(line);
             continue;
         }
@@ -1225,44 +1250,53 @@ async function runAiCheck() {
     }
 
     const statusEl = document.getElementById("aiCheckStatus");
-    const btn = document.getElementById("aiCheckBtn");
+    const btn      = document.getElementById("aiCheckBtn");
+    const loading  = document.getElementById("loadingOverlay");
+    const loadText = document.getElementById("loadingText");
 
-    document.getElementById("loadingOverlay").style.display = "flex";
+    const setStep = (stepText) => {
+        if (statusEl)  statusEl.textContent = stepText;
+        if (loadText)  loadText.textContent = stepText;
+    };
+
+    loading.style.display = "flex";
     btn.disabled = true;
 
     try {
-        // 1/3 プロンプト準備中
-        statusEl.textContent = "1/3：AIチェック用の指示文を準備しています…";
+        // 1/4
+        setStep("1/4：AIチェック用の指示文を準備しています…");
         const prompt = buildAiCheckPrompt();
 
-        // 2/3 AI応答待ち
-        statusEl.textContent = "2/3：AIに送信中（応答待ち）…";
+        // 2/4
+        setStep("2/4：AIに送信中です（応答待ち: 数十秒かかる場合があります）…");
         const aiText = await callAI(prompt, null);
 
         if (!aiText || !aiText.trim()) {
-            statusEl.textContent = "AIから有効な結果が返ってきませんでした。";
+            setStep("AIから有効な結果が返ってきませんでした。");
             alert("AIチェック結果が取得できませんでした。");
             return;
         }
 
-        // 3/3 整形＋Word出力
-        statusEl.textContent = "3/3：結果を整形し、Wordファイルを作成しています…";
-
-        // 不要なコメントを削除
+        // 3/4
+        setStep("3/4：コメントを整理し、不要な指摘を削除しています…");
         const cleaned = suppressTemplateComments(aiText);
 
+        // 4/4
+        setStep("4/4：Wordファイルを作成しています…");
         await exportAiCheckedWord(cleaned, AICHECK_FILENAME);
+
         showToast("AIチェック結果のWordファイルを作成しました");
-        statusEl.textContent = "完了：AIチェック付きWordファイルをダウンロードしました。";
+        setStep("完了：AIチェック付きWordファイルをダウンロードしました。");
     } catch (e) {
         console.error(e);
-        statusEl.textContent = "エラーが発生しました。詳細はコンソールを確認してください。";
+        setStep("エラーが発生しました。詳細はコンソールを確認してください。");
         alert("AIチェック中にエラーが発生しました: " + e.message);
     } finally {
-        document.getElementById("loadingOverlay").style.display = "none";
+        loading.style.display = "none";
         btn.disabled = false;
     }
 }
+
 
 
 // AIチェック結果 → Word（赤字行 = 【AI指摘】。■総評ブロックも赤字）
@@ -1304,24 +1338,25 @@ async function exportAiCheckedWord(text, originalName) {
             continue;
         }
 
-        // AI指摘行
-        if (trimmed.startsWith("【AI指摘】")) {
-            children.push(
-                new docx.Paragraph({
-                    children: [
-                        new docx.TextRun({
-                            text: trimmed,
-                            font: "Meiryo UI",
-                            size: 21,
-                            color: "FF0000",
-                            italics: true
-                        })
-                    ],
-                    spacing: { after: 80 }
+      // コメント行（AIコメント）
+if (trimmed.startsWith("【コメント】")) {
+    children.push(
+        new docx.Paragraph({
+            children: [
+                new docx.TextRun({
+                    text: trimmed,
+                    font: "Meiryo UI",
+                    size: 21,
+                    color: "FF0000",
+                    italics: true
                 })
-            );
-            continue;
-        }
+            ],
+            spacing: { after: 80 }
+        })
+    );
+    continue;
+}
+
 
         // 通常行（総評ブロック内は赤字、それ以外は黒）
         const runProps = {
