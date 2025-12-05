@@ -247,6 +247,13 @@
     border-color: #ea580c;
     background: #ffedd5;
 }
+/* ファイル選択後の見た目を少し強調 */
+.ai-check-drop.has-file {
+    border-style: solid;
+    border-color: #ea580c;
+    background: #ffedd5;
+}
+
 
 
 
@@ -529,17 +536,18 @@ body {
                 </div>
 
                 <!-- ドロップゾーン -->
-                <div id="aiCheckDrop"
-                     class="ai-check-drop mb-2">
-                    <div class="text-[10px] font-bold text-amber-800 mb-1">
-                        マニュアル原稿ファイルをドラッグ＆ドロップ（.docx / .txt）
-                    </div>
-                    <div class="text-[10px] text-amber-700">
-                        既存のマニュアル Word ファイルをここにドロップしてください。<br>
-                        database由来の定型文は自動で判別し、指摘対象から除外します。
-                    </div>
-                    <input type="file" id="aiCheckFile" accept=".docx,.txt" class="file-overlay">
-                </div>
+            <div id="aiCheckDrop"
+     class="ai-check-drop mb-2">
+    <div class="text-[10px] font-bold text-amber-800 mb-1">
+        マニュアル原稿ファイルをドラッグ＆ドロップ（.docx / .txt）
+    </div>
+    <div class="text-[10px] text-amber-700">
+        作成したマニュアル原稿をここにドロップしてください（.docx / .txt）。<br>
+        ドロップした原稿の日本語表現・表記ゆれをAIがチェックします。
+    </div>
+    <input type="file" id="aiCheckFile" accept=".docx,.txt" class="file-overlay">
+</div>
+
 
                 <!-- ステータス表示 -->
                 <div id="aiCheckStatus" class="text-[10px] text-amber-800 mb-2 h-10 overflow-hidden">
@@ -548,11 +556,12 @@ body {
 
                 <!-- ボタン群 -->
                 <div class="mt-auto flex flex-col gap-1">
-                    <button id="aiCheckBtn"
-                            onclick="runAiCheck()"
-                            class="w-full text-xs font-bold py-2 rounded bg-amber-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-700">
-                        <i class="fas fa-magnifying-glass-check mr-1"></i> AIチェックを実行してWordダウンロード
-                    </button>
+                  <button id="aiCheckBtn"
+        onclick="runAiCheck()"
+        class="w-full text-xs font-bold py-2 rounded bg-amber-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-700">
+    <i class="fas fa-magnifying-glass-check mr-1"></i> AIチェックを実行
+</button>
+
           <div class="text-[10px] text-amber-900">
     ・チェックコメントは問題の行の「次の行」に <span class="font-bold">【コメント】</span> 付き赤字で挿入します。<br>
     ・総合的なコメントは末尾に「総評」として追記します。
@@ -999,14 +1008,18 @@ async function loadRefs(files){
 function handleAiCheckFiles(files) {
     if (!files || !files.length) return;
     const file = files[0];
-
     if (!file) return;
 
     AICHECK_FILENAME = file.name || "manual";
 
     const statusEl = document.getElementById("aiCheckStatus");
-    const btn = document.getElementById("aiCheckBtn");
+    const btn      = document.getElementById("aiCheckBtn");
+    const drop     = document.getElementById("aiCheckDrop");
+
     statusEl.textContent = "読込中...";
+    if (drop) {
+        drop.classList.add("has-file");   // 枠線を実線＋色強めに
+    }
 
     const ext = (file.name.split(".").pop() || "").toLowerCase();
 
@@ -1014,7 +1027,7 @@ function handleAiCheckFiles(files) {
         AICHECK_TEXT = text || "";
         if (AICHECK_TEXT.trim()) {
             statusEl.textContent =
-                `読み込み完了：${AICHECK_FILENAME}（文字数 約${AICHECK_TEXT.length}）`;
+                `選択中：${AICHECK_FILENAME}（文字数 約${AICHECK_TEXT.length}）`;
             btn.disabled = false;
         } else {
             statusEl.textContent = "本文が取得できませんでした";
@@ -1023,7 +1036,6 @@ function handleAiCheckFiles(files) {
     };
 
     if (ext === "docx") {
-        // Word → テキスト（既存の mammoth を利用）
         file.arrayBuffer()
             .then(ab => mammoth.extractRawText({ arrayBuffer: ab }))
             .then(res => done(res.value || ""))
@@ -1339,12 +1351,15 @@ async function exportAiCheckedWord(text, originalName) {
         }
 
       // コメント行（AIコメント）
+// → Word では先頭の「【コメント】」を削除し、赤字の本文だけを出力する
 if (trimmed.startsWith("【コメント】")) {
+    const body = trimmed.replace(/^【コメント】\s*/, "");
+
     children.push(
         new docx.Paragraph({
             children: [
                 new docx.TextRun({
-                    text: trimmed,
+                    text: body,
                     font: "Meiryo UI",
                     size: 21,
                     color: "FF0000",
@@ -1356,6 +1371,7 @@ if (trimmed.startsWith("【コメント】")) {
     );
     continue;
 }
+
 
 
         // 通常行（総評ブロック内は赤字、それ以外は黒）
