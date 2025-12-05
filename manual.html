@@ -639,6 +639,9 @@ window.onload = () => {
 
     setupOverlayDrop("partsImgDrop", "partsImgInput", f => loadImages(f, "parts"));
     setupOverlayDrop("refDrop", "refInput", loadRefs);
+    // ★ マニュアルAIチェック用ドロップゾーン
+    setupOverlayDrop("aiCheckDrop", "aiCheckFile", handleAiCheckFiles);
+
 
     window.addEventListener("paste", e => {
         const items = e.clipboardData.items;
@@ -685,12 +688,15 @@ async function loadExcelFromServer() {
     const data = await res.json();
     console.log("[loadExcelFromServer] response:", data);
 
-    // rows / templates を格納
-    RAW_DATA   = Array.isArray(data.rows)      ? data.rows      : [];
-    TEMPLATES  = Array.isArray(data.templates) ? data.templates : [];
+    // rows / templates / termRules を格納
+    RAW_DATA       = Array.isArray(data.rows)      ? data.rows      : [];
+    TEMPLATES      = Array.isArray(data.templates) ? data.templates : [];
+    AI_TERM_RULES  = Array.isArray(data.termRules) ? data.termRules : [];
 
     console.log("TEMPLATES:", TEMPLATES);
+    console.log("AI_TERM_RULES:", AI_TERM_RULES);
     renderCheckboxes();
+
 
   } catch (err) {
     console.error("[loadExcelFromServer] error:", err);
@@ -970,6 +976,232 @@ async function loadRefs(files){
                 continue;
             }
 
+// === マニュアル原稿AIチェック関連 ===
+function handleAiCheckFiles(files) {
+    if (!files || !files.length) return;
+    const file = files[0];
+
+    if (!file) return;
+
+    AICHECK_FILENAME = file.name || "manual";
+
+    const statusEl = document.getElementById("aiCheckStatus");
+    const btn = document.getElementById("aiCheckBtn");
+    statusEl.textContent = "読込中...";
+
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+
+    const done = (text) => {
+        AICHECK_TEXT = text || "";
+        if (AICHECK_TEXT.trim()) {
+            statusEl.textContent =
+                `読み込み完了：${AICHECK_FILENAME}（文字数 約${AICHECK_TEXT.length}）`;
+            btn.disabled = false;
+        } else {
+            statusEl.textContent = "本文が取得できませんでした";
+            btn.disabled = true;
+        }
+    };
+
+    if (ext === "docx") {
+        // Word → テキスト（既存の mammoth を利用）
+        file.arrayBuffer()
+            .then(ab => mammoth.extractRawText({ arrayBuffer: ab }))
+            .then(res => done(res.value || ""))
+            .catch(e => {
+                console.error(e);
+                alert("Wordファイルの読み込みに失敗しました。");
+                statusEl.textContent = "読み込みエラー";
+                btn.disabled = true;
+            });
+    } else if (ext === "txt") {
+        file.text()
+            .then(t => done(t))
+            .catch(e => {
+                console.error(e);
+                alert("テキストファイルの読み込みに失敗しました。");
+                statusEl.textContent = "読み込みエラー";
+                btn.disabled = true;
+            });
+    } else {
+        alert("現在は .docx / .txt のみ対応です。");
+        statusEl.textContent = "対応していないファイル形式です";
+        btn.disabled = true;
+    }
+}
+
+            function buildAiCheckPrompt() {
+    const manual = AICHECK_TEXT || "";
+    const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
+    const ruleLines = (AI_TERM_RULES || [])
+        .map(r => `${r.from} → ${r.to}`)
+        .join("\n");
+
+    return `
+あなたは日本語の取扱説明書を専門とするテクニカルライター兼校正者です。
+日本語だけで回答してください。
+
+目的：
+1. 与えられたマニュアル原稿について、日本語として不自然な表現・誤字脱字・文法ミスを指摘する。
+2. 取扱説明書として一般的で自然な言い回しになっているかを確認する。
+3. 「各部の名称」と本文中の表記の対応・表記ゆれを確認する。
+4. 「■使用方法」セクションの流れが、ユーザーにとって自然でわかりやすい順序になっているか確認する。
+
+重要ルール：
+- 下記「テンプレート文章一覧」に含まれる文は database 由来の定型文です。
+  これらと完全一致またはほぼ同じ内容の文については、誤字以外は指摘しないでください。
+- テンプレート由来の文は、必ずそのまま残し、修正案も付けないでください。
+- チェック対象は、ユーザーが独自に追加・編集したと考えられる部分を優先してください。
+- 「表記ルール」に反する表記（例：バッテリー → バッテリ）を見つけた場合は、
+  問題の行の次の行に、統一表記の提案を【AI指摘】行として挿入してください。
+
+出力フォーマット（厳守）：
+- 入力されたマニュアル本文を、基本的に行単位でそのまま出力してください。
+- 問題がある行については「元の行」をそのまま出力した直後の行に、
+  【AI指摘】から始まるコメント行を1行だけ挿入してください。
+  例：
+  （元の行）
+  【AI指摘】ここは「○○」ではなく「△△」とする方が一般的です。
+
+- 複数の指摘がある場合も、同じ行の次の行にまとめて1行で記載してください。
+- コメント行では、「どこをどう直すべきか」が具体的にわかるように書いてください。
+- 全体に対するコメントは、本文の末尾に
+  「■総評」という見出しを作り、その下に数行でまとめてください。
+
+- Markdownや番号付きリストは使わず、プレーンテキストだけで出力してください。
+
+「各部の名称」に関するチェック：
+- マニュアル本文内の「■各部の名称」セクションと、それ以外の本文を比較し、
+  名称の表記ゆれ（例：本体側面ボタン / 側面ボタン）や未使用の名称がないか確認してください。
+- 表記ゆれや未使用があれば、その行または最も関連の深い行の次に【AI指摘】行でコメントしてください。
+
+「■使用方法」セクションに関するチェック：
+- 「■使用方法」から次の「■」見出しまでを1つのブロックとみなし、
+  手順の抜け・順番の不自然さ・ユーザーが迷いそうな点を確認してください。
+- 問題があれば、該当行の直後に【AI指摘】行で提案してください。
+
+表記ルール一覧（統一ルール。これに反していても database テンプレは例外扱い）：
+${ruleLines || "（ルールなし）"}
+
+テンプレート文章一覧（database 由来。これらの文は原則として指摘しない）：
+${tmplLines || "（なし）"}
+
+マニュアル本文（これを行単位でそのまま出力し、必要に応じて【AI指摘】行を差し込んでください）：
+${manual}
+`.trim();
+}
+
+async function runAiCheck() {
+    if (!AICHECK_TEXT.trim()) {
+        alert("先にマニュアル原稿ファイルをドラッグ＆ドロップしてください。");
+        return;
+    }
+
+    document.getElementById("loadingOverlay").style.display = "flex";
+    const btn = document.getElementById("aiCheckBtn");
+    btn.disabled = true;
+
+    try {
+        const prompt = buildAiCheckPrompt();
+        // manual-ai をそのまま再利用（画像は不要なので null）
+        const aiText = await callAI(prompt, null);
+
+        if (!aiText || !aiText.trim()) {
+            alert("AIチェック結果が取得できませんでした。");
+            return;
+        }
+
+        await exportAiCheckedWord(aiText, AICHECK_FILENAME);
+        showToast("AIチェック結果のWordファイルを作成しました");
+    } catch (e) {
+        console.error(e);
+        alert("AIチェック中にエラーが発生しました: " + e.message);
+    } finally {
+        document.getElementById("loadingOverlay").style.display = "none";
+        btn.disabled = false;
+    }
+}
+
+// AIチェック結果 → Word（赤字行 = 【AI指摘】）
+async function exportAiCheckedWord(text, originalName) {
+    const lines = (text || "").split(/\r?\n/);
+    const children = [];
+
+    for (const raw of lines) {
+        const trimmed = raw.trim();
+
+        // 空行
+        if (!trimmed) {
+            children.push(new docx.Paragraph({ text: "" }));
+            continue;
+        }
+
+        // 見出し（■〜）
+        if (trimmed.startsWith("■")) {
+            children.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: trimmed,
+                            font: "Meiryo UI",
+                            bold: true,
+                            size: 24
+                        })
+                    ],
+                    spacing: { before: 200, after: 100 }
+                })
+            );
+            continue;
+        }
+
+        // AI指摘行
+        if (trimmed.startsWith("【AI指摘】")) {
+            children.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: trimmed,
+                            font: "Meiryo UI",
+                            size: 21,
+                            color: "FF0000",
+                            italics: true
+                        })
+                    ],
+                    spacing: { after: 80 }
+                })
+            );
+            continue;
+        }
+
+        // 通常行
+        children.push(
+            new docx.Paragraph({
+                children: [
+                    new docx.TextRun({
+                        text: raw,
+                        font: "Meiryo UI",
+                        size: 21
+                    })
+                ],
+                spacing: { after: 50 }
+            })
+        );
+    }
+
+    const doc = new docx.Document({
+        sections: [{ children }]
+    });
+
+    const blob = await docx.Packer.toBlob(doc);
+
+    let base = (originalName || "manual").replace(/\.docx$/i, "");
+    if (!base) base = "manual";
+    const fileName = `${base}_AIチェック.docx`;
+
+    saveAs(blob, fileName);
+}
+
+            
             // 画像以外 → テキスト化して REF_TEXT に追記
             let txt = "";
             if (f.name.endsWith(".pdf")) {
