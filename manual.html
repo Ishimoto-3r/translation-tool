@@ -10,6 +10,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js";
     </script>
@@ -590,12 +591,14 @@ let LIB_READY = false;
 let toastTimer = null;
 let TEMPLATES = [];        // 定型文
 let AI_TERM_RULES = [];    // 表記ルール（表記ゆれ用）
-let AICHECK_TEXT = "";     // AIチェック対象のマニュアル本文
-let AICHECK_FILENAME = ""; // 元ファイル名
 
-// ★ AIチェック用：元Wordから変換したHTML Documentとテキスト行
-let AICHECK_DOC = null;          // DOMParser / createHTMLDocument で作った Document
-let AICHECK_TEXT_LINES = [];     // 行ごとのプレーンテキスト（AIに渡す/マッピング用）
+// ▼ AIチェック関連
+let AICHECK_TEXT = "";           // txt モード用：AIチェック対象のマニュアル本文
+let AICHECK_FILENAME = "";       // 元ファイル名
+let AICHECK_IS_DOCX = false;     // true: docx を AIチェック中 / false: txt モード
+let AICHECK_DOCX_BUFFER = null;  // docx モード用：元の .docx の ArrayBuffer
+let AICHECK_PARAGRAPHS = [];     // docx モード用：{ pid, text, section, pIndex }
+
 
 
 
@@ -763,6 +766,305 @@ function selectCompany(code, el){
     }
 }
 
+/* === docx 段落解析＆コメント挿入用ヘルパー === */
+
+/**
+ * word/document.xml の w:p からテキストを抽出
+ */
+function extractTextFromParagraph(pElem) {
+    const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const texts = [];
+    const tNodes = pElem.getElementsByTagNameNS(wNs, "t");
+    for (let i = 0; i < tNodes.length; i++) {
+        texts.push(tNodes[i].textContent || "");
+    }
+    return texts.join("").replace(/\r/g, "");
+}
+
+/**
+ * 元 docx (ArrayBuffer) から、AI 用の段落リストを作る。
+ * - AICHECK_PARAGRAPHS に { pid, text, section, pIndex } を格納
+ * - section: "normal" / "support"
+ */
+async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
+    AICHECK_PARAGRAPHS = [];
+
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const docXml = await zip.file("word/document.xml").async("text");
+
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(docXml, "application/xml");
+
+    const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const body = xmlDoc.getElementsByTagNameNS(wNs, "body")[0];
+    if (!body) return;
+
+    const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
+
+    let pidCounter = 0;
+    let inSupport = false;
+
+    for (let i = 0; i < pList.length; i++) {
+        const p = pList[i];
+        const text = extractTextFromParagraph(p).trim();
+
+        // 完全な空パラグラフは AI 対象から除外
+        if (!text) continue;
+
+        // セクション判定：■サポート・企業情報 ～ 次の ■ まで
+        if (text.startsWith("■サポート・企業情報")) {
+            inSupport = true;
+        } else if (inSupport && text.startsWith("■") && !text.startsWith("■サポート・企業情報")) {
+            // 他の「■」見出しでサポートセクション終了
+            inSupport = false;
+        }
+
+        const pid = "P" + String(pidCounter).padStart(3, "0");
+        pidCounter++;
+
+        AICHECK_PARAGRAPHS.push({
+            pid,
+            text,
+            section: inSupport ? "support" : "normal",
+            pIndex: i       // document.xml 内の w:p のインデックス
+        });
+    }
+}
+
+/**
+ * docx モード用：AI からの返答 (P000: xxx / TOTAL: yyy) を
+ * { commentsByPid, totalComment } に変換し、不要コメントを除外
+ */
+function parseAiCheckResponse(rawText) {
+    const lines = (rawText || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+    const commentsByPid = {};
+    let totalComment = "";
+
+    // テンプレ文セット（docx モードでは段落テキストと直接比較する）
+    const tmplSet = new Set(
+        (TEMPLATES || []).map(t => (t.text || "").trim()).filter(Boolean)
+    );
+
+    const findParagraphByPid = (pid) =>
+        AICHECK_PARAGRAPHS.find(p => p.pid === pid);
+
+    for (const line of lines) {
+        if (line.toUpperCase().startsWith("TOTAL:")) {
+            totalComment = line.replace(/^TOTAL:\s*/i, "").trim();
+            continue;
+        }
+
+        const m = line.match(/^P(\d{3})\s*[:：]\s*(.+)$/);
+        if (!m) continue;
+
+        const pid = "P" + m[1];
+        const commentText = (m[2] || "").trim();
+        const para = findParagraphByPid(pid);
+
+        // 存在しない PID / support セクションへのコメントは無視
+        if (!para || para.section === "support") continue;
+
+        // テンプレ由来の段落ならコメント抑制
+        const isTemplatePara = tmplSet.has((para.text || "").trim());
+
+        if (shouldSuppressComment(commentText, isTemplatePara)) {
+            continue;
+        }
+
+        commentsByPid[pid] = commentText;
+    }
+
+    return { commentsByPid, totalComment };
+}
+
+/**
+ * コメント内容から「レイアウト系」「問題なし系」などを除外する判定
+ * @param {string} content コメント本文
+ * @param {boolean} isTemplatePara 対象段落がテンプレ由来かどうか
+ */
+function shouldSuppressComment(content, isTemplatePara) {
+    if (!content) return true;
+
+    // テンプレ段落は原則コメント禁止
+    if (isTemplatePara) return true;
+
+    const ngKeywords = [
+        "インデント",
+        "字下げ",
+        "スペース",
+        "空白",
+        "空白スペース",
+        "余分なスペース",
+        "余計なスペース",
+        "余白",
+        "全角",
+        "半角",
+        "全角・半角",
+        "全角/半角",
+        "全角／半角",
+        "コロン",
+        "：",
+        "体裁",
+        "レイアウト",
+        "行頭をそろえ",
+        "行頭を揃え",
+        "先頭をそろえ",
+        "先頭を揃え",
+        "表記をそろえ",
+        "表記を揃え",
+        "表記を統一",
+        "書式をそろえ",
+        "書式を揃え",
+        "書式を統一",
+        "スタイルをそろえ",
+        "スタイルを揃え",
+        "スタイルを統一",
+        "他項目と同じスタイル",
+        "他項目と同じ書式",
+        "他項目と同様に揃え",
+        "他の行と同じように揃え",
+        "フォントサイズ",
+        "フォントをそろえ",
+        "フォントを揃え",
+        "見た目をそろえ",
+        "見た目を揃え"
+    ];
+
+    // レイアウト系
+    if (ngKeywords.some(k => content.includes(k))) {
+        return true;
+    }
+
+    // 「問題ありません」系
+    if (
+        content.includes("問題ありません") ||
+        content.includes("問題はありません") ||
+        content.includes("問題はない") ||
+        content.includes("修正の必要はありません") ||
+        content.includes("修正の必要はない") ||
+        (content.includes("このままで") && content.includes("問題"))
+    ) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * docx モード用：元の document.xml にコメント段落を追記して新しい .docx を生成
+ */
+async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, totalComment, originalName) {
+    if (!arrayBuffer) {
+        throw new Error("元の docx データがありません。");
+    }
+
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const docXml = await zip.file("word/document.xml").async("text");
+
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(docXml, "application/xml");
+
+    const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const body = xmlDoc.getElementsByTagNameNS(wNs, "body")[0];
+    const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
+
+    // pid -> pIndex のマップ
+    const indexByPid = new Map();
+    AICHECK_PARAGRAPHS.forEach(p => {
+        indexByPid.set(p.pid, p.pIndex);
+    });
+
+    // コメントの挿入順を「段落インデックスの降順」にして、インデックスずれを防ぐ
+    const pidList = Object.keys(commentsByPid || {}).sort((a, b) => {
+        const ia = indexByPid.get(a);
+        const ib = indexByPid.get(b);
+        return (ia ?? 0) - (ib ?? 0);
+    });
+
+    for (let i = pidList.length - 1; i >= 0; i--) {
+        const pid = pidList[i];
+        const idx = indexByPid.get(pid);
+        if (idx == null) continue;
+
+        const baseP = pList[idx];
+        if (!baseP) continue;
+
+        const commentText = (commentsByPid[pid] || "").trim();
+        if (!commentText) continue;
+
+        // コメント用の段落を作成（pPr は元段落からコピー）
+        const commentP = xmlDoc.createElementNS(wNs, "w:p");
+
+        const basePPr = baseP.getElementsByTagNameNS(wNs, "pPr")[0];
+        if (basePPr) {
+            commentP.appendChild(basePPr.cloneNode(true));
+        }
+
+        const r = xmlDoc.createElementNS(wNs, "w:r");
+        const rPr = xmlDoc.createElementNS(wNs, "w:rPr");
+
+        const color = xmlDoc.createElementNS(wNs, "w:color");
+        color.setAttributeNS(wNs, "w:val", "FF0000");
+
+        const highlight = xmlDoc.createElementNS(wNs, "w:highlight");
+        highlight.setAttributeNS(wNs, "w:val", "yellow");
+
+        rPr.appendChild(color);
+        rPr.appendChild(highlight);
+
+        const t = xmlDoc.createElementNS(wNs, "w:t");
+        t.textContent = commentText;
+
+        r.appendChild(rPr);
+        r.appendChild(t);
+        commentP.appendChild(r);
+
+        if (baseP.nextSibling) {
+            body.insertBefore(commentP, baseP.nextSibling);
+        } else {
+            body.appendChild(commentP);
+        }
+    }
+
+    // ■総評（TOTAL）がある場合は末尾に 1 段落として追加
+    if (totalComment && totalComment.trim()) {
+        const totalP = xmlDoc.createElementNS(wNs, "w:p");
+        const r = xmlDoc.createElementNS(wNs, "w:r");
+        const rPr = xmlDoc.createElementNS(wNs, "w:rPr");
+
+        const color = xmlDoc.createElementNS(wNs, "w:color");
+        color.setAttributeNS(wNs, "w:val", "FF0000");
+        const highlight = xmlDoc.createElementNS(wNs, "w:highlight");
+        highlight.setAttributeNS(wNs, "w:val", "yellow");
+
+        rPr.appendChild(color);
+        rPr.appendChild(highlight);
+
+        const t = xmlDoc.createElementNS(wNs, "w:t");
+        t.textContent = "■総評 " + totalComment;
+
+        r.appendChild(rPr);
+        r.appendChild(t);
+        totalP.appendChild(r);
+        body.appendChild(totalP);
+    }
+
+    const serializer = new XMLSerializer();
+    const newXml = serializer.serializeToString(xmlDoc);
+    zip.file("word/document.xml", newXml);
+
+    const outBlob = await zip.generateAsync({ type: "blob" });
+
+    let base = (originalName || "manual").replace(/\.docx$/i, "");
+    if (!base) base = "manual";
+    const fileName = `${base}_AIチェック.docx`;
+
+    saveAs(outBlob, fileName);
+}
+
+
+    
 /* ---- ドロップ設定 ---- */
 function setupOverlayDrop(zoneId, inputId, handler) {
     const z = document.getElementById(zoneId);
@@ -1017,54 +1319,55 @@ async function handleAiCheckFiles(files) {
     const file = files[0];
     if (!file) return;
 
-    // 既存状態をリセット
-    AICHECK_FILENAME   = file.name || "manual";
-    AICHECK_TEXT       = "";
-    AICHECK_TEXT_LINES = [];
-    AICHECK_DOC        = null;
+    AICHECK_FILENAME = file.name || "manual";
 
     const statusEl = document.getElementById("aiCheckStatus");
     const btn      = document.getElementById("aiCheckBtn");
     const drop     = document.getElementById("aiCheckDrop");
 
     statusEl.textContent = "読込中...";
-    btn.disabled = true;
-
     if (drop) {
-        drop.classList.add("has-file");   // 枠線を実線＋色強めに
+        drop.classList.add("has-file");
     }
 
     const ext = (file.name.split(".").pop() || "").toLowerCase();
 
-    // 読み込み完了後に共通で呼ぶ処理
-    const done = (text) => {
-        AICHECK_TEXT = text || "";
-        if (AICHECK_TEXT.trim()) {
-            statusEl.textContent =
-                `選択中：${AICHECK_FILENAME}（文字数 約${AICHECK_TEXT.length}）`;
-            btn.disabled = false;
-        } else {
-            statusEl.textContent = "本文が取得できませんでした";
-            btn.disabled = true;
-        }
-    };
+    // 共通：状態リセット
+    AICHECK_TEXT = "";
+    AICHECK_DOCX_BUFFER = null;
+    AICHECK_PARAGRAPHS = [];
 
     try {
         if (ext === "docx") {
-            // ▼ docx：mammoth で HTML 化し、画像入りの Document とテキスト行を作る
-            const { doc, lines } = await loadDocxToHtmlDocument(file);
-            AICHECK_DOC        = doc;
-            AICHECK_TEXT_LINES = lines;
-            const plain = lines.join("\n");
-            done(plain);
+            // ▼ docx モード
+            const ab = await file.arrayBuffer();
+            AICHECK_IS_DOCX = true;
+            AICHECK_DOCX_BUFFER = ab;
+
+            await parseDocxParagraphsFromArrayBuffer(ab);
+
+            const targetTextLen = AICHECK_PARAGRAPHS
+                .filter(p => p.section !== "support")
+                .map(p => p.text)
+                .join("\n").length;
+
+            statusEl.textContent =
+                `選択中：${AICHECK_FILENAME}（段落数 ${AICHECK_PARAGRAPHS.length} / チェック対象文字数 約${targetTextLen}）`;
+            btn.disabled = false;
         } else if (ext === "txt") {
-            // ▼ txt：1行ずつ <p> にした Document を作る
-            const rawText = await file.text();
-            const { doc, lines } = createHtmlDocFromPlainText(rawText);
-            AICHECK_DOC        = doc;
-            AICHECK_TEXT_LINES = lines;
-            const plain = lines.join("\n");
-            done(plain);
+            // ▼ txt モード（従来どおりテキスト全文を扱う）
+            AICHECK_IS_DOCX = false;
+            const t = await file.text();
+            AICHECK_TEXT = t || "";
+
+            if (AICHECK_TEXT.trim()) {
+                statusEl.textContent =
+                    `選択中：${AICHECK_FILENAME}（文字数 約${AICHECK_TEXT.length}）`;
+                btn.disabled = false;
+            } else {
+                statusEl.textContent = "本文が取得できませんでした";
+                btn.disabled = true;
+            }
         } else {
             alert("現在は .docx / .txt のみ対応です。");
             statusEl.textContent = "対応していないファイル形式です";
@@ -1077,6 +1380,7 @@ async function handleAiCheckFiles(files) {
         btn.disabled = true;
     }
 }
+
 
 
 // docx ファイルを HTML + 画像付きの Document に変換し、行テキストを抽出
@@ -1154,6 +1458,92 @@ function extractTextLinesFromDoc(doc) {
 
 
 function buildAiCheckPrompt() {
+    if (AICHECK_IS_DOCX) {
+        return buildAiCheckPromptForDocx();
+    } else {
+        return buildAiCheckPromptForPlainText();
+    }
+}
+
+/**
+ * docx モード：段落ID付きで AI にコメントだけ出させるプロンプト
+ */
+function buildAiCheckPromptForDocx() {
+    const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
+    const ruleLines = (AI_TERM_RULES || [])
+        .map(r => `${r.from} → ${r.to}`)
+        .join("\n");
+
+    // サポート・企業情報以外の段落だけ AI に渡す
+    const listText = (AICHECK_PARAGRAPHS || [])
+        .filter(p => p.section !== "support")
+        .map(p => `${p.pid}\n${p.text}`)
+        .join("\n\n");
+
+    return `
+あなたは日本語の取扱説明書を専門とするテクニカルライター兼校正者です。
+日本語だけで回答してください。
+
+目的：
+1. 与えられたマニュアル原稿について、日本語として不自然な表現・誤字脱字・文法ミスを指摘する。
+2. 取扱説明書として一般的で自然な言い回しになっているかを確認する。
+3. 「各部の名称」と本文中の表記の対応・表記ゆれを確認する。
+4. 「■使用方法」セクションの流れが、ユーザーにとって自然でわかりやすい順序になっているか確認する。
+
+重要ルール：
+- 下記「テンプレート文章一覧」に含まれる文は database 由来の定型文です。
+  これらと完全一致またはほぼ同じ内容の文については、誤字以外は指摘しないでください。
+- テンプレート由来の文は、必ずそのまま残し、修正案も付けないでください。
+- チェック対象は、ユーザーが独自に追加・編集したと考えられる部分を優先してください。
+- 「表記ルール」に反する表記（例：バッテリー → バッテリ）を見つけた場合は、
+  統一表記の提案をコメントで示してください。
+- 体裁やレイアウトに関する指摘は絶対にしてはいけません。
+  特に次のような内容は指摘禁止です：
+  ・行頭や行末の空白、インデント（字下げ）の違い
+  ・空白スペースの有無や数の違い
+  ・全角と半角の違い（スペース、英数字、括弧、記号、コロンなど）
+  ・「：」と「:」の違い、句読点・カンマ・ピリオドの有無の違い
+  ・段落の揃え方や余白、レイアウト、装飾に関するコメント
+- 上記禁止事項に関するコメントは、「問題があっても書かない」こと。
+
+■サポート・企業情報セクションについて：
+- 「■サポート・企業情報」以降～次の「■」見出しまでの段落は、
+  すでにチェック対象から除外されています。
+- これらの段落に対するコメントは、一切出力しないでください。
+
+出力フォーマット（厳守）：
+- 入力で与えた各段落には ID が振られています（P000, P001, ...）。
+- 問題がある段落だけについて、次の形式で1行ずつ出力してください：
+
+P000: コメント本文
+P010: コメント本文
+
+- コメントは、どこをどのように直すと良いかが具体的にわかるように書いてください。
+- 「問題ありません」「このままで問題ありません」など、
+  問題がないことだけを伝えるコメントは書かないでください。
+- 全体に対する総評は、最後に1行だけ
+
+TOTAL: 総評本文
+
+という形式で出力してください。
+- Markdown 記法や箇条書きは使用せず、すべてプレーンテキストで出力してください。
+
+表記ルール一覧（統一ルール。これに反していても database テンプレは例外扱い）：
+${ruleLines || "（ルールなし）"}
+
+テンプレート文章一覧（database 由来。これらの文は原則として指摘しない）：
+${tmplLines || "（なし）"}
+
+チェック対象の段落一覧（ID と本文）：
+${listText}
+`.trim();
+}
+
+/**
+ * txt モード：従来どおり「全文＋コメント行」で返すプロンプト
+ * （元の buildAiCheckPrompt の中身）
+ */
+function buildAiCheckPromptForPlainText() {
     const manual = AICHECK_TEXT || "";
     const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
     const ruleLines = (AI_TERM_RULES || [])
@@ -1202,16 +1592,6 @@ function buildAiCheckPrompt() {
 
 - Markdownや番号付きリストは使わず、プレーンテキストだけで出力してください。
 
-「各部の名称」に関するチェック：
-- マニュアル本文内の「■各部の名称」セクションと、それ以外の本文を比較し、
-  名称の表記ゆれ（例：本体側面ボタン / 側面ボタン）や未使用の名称がないか確認してください。
-- 表記ゆれや未使用があれば、その行または最も関連の深い行の次に【コメント】行でコメントしてください。
-
-「■使用方法」セクションに関するチェック：
-- 「■使用方法」から次の「■」見出しまでを1つのブロックとみなし、
-  手順の抜け・順番の不自然さ・ユーザーが迷いそうな点を確認してください。
-- 問題があれば、該当行の直後に【コメント】行で提案してください。
-
 表記ルール一覧（統一ルール。これに反していても database テンプレは例外扱い）：
 ${ruleLines || "（ルールなし）"}
 
@@ -1222,6 +1602,7 @@ ${tmplLines || "（なし）"}
 ${manual}
 `.trim();
 }
+
 
 
 
@@ -1347,9 +1728,17 @@ function suppressTemplateComments(text) {
 
 
 async function runAiCheck() {
-    if (!AICHECK_TEXT.trim()) {
-        alert("先にマニュアル原稿ファイルをドラッグ＆ドロップしてください。");
-        return;
+    // 入力チェック（docx / txt で分岐）
+    if (AICHECK_IS_DOCX) {
+        if (!AICHECK_DOCX_BUFFER) {
+            alert("先にマニュアル原稿の Word ファイル（.docx）をドラッグ＆ドロップしてください。");
+            return;
+        }
+    } else {
+        if (!AICHECK_TEXT.trim()) {
+            alert("先にマニュアル原稿ファイル（.txt）をドラッグ＆ドロップしてください。");
+            return;
+        }
     }
 
     const statusEl = document.getElementById("aiCheckStatus");
@@ -1380,13 +1769,26 @@ async function runAiCheck() {
             return;
         }
 
-        // 3/4
-        setStep("3/4：コメントを整理し、不要な指摘を削除しています…");
-        const cleaned = suppressTemplateComments(aiText);
+        if (AICHECK_IS_DOCX) {
+            // ▼ docx モード：P000: コメント / TOTAL: ... を解析して追記
+            setStep("3/4：コメントを解析し、不要な指摘を削除しています…");
+            const { commentsByPid, totalComment } = parseAiCheckResponse(aiText);
 
-        // 4/4
-        setStep("4/4：Wordファイルを作成しています…");
-        await exportAiCheckedWord(cleaned, AICHECK_FILENAME);
+            setStep("4/4：元の Word にコメントを追記しています…");
+            await exportAiCheckedDocxWithComments(
+                AICHECK_DOCX_BUFFER,
+                commentsByPid,
+                totalComment,
+                AICHECK_FILENAME
+            );
+        } else {
+            // ▼ txt モード：従来どおり全文テキストを再構成する
+            setStep("3/4：コメントを整理し、不要な指摘を削除しています…");
+            const cleaned = suppressTemplateComments(aiText);
+
+            setStep("4/4：Wordファイルを作成しています…");
+            await exportAiCheckedWord(cleaned, AICHECK_FILENAME);
+        }
 
         showToast("AIチェック結果のWordファイルを作成しました");
         setStep("完了：AIチェック付きWordファイルをダウンロードしました。");
