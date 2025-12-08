@@ -1409,34 +1409,8 @@ async function exportAiCheckedWord(aiText, originalName) {
         return;
     }
 
-    // ★ まず AIコメント（【コメント】行）を AICHECK_DOC にマージ
+    // AIコメント（【コメント】行）を AICHECK_DOC にマージ
     mergeAiCommentsIntoDoc(aiText);
-
-    // ★ フォントと画像の基本スタイルを追加
-    // head 要素が無い場合は作る
-    let head = AICHECK_DOC.head;
-    if (!head) {
-        head = AICHECK_DOC.createElement("head");
-        const htmlEl = AICHECK_DOC.documentElement || AICHECK_DOC.getElementsByTagName("html")[0];
-        if (htmlEl) {
-            htmlEl.insertBefore(head, htmlEl.firstChild);
-        }
-    }
-    const styleEl = AICHECK_DOC.createElement("style");
-    styleEl.type = "text/css";
-    styleEl.textContent = `
-        body {
-            font-family: "Meiryo UI", "Meiryo", "MS PGothic", sans-serif;
-        }
-        p, li, span {
-            font-family: inherit;
-        }
-        img {
-            max-width: 100%;
-            height: auto;
-        }
-    `;
-    head.appendChild(styleEl);
 
     // HTML 文字列として取り出し
     const html =
@@ -1459,7 +1433,6 @@ async function exportAiCheckedWord(aiText, originalName) {
 
     saveAs(blob, fileName);
 }
-
 
 
 // AIから返ってきたテキスト（元行＋【コメント】行）を、AICHECK_DOC にマージする
@@ -1517,22 +1490,24 @@ function mergeAiCommentsIntoDoc(aiText) {
 
         const selector = `[data-ai-line-index="${idx}"]`;
         const baseEl = body.querySelector(selector);
-        if (!baseEl) return;
+        if (!baseEl || !baseEl.parentNode) return;
 
-        // 基準要素の末尾に <br>＋<span> でコメントを追記する
+        // 基準要素の直後に <p> コメントを挿入（複数あれば順に）
+        let insertAfter = baseEl;
         comments.forEach(text => {
-            // 改行（同じ段落内で改行）
-            const br = AICHECK_DOC.createElement("br");
-            baseEl.appendChild(br);
+            const p = AICHECK_DOC.createElement("p");
+            p.textContent = text;
+            // ★ 指定どおり：赤字＋黄色ハイライト
+            p.style.color = "red";
+            p.style.backgroundColor = "yellow";
+            p.style.fontStyle = "italic";
 
-            // コメント本体（赤字＋黄色、斜体にはしない）
-            const span = AICHECK_DOC.createElement("span");
-            span.textContent = text;
-            span.style.color = "red";
-            span.style.backgroundColor = "yellow";
-            span.style.fontStyle = "normal";  // ★ 斜体禁止
-
-            baseEl.appendChild(span);
+            if (insertAfter.nextSibling) {
+                insertAfter.parentNode.insertBefore(p, insertAfter.nextSibling);
+            } else {
+                insertAfter.parentNode.appendChild(p);
+            }
+            insertAfter = p;
         });
     });
 }
