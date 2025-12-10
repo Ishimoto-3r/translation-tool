@@ -1314,71 +1314,56 @@ async function loadRefs(files){
 }
 
 // === マニュアル原稿AIチェック関連 ===
-async function handleAiCheckFiles(files) {
+function handleAiCheckFiles(files) {
     if (!files || !files.length) return;
     const file = files[0];
     if (!file) return;
-
-    AICHECK_FILENAME = file.name || "manual";
 
     const statusEl = document.getElementById("aiCheckStatus");
     const btn      = document.getElementById("aiCheckBtn");
     const drop     = document.getElementById("aiCheckDrop");
 
-    statusEl.textContent = "読込中...";
-    if (drop) {
-        drop.classList.add("has-file");
+    // 拡張子判定（.docx のみ許可）
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    if (ext !== "docx") {
+        alert("現在、AIチェックは .docx ファイルのみ対応しています。");
+        statusEl.textContent = "対応していないファイル形式です（.docxのみ対応）";
+        btn.disabled = true;
+        if (drop) drop.classList.remove("has-file");
+        AICHECK_TEXT = "";
+        AICHECK_FILENAME = "";
+        return;
     }
 
-    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    AICHECK_FILENAME = file.name || "manual";
+    statusEl.textContent = "読込中...";
+    btn.disabled = true;
+    if (drop) {
+        drop.classList.add("has-file");   // 枠線を実線＋色強めに
+    }
 
-    // 共通：状態リセット
-    AICHECK_TEXT = "";
-    AICHECK_DOCX_BUFFER = null;
-    AICHECK_PARAGRAPHS = [];
-
-    try {
-        if (ext === "docx") {
-            // ▼ docx モード
-            const ab = await file.arrayBuffer();
-            AICHECK_IS_DOCX = true;
-            AICHECK_DOCX_BUFFER = ab;
-
-            await parseDocxParagraphsFromArrayBuffer(ab);
-
-            const targetTextLen = AICHECK_PARAGRAPHS
-                .filter(p => p.section !== "support")
-                .map(p => p.text)
-                .join("\n").length;
-
+    const done = (text) => {
+        AICHECK_TEXT = text || "";
+        if (AICHECK_TEXT.trim()) {
             statusEl.textContent =
-                `選択中：${AICHECK_FILENAME}（段落数 ${AICHECK_PARAGRAPHS.length} / チェック対象文字数 約${targetTextLen}）`;
+                `選択中：${AICHECK_FILENAME}（文字数 約${AICHECK_TEXT.length}）`;
             btn.disabled = false;
-        } else if (ext === "txt") {
-            // ▼ txt モード（従来どおりテキスト全文を扱う）
-            AICHECK_IS_DOCX = false;
-            const t = await file.text();
-            AICHECK_TEXT = t || "";
-
-            if (AICHECK_TEXT.trim()) {
-                statusEl.textContent =
-                    `選択中：${AICHECK_FILENAME}（文字数 約${AICHECK_TEXT.length}）`;
-                btn.disabled = false;
-            } else {
-                statusEl.textContent = "本文が取得できませんでした";
-                btn.disabled = true;
-            }
         } else {
-            alert("現在は .docx / .txt のみ対応です。");
-            statusEl.textContent = "対応していないファイル形式です";
+            statusEl.textContent = "本文が取得できませんでした";
             btn.disabled = true;
         }
-    } catch (e) {
-        console.error(e);
-        alert("ファイルの読み込みに失敗しました。");
-        statusEl.textContent = "読み込みエラー";
-        btn.disabled = true;
-    }
+    };
+
+    // .docx → mammoth でテキスト抽出
+    file.arrayBuffer()
+        .then(ab => mammoth.extractRawText({ arrayBuffer: ab }))
+        .then(res => done(res.value || ""))
+        .catch(e => {
+            console.error(e);
+            alert("Wordファイルの読み込みに失敗しました。");
+            statusEl.textContent = "読み込みエラー";
+            btn.disabled = true;
+        });
 }
 
 
