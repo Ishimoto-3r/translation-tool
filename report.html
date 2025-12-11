@@ -258,60 +258,7 @@
     color: white;
     font-weight: 600;
 }
-        .dialog-overlay {
-            position: fixed;
-            inset: 0;
-            background-color: rgba(15, 23, 42, 0.45);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 1100;
-        }
-                .dialog-overlay.hidden { display: none; }
-
-        .dialog {
-            background-color: #ffffff;
-            padding: 1.5rem 1.75rem;
-            border-radius: 0.75rem;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-            max-width: 480px;
-            width: 90%;
-        }
-        .dialog p {
-            margin-top: 0;
-            margin-bottom: 1.25rem;
-            line-height: 1.6;
-            color: #111827;
-            font-size: 0.95rem;
-        }
-        .dialog-buttons {
-            display: flex;
-            justify-content: flex-end;
-            gap: 0.75rem;
-        }
-        .dialog-btn-primary,
-        .dialog-btn-secondary {
-            padding: 0.45rem 1.1rem;
-            border-radius: 9999px;
-            border: none;
-            font-size: 0.9rem;
-            font-weight: 600;
-            cursor: pointer;
-        }
-        .dialog-btn-primary {
-            background-color: #3b82f6;
-            color: #ffffff;
-        }
-        .dialog-btn-primary:hover {
-            background-color: #2563eb;
-        }
-        .dialog-btn-secondary {
-            background-color: #e5e7eb;
-            color: #374151;
-        }
-        .dialog-btn-secondary:hover {
-            background-color: #d1d5db;
-        }
+        
 
         
     </style>
@@ -408,20 +355,7 @@
         </div>
     </div>
 
-    <!-- 買い替え提案検知ダイアログ -->
-    <div id="buy-dialog" class="dialog-overlay hidden">
-        <div class="dialog">
-            <p>
-                買い替え提案している内容が検知されました。<br>
-                基本的に開発からの買い替え提案は不要です。<br>
-                このまま出力を続けますか？
-            </p>
-            <div class="dialog-buttons">
-                <button id="buy-dialog-yes" class="dialog-btn-primary">はい</button>
-                <button id="buy-dialog-no" class="dialog-btn-secondary">いいえ</button>
-            </div>
-        </div>
-    </div>
+
 
     <script src="/report.js" defer></script>
 </body>
