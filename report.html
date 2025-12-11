@@ -228,6 +228,12 @@
             color: #dc2626;
             font-weight: 600;
         }
+                .warning-text {
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+            color: #dc2626; /* 赤 */
+        }
+
 /* --- ★ここから追加★ ナビゲーションバー --- */
 .tool-nav {
     background-color: #374151; /* bg-gray-700 */
@@ -273,6 +279,23 @@
         <div id="main-header">
             <h1>修理レポート作成アシスタント (GPT-5)</h1>
             <button id="clear-all-btn-top" class="clear-btn-small">入力内容をクリア</button>
+        </div>
+
+        <div class="form-group">
+            <label>0. 購入から5年以上経過していますか？（お客様の申告で可）</label>
+            <div class="checkbox-group">
+                <label for="over5y-y">
+                    <input type="checkbox" id="over5y-y" value="y">
+                    <span></span> はい
+                </label>
+                <label for="over5y-n">
+                    <input type="checkbox" id="over5y-n" value="n">
+                    <span></span> いいえ
+                </label>
+            </div>
+            <div id="over5y-warning" class="warning-text hidden">
+                商品の状態によっては修理不可の提案が可能です。ご検討ください。
+            </div>
         </div>
 
         <div class="form-group">
