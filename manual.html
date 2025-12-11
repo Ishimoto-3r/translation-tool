@@ -1451,7 +1451,7 @@ function buildAiCheckPrompt() {
  * docx モード：段落ID付きで AI にコメントだけ出させるプロンプト
  */
 function buildAiCheckPromptForDocx() {
-    const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
+    const tmplLines = (TEMPLLES || []).map(t => t.text).join("\n");
     const ruleLines = (AI_TERM_RULES || [])
         .map(r => `${r.from} → ${r.to}`)
         .join("\n");
@@ -1488,6 +1488,16 @@ function buildAiCheckPromptForDocx() {
   ・段落の揃え方や余白、レイアウト、装飾に関するコメント
 - 上記禁止事項に関するコメントは、「問題があっても書かない」こと。
 
+番号・ページ番号に関する追加ルール：
+- 「各部の名称」などの番号をコメントで参照するときは、
+  文頭を「1. 」「1)」「①」などの番号だけで始めないでください。
+  Word の自動番号機能が誤動作するためです。
+- 番号を示す必要がある場合は、必ず文の途中で
+  「番号1のボタン」「(1)番のボタン」「1番のボタン」のように書き、
+  行頭を番号だけで始めないでください。
+- Word のページ番号や「（P283）」のようなページ参照は一切出力しないでください。
+  コメント本文の中に「P12」「P283」などページ数を表す記号を入れないでください。
+
 ■サポート・企業情報セクションについて：
 - 「■サポート・企業情報」以降～次の「■」見出しまでの段落は、
   すでにチェック対象から除外されています。
@@ -1520,6 +1530,7 @@ ${tmplLines || "（なし）"}
 ${listText}
 `.trim();
 }
+
 
 
 
