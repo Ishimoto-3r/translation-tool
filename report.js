@@ -15,8 +15,13 @@ const actionInput = document.getElementById('action');
 const remarksInput = document.getElementById('remarks');
 const remarksLabel = document.getElementById('remarks-label');
 
+// ★ 0番「5年以上経過」用
+const over5YYes = document.getElementById('over5y-y');
+const over5YNo = document.getElementById('over5y-n');
+const over5YWarning = document.getElementById('over5y-warning');
 
-// --- チェックボックスの排他制御 ---
+
+// --- チェックボックスの排他制御（再現有無） ---
 checkY.addEventListener('change', () => {
     if (checkY.checked) {
         checkN.checked = false;
@@ -30,7 +35,26 @@ checkN.addEventListener('change', () => {
     toggleSections();
 });
 
-// --- セクション表示の切り替え ---
+// --- 0番「5年以上経過」チェックボックスの排他制御 & 注意表示 ---
+if (over5YYes && over5YNo) {
+    over5YYes.addEventListener('change', () => {
+        if (over5YYes.checked) {
+            over5YNo.checked = false;
+            if (over5YWarning) over5YWarning.classList.remove('hidden');
+        } else {
+            if (over5YWarning) over5YWarning.classList.add('hidden');
+        }
+    });
+
+    over5YNo.addEventListener('change', () => {
+        if (over5YNo.checked) {
+            over5YYes.checked = false;
+            if (over5YWarning) over5YWarning.classList.add('hidden');
+        }
+    });
+}
+
+// --- セクション表示の切り替え（再現有無）---
 function toggleSections() {
     const reproducedY = checkY.checked;
     document.getElementById('section-reproduced-y-cause').classList.toggle('hidden', !reproducedY);
@@ -72,6 +96,7 @@ generateButton.addEventListener('click', async () => {
 
     // フォームデータを収集
     const formData = {
+        over5Years: over5YYes && over5YYes.checked ? 'y' : 'n', // ★追加
         inquiry: inquiryInput.value,
         reproduced: checkY.checked ? 'y' : 'n',
         verification: verificationInput.value,
@@ -85,7 +110,7 @@ generateButton.addEventListener('click', async () => {
     const finalPrompt = buildApiPrompt(formData);
     
     try {
-        // --- ★★★ Vercel バックエンド連携 (修正版) ★★★ ---
+        // --- Vercel バックエンド連携 ---
         const response = await fetch('/api/report', { 
             method: 'POST',
             headers: {
@@ -96,20 +121,13 @@ generateButton.addEventListener('click', async () => {
             })
         });
 
-        // ★★★ 修正点 ★★★
-        // 翻訳ツールの app.js と同じように、
-        // 最初に .ok で失敗をチェックし、.json() の失敗も .catch() します。
         if (!response.ok) {
-            // サーバーが 404 (ファイルなし) や 500 (エラー) を返した場合
-            // .json() が失敗する可能性があるので .catch() で空のオブジェクトを返す
             const errorData = await response.json().catch(() => ({})); 
             const errorMsg = errorData.error || `APIエラー (Status: ${response.status})。サーバーが応答しませんでした。`;
             throw new Error(errorMsg);
         }
 
-        // response.ok が true の場合のみ、安全に .json() を呼ぶ
         const data = await response.json();
-        // ★★★ 修正ここまで ★★★
 
         if (!data.gptResponse) {
              throw new Error("APIから予期しない形式の応答がありました。");
@@ -117,13 +135,22 @@ generateButton.addEventListener('click', async () => {
         
         const gptResponse = data.gptResponse;
 
+        // ★買い替え提案検知 → ダイアログ表示
+        if (containsBuySuggestion(gptResponse)) {
+            const proceed = await showBuyConfirmDialog();
+            if (!proceed) {
+                // 出力キャンセルして元の表示に戻す
+                resultOutput.textContent = '（ここに結果が表示されます）';
+                return; // finally でボタン状態だけ元に戻る
+            }
+        }
+
         // 最終結果を表示
         resultOutput.textContent = gptResponse.trim();
 
     } catch (error) {
         console.error('API呼び出しエラー:', error);
         
-        // ★ユーザーに分かりやすいエラーメッセージを追加
         if (error.message.includes("JSON.parse")) {
              resultOutput.innerHTML = `<span class="error-message">エラー: サーバーから予期しない応答がありました。<br>ファイルパス (api/report.js) が正しいか確認してください。</span>`;
         } else {
@@ -150,6 +177,7 @@ function buildApiPrompt(data) {
 - ユーザーが入力した要素が「なし」（空欄または 'n'）の場合、その要素は最終文に絶対に含めない。
 - ただし、「検証内容」は常に出力に含める。
 - 数値・型番・単位は半角で記載する（例: 5V, 1m）。
+- 購入からの年数にかかわらず、開発側から積極的に買い替えを勧める表現（「買い替えをご提案します」など）は基本的に使用しない。
 - 冗長な重複は避け、「。」「、」を用い、複数の文を自然に接続する。
 【構成順】
 1. （必須）「お問い合わせのあった、[不具合症状の要約]という症状は[再現しました/再現しませんでした]。」
@@ -160,6 +188,7 @@ function buildApiPrompt(data) {
 6. （再現時・処置入力あり）「対応として[必要な処置]が必要です。」と続ける。
 7. （備考入力あり）「なお、[備考]。」と続ける。
 【入力データ】
+- 購入から5年以上経過: ${data.over5Years} (y/n)
 - お問い合わせ内容（症状の要約に利用）: ${data.inquiry}
 - 再現有無: ${data.reproduced} (y/n)
 - 検証内容: ${data.verification}
@@ -170,7 +199,67 @@ function buildApiPrompt(data) {
 最終出力のみを生成してください。
 `;
 }
- 
+
+// --- 買い替え提案を検知する関数 ---
+function containsBuySuggestion(text) {
+    if (!text) return false;
+    const keywords = [
+        '買い替えをおすすめ',
+        '買い換えをおすすめ',
+        '買い替えをご提案',
+        '買い換えをご提案',
+        '買い替えのご提案',
+        '買い換えのご提案',
+        '買い替えをご検討ください',
+        '買い換えをご検討ください',
+        '本体の買い替えをご検討',
+        '本体の買い換えをご検討',
+        '新しい製品への買い替え',
+        '新しい製品への買い換え',
+        '新しい機種への買い替え',
+        '新しい機種への買い換え',
+        '新規購入をご提案',
+        '新規購入をご検討ください'
+    ];
+    return keywords.some(kw => text.includes(kw));
+}
+
+// --- 買い替え提案検知時の確認ダイアログ（はい／いいえ） ---
+function showBuyConfirmDialog() {
+    return new Promise((resolve) => {
+        const overlay = document.getElementById('buy-dialog');
+        const yesBtn = document.getElementById('buy-dialog-yes');
+        const noBtn = document.getElementById('buy-dialog-no');
+
+        // ダイアログがない場合はそのまま続行
+        if (!overlay || !yesBtn || !noBtn) {
+            resolve(true);
+            return;
+        }
+
+        const cleanup = () => {
+            yesBtn.removeEventListener('click', handleYes);
+            noBtn.removeEventListener('click', handleNo);
+            overlay.classList.add('hidden');
+        };
+
+        const handleYes = () => {
+            cleanup();
+            resolve(true);
+        };
+
+        const handleNo = () => {
+            cleanup();
+            resolve(false);
+        };
+
+        yesBtn.addEventListener('click', handleYes);
+        noBtn.addEventListener('click', handleNo);
+
+        overlay.classList.remove('hidden');
+    });
+}
+
 // --- トースト通知を表示する関数 ---
 function showToast(message) {
     const container = document.getElementById('toast-container');
@@ -221,6 +310,15 @@ function copyReportToClipboard() {
 
 // --- 入力内容をすべてクリアする関数 ---
 function clearAllInputs() {
+    // 0番
+    if (over5YNo && over5YYes) {
+        over5YNo.checked = true;
+        over5YYes.checked = false;
+    }
+    if (over5YWarning) {
+        over5YWarning.classList.add('hidden');
+    }
+
     inquiryInput.value = '';
     verificationInput.value = '';
     causeInput.value = '';
@@ -237,9 +335,20 @@ function clearAllInputs() {
 
 // --- 初期化処理 ---
 function initialize() {
+    // 0番：デフォルト「いいえ」
+    if (over5YNo && over5YYes) {
+        over5YNo.checked = true;
+        over5YYes.checked = false;
+    }
+    if (over5YWarning) {
+        over5YWarning.classList.add('hidden');
+    }
+
+    // 再現有無：デフォルト「いいえ」
     checkN.checked = true;
     checkY.checked = false;
     toggleSections();
+
     copyButton.addEventListener('click', copyReportToClipboard);
     clearButtonTop.addEventListener('click', clearAllInputs);
 }
