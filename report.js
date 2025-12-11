@@ -135,15 +135,7 @@ generateButton.addEventListener('click', async () => {
         
         const gptResponse = data.gptResponse;
 
-        // ★買い替え提案検知 → ダイアログ表示
-        if (containsBuySuggestion(gptResponse)) {
-            const proceed = await showBuyConfirmDialog();
-            if (!proceed) {
-                // 出力キャンセルして元の表示に戻す
-                resultOutput.textContent = '（ここに結果が表示されます）';
-                return; // finally でボタン状態だけ元に戻る
-            }
-        }
+        
 
         // 最終結果を表示
         resultOutput.textContent = gptResponse.trim();
@@ -200,65 +192,6 @@ function buildApiPrompt(data) {
 `;
 }
 
-// --- 買い替え提案を検知する関数 ---
-function containsBuySuggestion(text) {
-    if (!text) return false;
-    const keywords = [
-        '買い替えをおすすめ',
-        '買い換えをおすすめ',
-        '買い替えをご提案',
-        '買い換えをご提案',
-        '買い替えのご提案',
-        '買い換えのご提案',
-        '買い替えをご検討ください',
-        '買い換えをご検討ください',
-        '本体の買い替えをご検討',
-        '本体の買い換えをご検討',
-        '新しい製品への買い替え',
-        '新しい製品への買い換え',
-        '新しい機種への買い替え',
-        '新しい機種への買い換え',
-        '新規購入をご提案',
-        '新規購入をご検討ください'
-    ];
-    return keywords.some(kw => text.includes(kw));
-}
-
-// --- 買い替え提案検知時の確認ダイアログ（はい／いいえ） ---
-function showBuyConfirmDialog() {
-    return new Promise((resolve) => {
-        const overlay = document.getElementById('buy-dialog');
-        const yesBtn = document.getElementById('buy-dialog-yes');
-        const noBtn = document.getElementById('buy-dialog-no');
-
-        // ダイアログがない場合はそのまま続行
-        if (!overlay || !yesBtn || !noBtn) {
-            resolve(true);
-            return;
-        }
-
-        const cleanup = () => {
-            yesBtn.removeEventListener('click', handleYes);
-            noBtn.removeEventListener('click', handleNo);
-            overlay.classList.add('hidden');
-        };
-
-        const handleYes = () => {
-            cleanup();
-            resolve(true);
-        };
-
-        const handleNo = () => {
-            cleanup();
-            resolve(false);
-        };
-
-        yesBtn.addEventListener('click', handleYes);
-        noBtn.addEventListener('click', handleNo);
-
-        overlay.classList.remove('hidden');
-    });
-}
 
 // --- トースト通知を表示する関数 ---
 function showToast(message) {
