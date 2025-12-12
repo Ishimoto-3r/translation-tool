@@ -802,21 +802,25 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
     let pidCounter = 0;
-    let inSupport = false;
+    let currentSection = "normal"; // "normal" / "support" / "skip"
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
         const text = extractTextFromParagraph(p).trim();
-
-        // 完全な空パラグラフは AI 対象から除外
         if (!text) continue;
 
-        // セクション判定：■サポート・企業情報 ～ 次の ■ まで
+        // セクション切り替え
         if (text.startsWith("■サポート・企業情報")) {
-            inSupport = true;
-        } else if (inSupport && text.startsWith("■") && !text.startsWith("■サポート・企業情報")) {
-            // 他の「■」見出しでサポートセクション終了
-            inSupport = false;
+            currentSection = "support";
+        } else if (
+            text.startsWith("■ご使用済みの製品の廃棄に関して") ||
+            text.startsWith("■電波に関する注意事項") ||
+            text.startsWith("■技適マーク")
+        ) {
+            currentSection = "skip";
+        } else if (text.startsWith("■") && !text.startsWith("■サポート・企業情報")) {
+            // 他の「■」見出しで通常セクションに戻す
+            currentSection = "normal";
         }
 
         const pid = "P" + String(pidCounter).padStart(3, "0");
@@ -825,11 +829,12 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         AICHECK_PARAGRAPHS.push({
             pid,
             text,
-            section: inSupport ? "support" : "normal",
-            pIndex: i       // document.xml 内の w:p のインデックス
+            section: currentSection, // normal / support / skip
+            pIndex: i
         });
     }
 }
+
 
 /**
  * docx モード用：AI からの返答 (P000: xxx / TOTAL: yyy) を
@@ -841,7 +846,6 @@ function parseAiCheckResponse(rawText) {
     const commentsByPid = {};
     let totalComment = "";
 
-    // テンプレ文セット（docx モードでは段落テキストと直接比較する）
     const tmplSet = new Set(
         (TEMPLATES || []).map(t => (t.text || "").trim()).filter(Boolean)
     );
@@ -862,10 +866,9 @@ function parseAiCheckResponse(rawText) {
         const commentText = (m[2] || "").trim();
         const para = findParagraphByPid(pid);
 
-        // 存在しない PID / support セクションへのコメントは無視
-        if (!para || para.section === "support") continue;
+        // support / skip セクションへのコメントは無視
+        if (!para || para.section !== "normal") continue;
 
-        // テンプレ由来の段落ならコメント抑制
         const isTemplatePara = tmplSet.has((para.text || "").trim());
 
         if (shouldSuppressComment(commentText, isTemplatePara)) {
@@ -886,7 +889,7 @@ function parseAiCheckResponse(rawText) {
 function shouldSuppressComment(content, isTemplatePara) {
     if (!content) return true;
 
-    // テンプレ段落は原則コメント禁止
+    // テンプレート段落へのコメントは原則禁止
     if (isTemplatePara) return true;
 
     const ngKeywords = [
@@ -931,12 +934,17 @@ function shouldSuppressComment(content, isTemplatePara) {
         "見た目を揃え"
     ];
 
-    // レイアウト系
+    // レイアウト系コメント
     if (ngKeywords.some(k => content.includes(k))) {
         return true;
     }
 
-    // 「問題ありません」系
+    // ページ番号を含むコメント（P178 / （P283）など）は破棄
+    if (/[（(]\s*P\d{1,4}\s*[）)]/.test(content) || /\bP\d{1,4}\b/.test(content)) {
+        return true;
+    }
+
+    // 「問題ありません」系コメント
     if (
         content.includes("問題ありません") ||
         content.includes("問題はありません") ||
@@ -969,13 +977,13 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
     const body = xmlDoc.getElementsByTagNameNS(wNs, "body")[0];
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
-    // pid -> pIndex のマップ
+    // pid → 段落インデックス
     const indexByPid = new Map();
     AICHECK_PARAGRAPHS.forEach(p => {
         indexByPid.set(p.pid, p.pIndex);
     });
 
-    // コメントの挿入順を「段落インデックスの降順」にして、インデックスずれを防ぐ
+    // インデックス昇順 → 逆順で挿入
     const pidList = Object.keys(commentsByPid || {}).sort((a, b) => {
         const ia = indexByPid.get(a);
         const ib = indexByPid.get(b);
@@ -993,22 +1001,24 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
         const commentText = (commentsByPid[pid] || "").trim();
         if (!commentText) continue;
 
-        // コメント用の段落を作成（pPr は元段落からコピー）
         const commentP = xmlDoc.createElementNS(wNs, "w:p");
 
+        // 元段落の書式をコピーするが、番号書式 w:numPr だけ削除しておく
         const basePPr = baseP.getElementsByTagNameNS(wNs, "pPr")[0];
         if (basePPr) {
-            commentP.appendChild(basePPr.cloneNode(true));
+            const clonedPPr = basePPr.cloneNode(true);
+            const numPrList = clonedPPr.getElementsByTagNameNS(wNs, "numPr");
+            Array.from(numPrList).forEach(n => clonedPPr.removeChild(n)); // ★番号を継承させない
+            commentP.appendChild(clonedPPr);
         }
 
         const r = xmlDoc.createElementNS(wNs, "w:r");
         const rPr = xmlDoc.createElementNS(wNs, "w:rPr");
 
         const color = xmlDoc.createElementNS(wNs, "w:color");
-        color.setAttributeNS(wNs, "w:val", "FF0000");
-
+        color.setAttribute("w:val", "FF0000");
         const highlight = xmlDoc.createElementNS(wNs, "w:highlight");
-        highlight.setAttributeNS(wNs, "w:val", "yellow");
+        highlight.setAttribute("w:val", "yellow");
 
         rPr.appendChild(color);
         rPr.appendChild(highlight);
@@ -1027,16 +1037,16 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
         }
     }
 
-    // ■総評（TOTAL）がある場合は末尾に 1 段落として追加
+    // ■総評
     if (totalComment && totalComment.trim()) {
         const totalP = xmlDoc.createElementNS(wNs, "w:p");
         const r = xmlDoc.createElementNS(wNs, "w:r");
         const rPr = xmlDoc.createElementNS(wNs, "w:rPr");
 
         const color = xmlDoc.createElementNS(wNs, "w:color");
-        color.setAttributeNS(wNs, "w:val", "FF0000");
+        color.setAttribute("w:val", "FF0000");
         const highlight = xmlDoc.createElementNS(wNs, "w:highlight");
-        highlight.setAttributeNS(wNs, "w:val", "yellow");
+        highlight.setAttribute("w:val", "yellow");
 
         rPr.appendChild(color);
         rPr.appendChild(highlight);
@@ -1062,6 +1072,7 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
 
     saveAs(outBlob, fileName);
 }
+
 
 
     
@@ -1452,21 +1463,15 @@ function extractTextLinesFromDoc(doc) {
 
 // ★AIチェックは .docx 専用に固定する
 function buildAiCheckPrompt() {
-    return buildAiCheckPromptForDocx();
-}
-
-/**
- * docx モード：段落ID付きで AI にコメントだけ出させるプロンプト
- */
-function buildAiCheckPromptForDocx() {
+    return function buildAiCheckPromptForDocx() {
     const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
     const ruleLines = (AI_TERM_RULES || [])
         .map(r => `${r.from} → ${r.to}`)
         .join("\n");
 
-    // サポート・企業情報以外の段落だけ AI に渡す
+    // ★ normal セクションだけ AI に渡す
     const listText = (AICHECK_PARAGRAPHS || [])
-        .filter(p => p.section !== "support")
+        .filter(p => p.section === "normal")
         .map(p => `${p.pid}\n${p.text}`)
         .join("\n\n");
 
@@ -1503,13 +1508,18 @@ function buildAiCheckPromptForDocx() {
 - 番号を示す必要がある場合は、必ず文の途中で
   「番号1のボタン」「(1)番のボタン」「1番のボタン」のように書き、
   行頭を番号だけで始めないでください。
-- Word のページ番号や「（P283）」のようなページ参照は一切出力しないでください。
-  コメント本文の中に「P12」「P283」などページ数を表す記号を入れないでください。
+- Word のページ番号や「（P178）」のようなページ参照は一切出力しないでください。
 
 ■サポート・企業情報セクションについて：
 - 「■サポート・企業情報」以降～次の「■」見出しまでの段落は、
   すでにチェック対象から除外されています。
 - これらの段落に対するコメントは、一切出力しないでください。
+
+■その他、AIチェック対象外にしているセクション：
+- 「■ご使用済みの製品の廃棄に関して」
+- 「■電波に関する注意事項」
+- 「■技適マーク」
+これらのセクションに対するコメントも、一切出力しないでください。
 
 出力フォーマット（厳守）：
 - 入力で与えた各段落には ID が振られています（P000, P001, ...）。
@@ -1538,9 +1548,6 @@ ${tmplLines || "（なし）"}
 ${listText}
 `.trim();
 }
-
-
-
 
 
 
