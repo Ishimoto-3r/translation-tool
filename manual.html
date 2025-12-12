@@ -786,6 +786,7 @@ function extractTextFromParagraph(pElem) {
  * - AICHECK_PARAGRAPHS に { pid, text, section, pIndex } を格納
  * - section: "normal" / "support"
  */
+// ★置き換え：docx 段落解析
 async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     AICHECK_PARAGRAPHS = [];
 
@@ -802,26 +803,40 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
     let pidCounter = 0;
-    let currentSection = "normal"; // "normal" / "support" / "skip"
+    let inSupport = false;
+
+    const isImageNumberLine = (text) => {
+        // ①〜⑳ が 3 個以上出てくる行 → 「①②③④⑤…」のような番号列とみなして除外
+        const m = text.match(/[\u2460-\u2473]/g); // ①〜⑳
+        if (m && m.length >= 3) return true;
+        return false;
+    };
+
+    const isShortLabelLine = (text) => {
+        // 写真ラベルのような「固定ネジ」「チルト調整ネジ」など
+        const t = text.trim();
+        if (!t) return true;
+        if (t.length > 20) return false;                 // 長い文章は対象
+        if (/[。．！？?]/.test(t)) return false;         // 文末記号がある＝文章
+        if (/(です|ます|ください|してください)/.test(t)) return false; // 明らかに文章
+        return true; // 単語・短いラベル → AI チェック対象外
+    };
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
         const text = extractTextFromParagraph(p).trim();
         if (!text) continue;
 
-        // セクション切り替え
+        // ■サポート・企業情報 ～ 次の ■ まで は別セクション扱い
         if (text.startsWith("■サポート・企業情報")) {
-            currentSection = "support";
-        } else if (
-            text.startsWith("■ご使用済みの製品の廃棄に関して") ||
-            text.startsWith("■電波に関する注意事項") ||
-            text.startsWith("■技適マーク")
-        ) {
-            currentSection = "skip";
-        } else if (text.startsWith("■") && !text.startsWith("■サポート・企業情報")) {
-            // 他の「■」見出しで通常セクションに戻す
-            currentSection = "normal";
+            inSupport = true;
+        } else if (inSupport && text.startsWith("■") && !text.startsWith("■サポート・企業情報")) {
+            inSupport = false;
         }
+
+        // 写真番号列・短いラベル行は AI に渡さない
+        if (isImageNumberLine(text)) continue;
+        if (isShortLabelLine(text)) continue;
 
         const pid = "P" + String(pidCounter).padStart(3, "0");
         pidCounter++;
@@ -829,7 +844,7 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         AICHECK_PARAGRAPHS.push({
             pid,
             text,
-            section: currentSection, // normal / support / skip
+            section: inSupport ? "support" : "normal",
             pIndex: i
         });
     }
@@ -840,6 +855,7 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
  * docx モード用：AI からの返答 (P000: xxx / TOTAL: yyy) を
  * { commentsByPid, totalComment } に変換し、不要コメントを除外
  */
+// ★置き換え：AI 返答 → コメントマップへ
 function parseAiCheckResponse(rawText) {
     const lines = (rawText || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
 
@@ -856,6 +872,7 @@ function parseAiCheckResponse(rawText) {
     for (const line of lines) {
         if (line.toUpperCase().startsWith("TOTAL:")) {
             totalComment = line.replace(/^TOTAL:\s*/i, "").trim();
+            totalComment = removePageRefsFromComment(totalComment);
             continue;
         }
 
@@ -863,15 +880,18 @@ function parseAiCheckResponse(rawText) {
         if (!m) continue;
 
         const pid = "P" + m[1];
-        const commentText = (m[2] || "").trim();
-        const para = findParagraphByPid(pid);
+        let commentText = (m[2] || "").trim();
 
-        // support / skip セクションへのコメントは無視
-        if (!para || para.section !== "normal") continue;
+        const para = findParagraphByPid(pid);
+        if (!para || para.section === "support") continue;
+
+        // ページ番号などを削除
+        commentText = removePageRefsFromComment(commentText);
+        if (!commentText) continue;
 
         const isTemplatePara = tmplSet.has((para.text || "").trim());
 
-        if (shouldSuppressComment(commentText, isTemplatePara)) {
+        if (shouldSuppressComment(commentText, isTemplatePara, para)) {
             continue;
         }
 
@@ -881,66 +901,42 @@ function parseAiCheckResponse(rawText) {
     return { commentsByPid, totalComment };
 }
 
+
 /**
  * コメント内容から「レイアウト系」「問題なし系」などを除外する判定
  * @param {string} content コメント本文
  * @param {boolean} isTemplatePara 対象段落がテンプレ由来かどうか
  */
-function shouldSuppressComment(content, isTemplatePara) {
+// ★置き換え：コメント抑制ロジック
+function shouldSuppressComment(content, isTemplatePara, para) {
     if (!content) return true;
 
     // テンプレ段落は原則コメント禁止
     if (isTemplatePara) return true;
 
-    // レイアウト・体裁系キーワード
-    const layoutKeywords = [
-        "インデント",
-        "字下げ",
-        "スペース",
-        "空白",
-        "空白スペース",
-        "余分なスペース",
-        "余計なスペース",
-        "余白",
-        "全角",
-        "半角",
-        "全角・半角",
-        "全角/半角",
-        "全角／半角",
-        "コロン",
-        "：",
-        "体裁",
-        "レイアウト",
-        "行頭をそろえ",
-        "行頭を揃え",
-        "先頭をそろえ",
-        "先頭を揃え",
-        "表記をそろえ",
-        "表記を揃え",
-        "表記を統一",
-        "書式をそろえ",
-        "書式を揃え",
-        "書式を統一",
-        "スタイルをそろえ",
-        "スタイルを揃え",
-        "スタイルを統一",
-        "他項目と同じスタイル",
-        "他項目と同じ書式",
-        "他項目と同様に揃え",
-        "他の行と同じように揃え",
-        "フォントサイズ",
-        "フォントをそろえ",
-        "フォントを揃え",
-        "見た目をそろえ",
-        "見た目を揃え"
+    // レイアウト・表記揃え系の NG キーワード
+    const ngKeywords = [
+        "インデント", "字下げ", "スペース", "空白", "空白スペース",
+        "余分なスペース", "余計なスペース", "余白",
+        "全角", "半角", "全角・半角", "全角/半角", "全角／半角",
+        "コロン", "：",
+        "体裁", "レイアウト",
+        "行頭をそろえ", "行頭を揃え",
+        "先頭をそろえ", "先頭を揃え",
+        "表記をそろえ", "表記を揃え", "表記を統一",
+        "書式をそろえ", "書式を揃え", "書式を統一",
+        "スタイルをそろえ", "スタイルを揃え", "スタイルを統一",
+        "他項目と同じスタイル", "他項目と同じ書式",
+        "他項目と同様に揃え", "他の行と同じように揃え",
+        "フォントサイズ", "フォントをそろえ", "フォントを揃え",
+        "見た目をそろえ", "見た目を揃え"
     ];
 
-    // レイアウト系コメントは全て抑制
-    if (layoutKeywords.some(k => content.includes(k))) {
+    if (ngKeywords.some(k => content.includes(k))) {
         return true;
     }
 
-    // 「問題ありません」系コメントは不要
+    // 「問題ありません」系コメントは全部捨てる
     if (
         content.includes("問題ありません") ||
         content.includes("問題はありません") ||
@@ -952,32 +948,25 @@ function shouldSuppressComment(content, isTemplatePara) {
         return true;
     }
 
-    // Shift+Enter（行継続）に関する誤指摘を抑制
-    if (
-        content.includes("複数の手順が連続") ||
-        content.includes("1行に複数") ||
-        content.includes("行が連続していて読みにくい") ||
-        content.includes("可読性にやや難があります")
-    ) {
-        return true;
-    }
+    // 表記ルール関連：段落がすでに「to」側だけを使っているなら、誤検出とみなして捨てる
+    if (para && Array.isArray(AI_TERM_RULES) && AI_TERM_RULES.length) {
+        const text = para.text || "";
+        for (const rule of AI_TERM_RULES) {
+            const from = rule.from || "";
+            const to   = rule.to   || "";
+            if (!from || !to) continue;
 
-    // 図中ラベル（画像上の短い語）への不要な指摘を抑制
-    if (
-        content.includes("図中ラベル") ||
-        content.includes("図中のラベル") ||
-        content.includes("図中のテキスト") ||
-        content.includes("写真上のテキスト")
-    ) {
-        return true;
-    }
+            const hasFrom = text.includes(from);
+            const hasTo   = text.includes(to);
 
-    // 単語ラベルへの「統一」「表記ゆれ」系コメントも抑制
-    if (
-        (content.includes("名称を統一") || content.includes("表記を統一") || content.includes("表記ゆれ")) &&
-        (content.includes("ネジ") || content.includes("カバー") || content.includes("ボタン") || content.includes("レバー"))
-    ) {
-        return true;
+            // 段落中はすでに「to」のみ／「from」は含まれない
+            if (!hasFrom && hasTo) {
+                // かつコメントが「表記ルール」「to」を含んでいる → 余計な指摘
+                if (content.includes("表記ルール") && content.includes(to)) {
+                    return true;
+                }
+            }
+        }
     }
 
     return false;
@@ -1492,14 +1481,14 @@ function buildAiCheckPrompt() {
     return buildAiCheckPromptForDocx();
 }
 
-// docx用プロンプト本体
+// ★置き換え：docx モード用プロンプト
 function buildAiCheckPromptForDocx() {
+    // ← ここ、元コードでは TEMPLLES になっていたのでバグっていました
     const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
     const ruleLines = (AI_TERM_RULES || [])
         .map(r => `${r.from} → ${r.to}`)
         .join("\n");
 
-    // サポート・企業情報セクションは parseDocx 側で除外済み
     const listText = (AICHECK_PARAGRAPHS || [])
         .filter(p => p.section !== "support")
         .map(p => `${p.pid}\n${p.text}`)
@@ -1530,32 +1519,18 @@ function buildAiCheckPromptForDocx() {
   ・「：」と「:」の違い、句読点・カンマ・ピリオドの有無の違い
   ・段落の揃え方や余白、レイアウト、装飾に関するコメント
 
-Shift+Enter（ソフト改行）に関するルール：
-- Word の Shift+Enter による改行（行継続）は正常な書き方です。
-- これを理由に「1行に複数の手順が連続している」「行が連続していて読みにくい」
-  などの可読性に関する指摘をしてはいけません。
-- 行継続そのものに対するコメントは禁止です。
-
-画像上のラベル（図中テキスト）に関するルール：
-- 写真や図の上に重ねられた短いラベル（例：「固定ネジ」「電池カバー」「チルト調整ネジ」など）
-  のような名詞1〜2語の単語・短語は分析対象外とします。
-- これらのラベルに対して、
-  「名称を統一した方がよい」「表記ゆれがある」「意味が分かりにくい」
-  といったコメントは書いてはいけません。
-- 文章として成立していない語句（名詞だけ、短い句だけ）は、表記ゆれ・可読性の指摘対象にしないでください。
+- 写真の上に直接載っている番号やラベル（「①〜⑩」「固定ネジ」「チルト調整ネジ」など）は、
+  それ自体の書き方についてコメントしないでください。
+  写真ラベルの説明文（文章）だけを対象にしてください。
 
 番号・ページ番号に関する追加ルール：
 - 「各部の名称」などの番号をコメントで参照するときは、
   文頭を「1. 」「1)」「①」などの番号だけで始めないでください。
-  Word の自動番号機能が誤動作するためです。
-- 番号を示す必要がある場合は、必ず文の途中で
-  「番号1のボタン」「(1)番のボタン」「1番のボタン」のように書き、
-  行頭を番号だけで始めないでください。
-- Word のページ番号や「（P283）」のようなページ参照は一切出力しないでください。
-  コメント本文の中に「P12」「P283」などページ数を表す記号を入れないでください。
+- ページ番号や「P178」「P181」「（P178, P181）」のような表記は
+  コメント本文に一切書かないでください。
 
-サポート・企業情報セクションについて：
-- 「■サポート・企業情報」以降〜次の「■」見出しまでの段落は、
+■サポート・企業情報セクションについて：
+- 「■サポート・企業情報」以降～次の「■」見出しまでの段落は、
   すでにチェック対象から除外されています。
 - これらの段落に対するコメントは、一切出力しないでください。
 
@@ -1576,7 +1551,7 @@ TOTAL: 総評本文
 という形式で出力してください。
 - Markdown 記法や箇条書きは使用せず、すべてプレーンテキストで出力してください。
 
-表記ルール一覧（統一ルール。これに反していても database テンプレは例外扱い）：
+表記ルール一覧（統一ルール）：
 ${ruleLines || "（ルールなし）"}
 
 テンプレート文章一覧（database 由来。これらの文は原則として指摘しない）：
@@ -1587,7 +1562,24 @@ ${listText}
 `.trim();
 }
 
+// ★追加ヘルパー：ページ番号表記をコメントから除去
+function removePageRefsFromComment(text) {
+    if (!text) return "";
 
+    let s = text;
+
+    // （P178, P181） / (P178-181) など
+    s = s.replace(/[（(]\s*P\d+(?:\s*[-,]\s*\d+)*\s*[)）]/g, "");
+
+    // 「P178」「P181ページ」など単独
+    s = s.replace(/P\d{1,4}ページ?/g, "");
+
+    // 前後の余計な区切りを整理
+    s = s.replace(/[、,]\s*(?=。|$)/g, "");
+    s = s.replace(/\s{2,}/g, " ").trim();
+
+    return s.trim();
+}
 
 
 async function runAiCheck() {
