@@ -914,23 +914,16 @@ function parseAiCheckResponse(rawText) {
  * @param {string} content コメント本文
  * @param {boolean} isTemplatePara 対象段落がテンプレ由来かどうか
  */
-// ★置き換え：コメント抑制ロジック（強化版）
+// ★置き換え：コメント抑制ロジック（読みやすさ/分割/冗長性は「理由付き」のみ許可）
 function shouldSuppressComment(content, isTemplatePara, para) {
     if (!content) return true;
 
     // テンプレ段落は原則コメント禁止
     if (isTemplatePara) return true;
 
-    // ① Shift+Enter/改行方法/文を分ける提案/1行に詰め込む系は全部禁止（←今回の主題）
-    const ngReadabilityKeywords = [
-        "1行に", "一行に", "詰め込", "情報が多", "文章を分け", "文を分け", "分割した方", "分けた方",
-        "箇条書きに", "箇条書きにした方", "箇条書きにすると", "改行した方", "改行すると",
-        "読みやすく", "可読性", "手順が連続", "手順が続", "長いので", "冗長", "簡潔に",
-        "文頭の", "句読点を", "読点", "句点"
-    ];
-    if (ngReadabilityKeywords.some(k => content.includes(k))) return true;
+    const c = String(content).trim();
 
-    // ② レイアウト・表記揃え系の NG キーワード（既存）
+    // レイアウト・表記揃え系の NG キーワード（これらは基本的に捨てる）
     const ngKeywords = [
         "インデント", "字下げ", "スペース", "空白", "空白スペース",
         "余分なスペース", "余計なスペース", "余白",
@@ -947,19 +940,57 @@ function shouldSuppressComment(content, isTemplatePara, para) {
         "フォントサイズ", "フォントをそろえ", "フォントを揃え",
         "見た目をそろえ", "見た目を揃え"
     ];
-    if (ngKeywords.some(k => content.includes(k))) return true;
 
-    // ③ 「問題ありません」系は捨てる（既存）
+    // ▼ 「読みやすさ／分割／冗長性」は欲しいが、
+    //    “見た目”ではなく “意味・誤解・手順” に関係する「理由付き」だけ通す
+    const readabilityAllowKeywords = [
+        "意味が分かりにく", "意図が伝わりにく", "解釈が分かれ",
+        "誤解され", "誤読され", "どちらとも読め",
+        "主語が不明", "対象が不明", "何を指すか不明", "指しているものが不明",
+        "手順が分かりにく", "操作の順序", "順序が不明", "条件と動作が混在",
+        "一文が長", "文が長", "長すぎ",
+        "分けた方が理解しやす", "分割した方がよい", "二文に分け",
+        "冗長", "重複してい", "繰り返し"
+    ];
+
+    // 読みやすさ系の「理由付き」判定（= 意味/誤解/手順/長文化/重複のいずれか）
+    const isReasonedReadability =
+        readabilityAllowKeywords.some(k => c.includes(k));
+
+    // 体裁NGワードに当たったら基本は捨てる。
+    // ただし「理由付きの読みやすさ指摘」だけは例外で通す。
+    if (ngKeywords.some(k => c.includes(k))) {
+        if (!isReasonedReadability) return true;
+    }
+
+    // 「問題ありません」系コメントは全部捨てる
     if (
-        content.includes("問題ありません") ||
-        content.includes("問題はありません") ||
-        content.includes("問題はない") ||
-        content.includes("修正の必要はありません") ||
-        content.includes("修正の必要はない") ||
-        (content.includes("このままで") && content.includes("問題"))
-    ) return true;
+        c.includes("問題ありません") ||
+        c.includes("問題はありません") ||
+        c.includes("問題はない") ||
+        c.includes("修正の必要はありません") ||
+        c.includes("修正の必要はない") ||
+        (c.includes("このままで") && c.includes("問題"))
+    ) {
+        return true;
+    }
 
-    // ④ 表記ルール誤検出の抑制（既存）
+    // ▼ 追加：改行（Shift+Enter含む）や“改行した方が良い”系は理由があっても捨てる
+    //    （ユーザー要望：Shift+Enter と Enter は区別しない／改行指摘は不要）
+    const breakOnlyNg = [
+        "改行", "行を分け", "行を分割", "改段", "段落を分け", "段落を分割",
+        "Shift+Enter", "シフトエンター", "シフト＋エンター", "Shift + Enter",
+        "Enter", "エンター"
+    ];
+    // ただし「一文が長いので二文に分ける」はOKにしたいので、
+    // 「改行」理由だけのものを落とす（= "改行"は含むが、"一文が長"等が無い）
+    if (breakOnlyNg.some(k => c.includes(k)) && !isReasonedReadability) {
+        return true;
+    }
+    // 「改行」系が入っていても、理由付き読みやすさ（長文化/誤解等）なら通す
+    // 例：「一文が長いので二文に分けてください」は通る
+
+    // 表記ルール関連：段落がすでに「to」側だけを使っているなら、誤検出とみなして捨てる
     if (para && Array.isArray(AI_TERM_RULES) && AI_TERM_RULES.length) {
         const text = para.text || "";
         for (const rule of AI_TERM_RULES) {
@@ -970,16 +1001,19 @@ function shouldSuppressComment(content, isTemplatePara, para) {
             const hasFrom = text.includes(from);
             const hasTo   = text.includes(to);
 
+            // 段落中はすでに「to」のみ／「from」は含まれない
             if (!hasFrom && hasTo) {
-                if (content.includes("表記ルール") && content.includes(to)) {
+                // かつコメントが「表記ルール」「to」を含んでいる → 余計な指摘
+                if (c.includes("表記ルール") && c.includes(to)) {
                     return true;
                 }
             }
         }
     }
 
-    return false;
+    return false; // ここまで来たら採用
 }
+
 
 
 
