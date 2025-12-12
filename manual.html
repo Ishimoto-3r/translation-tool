@@ -889,10 +889,11 @@ function parseAiCheckResponse(rawText) {
 function shouldSuppressComment(content, isTemplatePara) {
     if (!content) return true;
 
-    // テンプレート段落へのコメントは原則禁止
+    // テンプレ段落は原則コメント禁止
     if (isTemplatePara) return true;
 
-    const ngKeywords = [
+    // レイアウト・体裁系キーワード
+    const layoutKeywords = [
         "インデント",
         "字下げ",
         "スペース",
@@ -934,17 +935,12 @@ function shouldSuppressComment(content, isTemplatePara) {
         "見た目を揃え"
     ];
 
-    // レイアウト系コメント
-    if (ngKeywords.some(k => content.includes(k))) {
+    // レイアウト系コメントは全て抑制
+    if (layoutKeywords.some(k => content.includes(k))) {
         return true;
     }
 
-    // ページ番号を含むコメント（P178 / （P283）など）は破棄
-    if (/[（(]\s*P\d{1,4}\s*[）)]/.test(content) || /\bP\d{1,4}\b/.test(content)) {
-        return true;
-    }
-
-    // 「問題ありません」系コメント
+    // 「問題ありません」系コメントは不要
     if (
         content.includes("問題ありません") ||
         content.includes("問題はありません") ||
@@ -956,8 +952,37 @@ function shouldSuppressComment(content, isTemplatePara) {
         return true;
     }
 
+    // Shift+Enter（行継続）に関する誤指摘を抑制
+    if (
+        content.includes("複数の手順が連続") ||
+        content.includes("1行に複数") ||
+        content.includes("行が連続していて読みにくい") ||
+        content.includes("可読性にやや難があります")
+    ) {
+        return true;
+    }
+
+    // 図中ラベル（画像上の短い語）への不要な指摘を抑制
+    if (
+        content.includes("図中ラベル") ||
+        content.includes("図中のラベル") ||
+        content.includes("図中のテキスト") ||
+        content.includes("写真上のテキスト")
+    ) {
+        return true;
+    }
+
+    // 単語ラベルへの「統一」「表記ゆれ」系コメントも抑制
+    if (
+        (content.includes("名称を統一") || content.includes("表記を統一") || content.includes("表記ゆれ")) &&
+        (content.includes("ネジ") || content.includes("カバー") || content.includes("ボタン") || content.includes("レバー"))
+    ) {
+        return true;
+    }
+
     return false;
 }
+
 
 /**
  * docx モード用：元の document.xml にコメント段落を追記して新しい .docx を生成
@@ -1474,13 +1499,13 @@ function buildAiCheckPromptForDocx() {
         .map(r => `${r.from} → ${r.to}`)
         .join("\n");
 
-    // normal セクションだけ AI に渡す
+    // サポート・企業情報セクションは parseDocx 側で除外済み
     const listText = (AICHECK_PARAGRAPHS || [])
-        .filter(p => p.section === "normal")
+        .filter(p => p.section !== "support")
         .map(p => `${p.pid}\n${p.text}`)
         .join("\n\n");
 
-    const prompt = `
+    return `
 あなたは日本語の取扱説明書を専門とするテクニカルライター兼校正者です。
 日本語だけで回答してください。
 
@@ -1504,7 +1529,20 @@ function buildAiCheckPromptForDocx() {
   ・全角と半角の違い（スペース、英数字、括弧、記号、コロンなど）
   ・「：」と「:」の違い、句読点・カンマ・ピリオドの有無の違い
   ・段落の揃え方や余白、レイアウト、装飾に関するコメント
-- 上記禁止事項に関するコメントは、「問題があっても書かない」こと。
+
+Shift+Enter（ソフト改行）に関するルール：
+- Word の Shift+Enter による改行（行継続）は正常な書き方です。
+- これを理由に「1行に複数の手順が連続している」「行が連続していて読みにくい」
+  などの可読性に関する指摘をしてはいけません。
+- 行継続そのものに対するコメントは禁止です。
+
+画像上のラベル（図中テキスト）に関するルール：
+- 写真や図の上に重ねられた短いラベル（例：「固定ネジ」「電池カバー」「チルト調整ネジ」など）
+  のような名詞1〜2語の単語・短語は分析対象外とします。
+- これらのラベルに対して、
+  「名称を統一した方がよい」「表記ゆれがある」「意味が分かりにくい」
+  といったコメントは書いてはいけません。
+- 文章として成立していない語句（名詞だけ、短い句だけ）は、表記ゆれ・可読性の指摘対象にしないでください。
 
 番号・ページ番号に関する追加ルール：
 - 「各部の名称」などの番号をコメントで参照するときは、
@@ -1513,18 +1551,13 @@ function buildAiCheckPromptForDocx() {
 - 番号を示す必要がある場合は、必ず文の途中で
   「番号1のボタン」「(1)番のボタン」「1番のボタン」のように書き、
   行頭を番号だけで始めないでください。
-- Word のページ番号や「（P178）」のようなページ参照は一切出力しないでください。
+- Word のページ番号や「（P283）」のようなページ参照は一切出力しないでください。
+  コメント本文の中に「P12」「P283」などページ数を表す記号を入れないでください。
 
-■サポート・企業情報セクションについて：
-- 「■サポート・企業情報」以降～次の「■」見出しまでの段落は、
+サポート・企業情報セクションについて：
+- 「■サポート・企業情報」以降〜次の「■」見出しまでの段落は、
   すでにチェック対象から除外されています。
 - これらの段落に対するコメントは、一切出力しないでください。
-
-■その他、AIチェック対象外にしているセクション：
-- 「■ご使用済みの製品の廃棄に関して」
-- 「■電波に関する注意事項」
-- 「■技適マーク」
-これらのセクションに対するコメントも、一切出力しないでください。
 
 出力フォーマット（厳守）：
 - 入力で与えた各段落には ID が振られています（P000, P001, ...）。
@@ -1551,10 +1584,9 @@ ${tmplLines || "（なし）"}
 
 チェック対象の段落一覧（ID と本文）：
 ${listText}
-`;
-
-    return prompt.trim();
+`.trim();
 }
+
 
 
 
