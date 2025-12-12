@@ -801,19 +801,32 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
     let pidCounter = 0;
-    let inSupport = false;
+
+    // 見出しで「除外セクション」だけは維持（ここだけは必要最低限）
+    const EXCLUDE_HEADINGS = new Set([
+        "■サポート・企業情報",
+        "■ご使用済みの製品の廃棄に関して",
+    ]);
+
+    let currentHeading = "";
+    let inExcludedSection = false;
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
         const text = extractTextFromParagraph(p).trim();
         if (!text) continue;
 
-        // サポート・企業情報だけ除外（※前の状態）
+        // 見出し検出（■）
         if (text.startsWith("■")) {
-            inSupport = (text.trim() === "■サポート・企業情報");
-            continue;
+            currentHeading = text.trim();
+            inExcludedSection = EXCLUDE_HEADINGS.has(currentHeading);
+            continue; // 見出し行自体は渡さない
         }
-        if (inSupport) continue;
+
+        if (inExcludedSection) continue;
+
+        // ★ここが重要：写真番号列 / 短いラベル行 などは “除外しない”
+        // （＝前の量に戻す）
 
         const pid = "P" + String(pidCounter).padStart(3, "0");
         pidCounter++;
@@ -826,7 +839,6 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         });
     }
 }
-
 
 
 /**
@@ -886,23 +898,29 @@ function parseAiCheckResponse(rawText) {
  * @param {boolean} isTemplatePara 対象段落がテンプレ由来かどうか
  */
 // ★置き換え：コメント抑制ロジック（読みやすさ/分割/冗長性は「理由付き」のみ許可）
-function shouldSuppressComment(content) {
+function shouldSuppressComment(content, isTemplatePara, para) {
     if (!content) return true;
 
-    const c = content.trim();
+    // テンプレ段落は原則コメント禁止（ここは現仕様を維持）
+    if (isTemplatePara) return true;
+
+    const c = String(content).trim();
     if (!c) return true;
 
-    // 完全NGはこれだけ（前の挙動に近い）
+    // 「問題ありません」系だけは捨てる（これは維持）
     if (
         c.includes("問題ありません") ||
         c.includes("問題はありません") ||
-        c.includes("修正の必要はありません")
-    ) {
-        return true;
-    }
+        c.includes("問題はない") ||
+        c.includes("修正の必要はありません") ||
+        c.includes("修正の必要はない")
+    ) return true;
 
-    // それ以外は全部通す（量優先）
-    return false;
+    // ★レイアウト/表記揃え系の大量NGは、いったん撤去して量を戻す
+    // ★改行指摘の抑制も、いったん撤去して量を戻す
+    // ★表記ルール関連の誤検出抑制も、いったん撤去して量を戻す
+
+    return false; // 基本通す
 }
 
 
