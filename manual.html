@@ -547,7 +547,7 @@ body {
         作成したマニュアル原稿をここにドロップしてください（.docx）。<br>
         ドロップした原稿の日本語表現・表記ゆれをAIがチェックします。
     </div>
-    <input type="file" id="aiCheckFile" accept=".docx,.txt" class="file-overlay">
+   <input type="file" id="aiCheckFile" accept=".docx" class="file-overlay">
 </div>
 
 
@@ -1330,8 +1330,10 @@ function handleAiCheckFiles(files) {
         statusEl.textContent = "対応していないファイル形式です（.docxのみ対応）";
         btn.disabled = true;
         if (drop) drop.classList.remove("has-file");
-        AICHECK_TEXT = "";
         AICHECK_FILENAME = "";
+        AICHECK_IS_DOCX = false;
+        AICHECK_DOCX_BUFFER = null;
+        AICHECK_PARAGRAPHS = [];
         return;
     }
 
@@ -1339,32 +1341,38 @@ function handleAiCheckFiles(files) {
     statusEl.textContent = "読込中...";
     btn.disabled = true;
     if (drop) {
-        drop.classList.add("has-file");   // 枠線を実線＋色強めに
+        drop.classList.add("has-file");
     }
 
-    const done = (text) => {
-        AICHECK_TEXT = text || "";
-        if (AICHECK_TEXT.trim()) {
-            statusEl.textContent =
-                `選択中：${AICHECK_FILENAME}（文字数 約${AICHECK_TEXT.length}）`;
-            btn.disabled = false;
-        } else {
-            statusEl.textContent = "本文が取得できませんでした";
-            btn.disabled = true;
-        }
-    };
-
-    // .docx → mammoth でテキスト抽出
+    // docx をそのまま保持しつつ、段落解析
     file.arrayBuffer()
-        .then(ab => mammoth.extractRawText({ arrayBuffer: ab }))
-        .then(res => done(res.value || ""))
+        .then(async (ab) => {
+            AICHECK_IS_DOCX = true;
+            AICHECK_DOCX_BUFFER = ab;
+
+            // 段落リストを作成（AICHECK_PARAGRAPHS を埋める）
+            await parseDocxParagraphsFromArrayBuffer(ab);
+
+            const paraCount = AICHECK_PARAGRAPHS.length;
+            const charCount = AICHECK_PARAGRAPHS
+                .reduce((sum, p) => sum + (p.text || "").length, 0);
+
+            statusEl.textContent =
+                `選択中：${AICHECK_FILENAME}（段落数 ${paraCount} / 文字数 約${charCount}）`;
+            btn.disabled = paraCount === 0;
+        })
         .catch(e => {
             console.error(e);
             alert("Wordファイルの読み込みに失敗しました。");
             statusEl.textContent = "読み込みエラー";
             btn.disabled = true;
+            if (drop) drop.classList.remove("has-file");
+            AICHECK_IS_DOCX = false;
+            AICHECK_DOCX_BUFFER = null;
+            AICHECK_PARAGRAPHS = [];
         });
 }
+
 
 
 
@@ -1451,7 +1459,7 @@ function buildAiCheckPrompt() {
  * docx モード：段落ID付きで AI にコメントだけ出させるプロンプト
  */
 function buildAiCheckPromptForDocx() {
-    const tmplLines = (TEMPLLES || []).map(t => t.text).join("\n");
+    const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
     const ruleLines = (AI_TERM_RULES || [])
         .map(r => `${r.from} → ${r.to}`)
         .join("\n");
@@ -1658,17 +1666,10 @@ function suppressTemplateComments(text) {
 
 
 async function runAiCheck() {
-    // 入力チェック（docx / txt で分岐）
-    if (AICHECK_IS_DOCX) {
-        if (!AICHECK_DOCX_BUFFER) {
-            alert("先にマニュアル原稿の Word ファイル（.docx）をドラッグ＆ドロップしてください。");
-            return;
-        }
-    } else {
-        if (!AICHECK_TEXT.trim()) {
-            alert("先にマニュアル原稿ファイルをドラッグ＆ドロップしてください。");
-            return;
-        }
+    // docx が読み込まれているかチェック
+    if (!AICHECK_DOCX_BUFFER || !Array.isArray(AICHECK_PARAGRAPHS) || !AICHECK_PARAGRAPHS.length) {
+        alert("先にマニュアル原稿の Word ファイル（.docx）をドラッグ＆ドロップしてください。");
+        return;
     }
 
     const statusEl = document.getElementById("aiCheckStatus");
@@ -1685,12 +1686,12 @@ async function runAiCheck() {
     btn.disabled = true;
 
     try {
-        // 1/4
-        setStep("1/4：AIチェック用の指示文を準備しています…");
-        const prompt = buildAiCheckPrompt();
+        // 1/3
+        setStep("1/3：AIチェック用の指示文を準備しています…");
+        const prompt = buildAiCheckPrompt();  // docx モード固定
 
-        // 2/4
-        setStep("2/4：AIに送信中です（応答待ち: 数十秒かかる場合があります）…");
+        // 2/3
+        setStep("2/3：AIに送信中です（応答待ち: 数十秒かかる場合があります）…");
         const aiText = await callAI(prompt, null);
 
         if (!aiText || !aiText.trim()) {
@@ -1699,26 +1700,16 @@ async function runAiCheck() {
             return;
         }
 
-        if (AICHECK_IS_DOCX) {
-            // ▼ docx モード：P000: コメント / TOTAL: ... を解析して追記
-            setStep("3/4：コメントを解析し、不要な指摘を削除しています…");
-            const { commentsByPid, totalComment } = parseAiCheckResponse(aiText);
+        // 3/3：コメント解析→Word に追記
+        setStep("3/3：コメントを解析し、Wordに追記しています…");
+        const { commentsByPid, totalComment } = parseAiCheckResponse(aiText);
 
-            setStep("4/4：元の Word にコメントを追記しています…");
-            await exportAiCheckedDocxWithComments(
-                AICHECK_DOCX_BUFFER,
-                commentsByPid,
-                totalComment,
-                AICHECK_FILENAME
-            );
-        } else {
-            // ▼ txt モード：従来どおり全文テキストを再構成する
-            setStep("3/4：コメントを整理し、不要な指摘を削除しています…");
-            const cleaned = suppressTemplateComments(aiText);
-
-            setStep("4/4：Wordファイルを作成しています…");
-            await exportAiCheckedWord(cleaned, AICHECK_FILENAME);
-        }
+        await exportAiCheckedDocxWithComments(
+            AICHECK_DOCX_BUFFER,
+            commentsByPid,
+            totalComment,
+            AICHECK_FILENAME
+        );
 
         showToast("AIチェック結果のWordファイルを作成しました");
         setStep("完了：AIチェック付きWordファイルをダウンロードしました。");
