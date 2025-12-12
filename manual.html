@@ -1462,20 +1462,25 @@ function extractTextLinesFromDoc(doc) {
 
 
 // ★AIチェックは .docx 専用に固定する
+// AIチェック用プロンプト（docx専用ラッパー）
 function buildAiCheckPrompt() {
-    return function buildAiCheckPromptForDocx() {
+    return buildAiCheckPromptForDocx();
+}
+
+// docx用プロンプト本体
+function buildAiCheckPromptForDocx() {
     const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
     const ruleLines = (AI_TERM_RULES || [])
         .map(r => `${r.from} → ${r.to}`)
         .join("\n");
 
-    // ★ normal セクションだけ AI に渡す
+    // normal セクションだけ AI に渡す
     const listText = (AICHECK_PARAGRAPHS || [])
         .filter(p => p.section === "normal")
         .map(p => `${p.pid}\n${p.text}`)
         .join("\n\n");
 
-    return `
+    const prompt = `
 あなたは日本語の取扱説明書を専門とするテクニカルライター兼校正者です。
 日本語だけで回答してください。
 
@@ -1546,128 +1551,9 @@ ${tmplLines || "（なし）"}
 
 チェック対象の段落一覧（ID と本文）：
 ${listText}
-`.trim();
-}
+`;
 
-
-
-// テンプレ由来の行・レイアウト系・問題なし系など
-// 不要な「コメント」行を削除する
-function suppressTemplateComments(text) {
-    if (!text) return text;
-
-    // テンプレ文（database 由来）のセット
-    const tmplSet = new Set(
-        (TEMPLATES || [])
-            .map(t => (t.text || "").trim())
-            .filter(Boolean)
-    );
-
-    const lines = text.split(/\r?\n/);
-    const out = [];
-
-    let seenRealLine = false;  // 最初の「元の行」を見たかどうか
-
-    // レイアウト調整・表記揃え系のコメントで使われがちなキーワード群
-    const ngKeywords = [
-        "インデント",
-        "字下げ",
-        "スペース",
-        "空白",
-        "空白スペース",
-        "余分なスペース",
-        "余計なスペース",
-        "余白",
-        "全角",
-        "半角",
-        "全角・半角",
-        "全角/半角",
-        "全角／半角",
-        "コロン",
-        "：",
-        "体裁",
-        "レイアウト",
-        "行頭をそろえ",
-        "行頭を揃え",
-        "先頭をそろえ",
-        "先頭を揃え",
-        "表記をそろえ",
-        "表記を揃え",
-        "表記を統一",
-        "書式をそろえ",
-        "書式を揃え",
-        "書式を統一",
-        "スタイルをそろえ",
-        "スタイルを揃え",
-        "スタイルを統一",
-        "他項目と同じスタイル",
-        "他項目と同じ書式",
-        "他項目と同様に揃え",
-        "他の行と同じように揃え",
-        "フォントサイズ",
-        "フォントをそろえ",
-        "フォントを揃え",
-        "見た目をそろえ",
-        "見た目を揃え"
-    ];
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const trimmed = line.trim();
-
-        // 何も書いていない行は、最初の「元の行」以前なら捨てる
-        if (!trimmed) {
-            if (seenRealLine) {
-                out.push(line);
-            }
-            continue;
-        }
-
-        // コメント行（【コメント】〜）
-        if (trimmed.startsWith("【コメント】")) {
-            const content = trimmed;
-
-            // 文頭にいきなりコメントが来た場合（前に元の行が無い）は捨てる
-            if (!seenRealLine) {
-                continue;
-            }
-
-            // レイアウト系キーワードを含むコメントは捨てる
-            if (ngKeywords.some(k => content.includes(k))) {
-                continue;
-            }
-
-            // 「問題ありません」「修正不要」など問題なしコメントは捨てる
-            if (
-                content.includes("問題ありません") ||
-                content.includes("問題はありません") ||
-                content.includes("問題はない") ||
-                content.includes("修正の必要はありません") ||
-                content.includes("修正の必要はない") ||
-                (content.includes("このままで") && content.includes("問題"))
-            ) {
-                continue;
-            }
-
-            // 直前行がテンプレ文ならコメントを捨てる
-            if (out.length > 0) {
-                const prevTrim = out[out.length - 1].trim();
-                if (tmplSet.has(prevTrim)) {
-                    continue;
-                }
-            }
-
-            // 上記以外のコメントだけ残す
-            out.push(line);
-            continue;
-        }
-
-        // ここまで来たら「元の行」
-        seenRealLine = true;
-        out.push(line);
-    }
-
-    return out.join("\n");
+    return prompt.trim();
 }
 
 
