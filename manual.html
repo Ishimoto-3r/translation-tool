@@ -817,13 +817,27 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     };
 
     const isShortLabelLine = (text) => {
-        const t = text.trim();
-        if (!t) return true;
-        if (t.length > 20) return false;
-        if (/[。．！？?]/.test(t)) return false;
-        if (/(です|ます|ください|してください)/.test(t)) return false;
-        return true;
-    };
+    // 「単語（ラベル）」だけ除外し、短い“文章”は除外しない（＝コメント量を戻す）
+    const t = (text || "").trim();
+    if (!t) return true;
+
+    // 文章っぽい要素があれば「ラベルではない」＝チェック対象
+    // ・句点/疑問符
+    // ・助詞（を/に/へ/で/から/まで/と/や/の 等）
+    // ・です/ます/ください/してください 等
+    // ・動詞っぽい終わり（する/した/して/できる/入れる/押す/回す/取り付ける…）
+    if (/[。．！？?]/.test(t)) return false;
+    if (/(です|ます|ください|してください|下さい)/.test(t)) return false;
+    if (/[をにへでからまでとやの]/.test(t)) return false;
+    if (/(する|します|した|して|できる|入れる|押す|回す|取り付ける|取り外す|接続する|充電する|確認する|選択する|操作する)$/.test(t)) return false;
+
+    // ここまで来たら「ラベルっぽい」ので除外
+    // ただし極端に長いものは文章の可能性があるので残す
+    if (t.length > 30) return false;
+
+    return true;
+};
+
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
