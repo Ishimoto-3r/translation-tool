@@ -801,51 +801,19 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
     let pidCounter = 0;
-
-    // 除外は「サポート・企業情報」だけに戻す（量を戻すため）
-    const EXCLUDE_HEADINGS = new Set([
-        "■サポート・企業情報"
-    ]);
-
-    let inExcludedSection = false;
-
-    // ①〜⑳が大量にある「番号行」だけ除外（写真番号列）
-    const isImageNumberLine = (text) => {
-        const m = text.match(/[\u2460-\u2473]/g); // ①〜⑳
-        return !!(m && m.length >= 3);
-    };
-
-    // 短い“単語ラベル”だけ除外（除外を弱く）
-    // ※以前より拾う量を増やす：短文は基本通す
-    const isShortLabelLine = (text) => {
-        const t = (text || "").trim();
-        if (!t) return true;
-
-        // 句読点/敬体/ひらがながあれば文章扱い（通す）
-        if (/[。．！？?]/.test(t)) return false;
-        if (/(です|ます|ください|してください|下さい)/.test(t)) return false;
-        if (/[ぁ-ん]/.test(t)) return false;
-
-        // “漢字/カタカナだけの短い単語”だけ落とす（しきい値を小さく）
-        return (t.length <= 10);
-    };
+    let inSupport = false;
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
         const text = extractTextFromParagraph(p).trim();
         if (!text) continue;
 
-        // 見出し検出（■）
+        // サポート・企業情報だけ除外（※前の状態）
         if (text.startsWith("■")) {
-            inExcludedSection = EXCLUDE_HEADINGS.has(text.trim());
-            // 見出し行自体はAIに渡さない（現行踏襲）
+            inSupport = (text.trim() === "■サポート・企業情報");
             continue;
         }
-
-        if (inExcludedSection) continue;
-
-        if (isImageNumberLine(text)) continue;
-        if (isShortLabelLine(text)) continue;
+        if (inSupport) continue;
 
         const pid = "P" + String(pidCounter).padStart(3, "0");
         pidCounter++;
@@ -918,68 +886,22 @@ function parseAiCheckResponse(rawText) {
  * @param {boolean} isTemplatePara 対象段落がテンプレ由来かどうか
  */
 // ★置き換え：コメント抑制ロジック（読みやすさ/分割/冗長性は「理由付き」のみ許可）
-function shouldSuppressComment(content, isTemplatePara, para) {
+function shouldSuppressComment(content) {
     if (!content) return true;
 
-    const c = String(content).trim();
+    const c = content.trim();
     if (!c) return true;
 
-    // ▼ 体裁・レイアウト系は一律で捨てる（ここは厳格維持）
-    const ngKeywords = [
-        "インデント", "字下げ", "スペース", "空白", "空白スペース",
-        "余分なスペース", "余計なスペース", "余白",
-        "全角", "半角", "全角・半角", "全角/半角", "全角／半角",
-        "コロン", "体裁", "レイアウト",
-        "行頭をそろえ", "行頭を揃え",
-        "先頭をそろえ", "先頭を揃え",
-        "表記をそろえ", "表記を揃え", "表記を統一",
-        "書式をそろえ", "書式を揃え", "書式を統一",
-        "スタイルをそろえ", "スタイルを揃え", "スタイルを統一",
-        "他項目と同じスタイル", "他項目と同じ書式",
-        "他項目と同様に揃え", "他の行と同じように揃え",
-        "フォントサイズ", "フォントをそろえ", "フォントを揃え",
-        "見た目をそろえ", "見た目を揃え"
-    ];
-    if (ngKeywords.some(k => c.includes(k))) return true;
-
-    // ▼ 「問題ありません」系は捨てる
+    // 完全NGはこれだけ（前の挙動に近い）
     if (
         c.includes("問題ありません") ||
         c.includes("問題はありません") ||
-        c.includes("問題はない") ||
-        c.includes("修正の必要はありません") ||
-        c.includes("修正の必要はない") ||
-        (c.includes("このままで") && c.includes("問題"))
-    ) return true;
-
-    // ▼ 改行だけを理由にした指摘は捨てる（ユーザー要望）
-    //    ただし「一文が長いので二文に分ける」等の“文の分割”はOK
-    const hasBreakWord = /(改行|Shift\+Enter|シフトエンター|エンター)/.test(c);
-    const isSentenceSplit = /(一文が長|文が長|二文に分け|2文に分け|分割した方|分けた方が)/.test(c);
-    if (hasBreakWord && !isSentenceSplit) return true;
-
-    // ▼ 表記ルール誤検出を除外（ここは現行踏襲）
-    if (para && Array.isArray(AI_TERM_RULES) && AI_TERM_RULES.length) {
-        const text = para.text || "";
-        for (const rule of AI_TERM_RULES) {
-            const from = rule.from || "";
-            const to   = rule.to   || "";
-            if (!from || !to) continue;
-
-            const hasFrom = text.includes(from);
-            const hasTo   = text.includes(to);
-
-            if (!hasFrom && hasTo) {
-                if (c.includes("表記ルール") && c.includes(to)) {
-                    return true;
-                }
-            }
-        }
+        c.includes("修正の必要はありません")
+    ) {
+        return true;
     }
 
-    // ★重要：テンプレ段落でもコメントを“抑制しない”（量を戻すため）
-    // isTemplatePara はここでは見ない
-
+    // それ以外は全部通す（量優先）
     return false;
 }
 
