@@ -827,14 +827,9 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
-    // 「安全上の注意」見出し検出（表記ゆれ対応）
     const safetyHeads = new Set([
-        "■安全上のご注意",
-        "■安全上の注意",
-        "■ 安全上のご注意",
-        "■ 安全上の注意",
-        "安全上のご注意",
-        "安全上の注意"
+        "■安全上のご注意","■安全上の注意","■ 安全上のご注意","■ 安全上の注意",
+        "安全上のご注意","安全上の注意"
     ]);
 
     const allTexts = pList
@@ -843,7 +838,6 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
 
     const hasSafetyHeading = allTexts.some(t => safetyHeads.has(t));
 
-    // 除外セクション
     const EXCLUDE_HEADINGS = new Set([
         "■サポート・企業情報",
         "■ご使用済みの製品の廃棄に関して",
@@ -851,42 +845,12 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         "■技適マーク",
     ]);
 
-    let pidCounter = 0;
-
+    // --- ここから「段落を一旦収集→結合」 ---
     let currentHeading = "";
     let inExcludedSection = false;
-
-    // ・安全見出しが「存在する」→ そこ以降だけ収集
-    // ・存在しない → 先頭から収集
     let startCollect = !hasSafetyHeading;
 
-    // ★結合用バッファ
-    let bufText = "";
-    let bufStartIndex = null;   // 使わないがデバッグ用に残してOK
-    let bufEndIndex = null;     // これを pIndex にする（コメント挿入は末尾段落の次）
-    let bufParaCount = 0;
-
-    const MAX_JOIN_CHARS = 160; // おすすめ：160
-    const MAX_JOIN_PARAS = 3;   // おすすめ：3
-
-    const flushBuffer = () => {
-        const t = (bufText || "").trim();
-        if (t) {
-            const pid = "P" + String(pidCounter).padStart(3, "0");
-            pidCounter++;
-
-            AICHECK_PARAGRAPHS.push({
-                pid,
-                text: t,
-                section: "normal",
-                pIndex: bufEndIndex ?? 0, // ★末尾段落のindex
-            });
-        }
-        bufText = "";
-        bufStartIndex = null;
-        bufEndIndex = null;
-        bufParaCount = 0;
-    };
+    const collected = []; // { text, pIndex }
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
@@ -894,80 +858,110 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         const text = (textRaw || "").trim();
         if (!text) continue;
 
-        // 見出し検出（■あり / safetyHeadsあり）
         const isHeadingLike = text.startsWith("■") || safetyHeads.has(text);
-        if (isHeadingLike) {
-            // 見出しが来たら、バッファがあれば確定
-            flushBuffer();
 
+        if (isHeadingLike) {
             currentHeading = text.startsWith("■") ? text : ("■" + text);
             inExcludedSection = EXCLUDE_HEADINGS.has(currentHeading);
 
             if (safetyHeads.has(text) || safetyHeads.has(currentHeading)) {
                 startCollect = true;
             }
-            continue; // 見出し行自体は渡さない
+            continue;
         }
 
         if (!startCollect) continue;
         if (inExcludedSection) continue;
 
-        // 「番号だけ段落」は完全除外（AIにも渡さない）
+        // 番号だけ段落は除外
         if (isNumberingOnlyParagraph(text)) continue;
 
-        // ★構造段落は結合しない（ここで確定して単独で追加）
-        if (isStructuralParagraph(text)) {
-            flushBuffer();
+        collected.push({ text, pIndex: i });
+    }
 
-            const pid = "P" + String(pidCounter).padStart(3, "0");
-            pidCounter++;
-            AICHECK_PARAGRAPHS.push({
-                pid,
-                text,
-                section: "normal",
-                pIndex: i
-            });
-            continue;
+    // --- 「文の途中改行っぽい段落」を結合 ---
+    const merged = mergeDocxParagraphsForAiCheck(collected);
+
+    let pidCounter = 0;
+    for (const m of merged) {
+        const pid = "P" + String(pidCounter).padStart(3, "0");
+        pidCounter++;
+
+        AICHECK_PARAGRAPHS.push({
+            pid,
+            text: m.text,
+            section: "normal",
+            // ★コメント挿入位置は「結合した最後の段落」にする
+            pIndex: m.pIndexLast
+        });
+    }
+}
+
+    function mergeDocxParagraphsForAiCheck(items) {
+    // items: [{text, pIndex}]
+    const out = [];
+    if (!Array.isArray(items) || !items.length) return out;
+
+    const isBullet = (t) => /^([•・\-]|[0-9０-９]+\.)\s*/.test((t||"").trim());
+    const endsSentenceLike = (t) => {
+        const s = (t || "").trim();
+        if (!s) return true;
+
+        // 末尾が句点/終端記号なら「終わってる」扱い
+        if (/[。．.!！？\?]$/.test(s)) return true;
+        if (/[」』】）)\]]$/.test(s)) return true;
+
+        // マニュアルで句点を省略しがちな終端（ここは増やしてOK）
+        if (/(ください|します|します。|ました|です|ます|ません|可能です|できます|となります)$/.test(s)) return true;
+
+        return false;
+    };
+
+    const shouldMerge = (prev, next) => {
+        const a = (prev || "").trim();
+        const b = (next || "").trim();
+        if (!a || !b) return false;
+
+        // 箇条書き同士は基本結合しない（別項目になりやすい）
+        if (isBullet(a) && isBullet(b)) return false;
+
+        // 片方だけ箇条書きなら「折り返し」の可能性もあるので、
+        // prevが箇条書きで、終端してない時だけ結合を許可
+        if (isBullet(a) && !isBullet(b)) {
+            return !endsSentenceLike(a);
         }
 
-        // ★次段落を先読みして、結合を止めるべきか判断
-        let nextText = "";
-        for (let j = i + 1; j < pList.length; j++) {
-            const nt = (extractTextFromParagraph(pList[j]) || "").trim();
-            if (!nt) continue;
-            // 見出しは nextText として扱う（break判定材料）
-            nextText = nt;
-            break;
-        }
+        // prevが文として終端してたら結合しない
+        if (endsSentenceLike(a)) return false;
 
-        // バッファに追加（スペースで自然につなぐ）
-        if (!bufText) {
-            bufText = text;
-            bufStartIndex = i;
-            bufEndIndex = i;
-            bufParaCount = 1;
+        // nextが見出しっぽい/区切りっぽいものは結合しない
+        if (b.startsWith("■") || b.startsWith("<")) return false;
+
+        return true;
+    };
+
+    let curText = items[0].text;
+    let curLast = items[0].pIndex;
+
+    for (let i = 1; i < items.length; i++) {
+        const nxt = items[i];
+
+        if (shouldMerge(curText, nxt.text)) {
+            // 日本語なので基本は空白なしで結合（必要なら1スペースに変更可）
+            curText = (curText || "").trimEnd() + (nxt.text || "").trimStart();
+            curLast = nxt.pIndex;
         } else {
-            bufText = (bufText + " " + text).replace(/\s{2,}/g, " ").trim();
-            bufEndIndex = i;
-            bufParaCount++;
-        }
-
-        // ★暴走防止：上限で強制確定
-        const overLimit =
-            (bufText.length >= MAX_JOIN_CHARS) ||
-            (bufParaCount >= MAX_JOIN_PARAS);
-
-        // ★終端判定：ここで止めるべきなら確定
-        const shouldBreak = shouldBreakBeforeNext(bufText, nextText);
-
-        if (overLimit || shouldBreak) {
-            flushBuffer();
+            out.push({ text: curText, pIndexLast: curLast });
+            curText = nxt.text;
+            curLast = nxt.pIndex;
         }
     }
 
-    // 最後の残り
-    flushBuffer();
+    out.push({ text: curText, pIndexLast: curLast });
+    return out;
 }
+
+    
 
 /* === AIチェック用：途中改行の段落結合ヘルパー === */
 
