@@ -778,7 +778,9 @@ function isNumberingOnlyParagraph(text) {
     const t = s.replace(/\s+/g, "");
 
     // 例： (1)(2)(3) / （1）（2） / ①②③ / 1,2,3 / 1.2.3 みたいな「番号だけ」の行を除外
-    const onlyNumSymbols = /^[0-9０-９()（）［\[\]【】{}｛｝<>＜＞.,．,，、・\-ー＋+×xX*＊#＃①-⑳⑴-⑳❶-❿]+$/;
+    const onlyNumSymbols =
+  /^[0-9０-９()（）［\[\]【】{}｛｝<>＜＞.,．，、・\-ー＋+×xX*＊#＃\u2460-\u2473\u2474-\u2487\u2776-\u277F]+$/;
+
     if (onlyNumSymbols.test(t)) return true;
 
     // 例： (1)(2)(3)(4) のように括弧付き数字が連続するパターン
