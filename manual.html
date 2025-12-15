@@ -969,6 +969,51 @@ function shouldSuppressComment(content, isTemplatePara, para) {
 
     const c = String(content).trim();
     if (!c) return true;
+    // ===== 追加：表記ルールコメントの妥当性検証（from が本文に無ければ捨てる）=====
+const isTerminologyTopic =
+  c.includes("表記ルール") || c.includes("表記ゆれ") || c.includes("用語") || /→/.test(c);
+
+// コメントが表記ルール系っぽい場合だけ厳格チェック
+if (isTerminologyTopic && para && typeof para.text === "string") {
+  const src = para.text;
+
+  // 1) コメント内に「from→to」が書かれている場合：from が本文に無ければ捨てる
+  const arrow = c.match(/(.+?)\s*→\s*(.+)/);
+  if (arrow) {
+    const fromWord = (arrow[1] || "").trim();
+    if (fromWord && !src.includes(fromWord)) {
+      return true;
+    }
+  }
+
+  // 2) 「表記ルール『from→to』と異なる」系：termRules から特定し、from が本文に無ければ捨てる
+  //    （今回の「インジケータは…異なるため…」誤爆をここで落とす）
+  if (Array.isArray(AI_TERM_RULES) && AI_TERM_RULES.length) {
+    const hit = AI_TERM_RULES.find(r => {
+      const f = (r.from || "").trim();
+      const t = (r.to || "").trim();
+      if (!f || !t) return false;
+      // コメントがこのルールに言及してそうか（from/to/「from→to」どれか）
+      return c.includes(f) || c.includes(t) || c.includes(`${f} → ${t}`) || c.includes(`${f}→${t}`);
+    });
+
+    if (hit) {
+      const f = (hit.from || "").trim();
+      const t = (hit.to || "").trim();
+
+      // 本文が to（正）を含むのに、from（誤）が無い = 「合ってるのに違う」系なので捨てる
+      if (t && src.includes(t) && (!f || !src.includes(f))) {
+        return true;
+      }
+
+      // 本文に from が無いのに修正を求めるのは誤爆なので捨てる（より一般的）
+      if (f && !src.includes(f) && (c.includes("修正") || c.includes("修正します") || c.includes("置換") || c.includes("変更"))) {
+        return true;
+      }
+    }
+  }
+}
+
     // ===== 追加：表記ルール絡みの「推測・条件付きコメント」を全落とし =====
     // 例）「〜がルールに反して『〜』となっている場合は…」のような仮定は不要指摘として除外
     const looksLikeTerminologyComment =
@@ -1605,6 +1650,9 @@ function buildAiCheckPromptForDocx() {
 - 「表記をそろえる／揃える／統一する／他項目と同じにする」など、置換内容が特定できない曖昧なコメントは禁止です。
 - 表記ルール一覧に無い単語は、表記ゆれとして指摘しないでください。
 - 表記ルールに関連するコメントは「違反がある場合のみ」出す（違反が無いなら沈黙）。
+- 表記ルール違反を指摘する場合は、必ず「本文に実際に含まれている誤表記（from）」をそのまま引用し、from→to を書くこと。
+  本文に from が存在しない場合、表記ルール関連のコメントは一切出してはいけない。
+
 
 - 語尾や言い回しの好み（例：「〜すると分かりやすい」等）の提案は禁止。
   改善提案は「誤解・誤操作・安全リスクの低減」または「手順の欠落補完」がある場合に限る。
