@@ -811,16 +811,13 @@ function extractTextFromParagraph(pElem) {
     return texts.join("").replace(/\r/g, "");
 }
 
-// ★置き換え：docx 段落解析（「■安全上のご注意」より前は除外 + 除外セクション対応）
+// ★置き換え：docx 段落解析（途中改行を結合してAIに渡す版）
 async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     AICHECK_PARAGRAPHS = [];
 
     const zip = await JSZip.loadAsync(arrayBuffer);
     const docFile = zip.file("word/document.xml");
-    if (!docFile) {
-        // docxとして不正（または特殊構造）
-        return;
-    }
+    if (!docFile) return;
 
     const docXml = await docFile.async("text");
 
@@ -830,7 +827,7 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
-    // まず「安全上の注意」見出しが存在するかを事前スキャン（表記ゆれ対応）
+    // 「安全上の注意」見出し検出（表記ゆれ対応）
     const safetyHeads = new Set([
         "■安全上のご注意",
         "■安全上の注意",
@@ -840,26 +837,56 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         "安全上の注意"
     ]);
 
-    const allTexts = pList.map(p => (extractTextFromParagraph(p) || "").trim()).filter(Boolean);
+    const allTexts = pList
+        .map(p => (extractTextFromParagraph(p) || "").trim())
+        .filter(Boolean);
+
     const hasSafetyHeading = allTexts.some(t => safetyHeads.has(t));
 
+    // 除外セクション
+    const EXCLUDE_HEADINGS = new Set([
+        "■サポート・企業情報",
+        "■ご使用済みの製品の廃棄に関して",
+        "■電波に関する注意事項",
+        "■技適マーク",
+    ]);
+
     let pidCounter = 0;
-
-const EXCLUDE_HEADINGS = new Set([
-    "■サポート・企業情報",
-    "■ご使用済みの製品の廃棄に関して",
-    "■電波に関する注意事項",
-    "■技適マーク",
-]);
-
 
     let currentHeading = "";
     let inExcludedSection = false;
 
-    // ★ルール：
-    // ・安全見出しが「存在する」ファイル → その見出し以降だけを収集
-    // ・存在しないファイル → 先頭から収集（0件防止）
+    // ・安全見出しが「存在する」→ そこ以降だけ収集
+    // ・存在しない → 先頭から収集
     let startCollect = !hasSafetyHeading;
+
+    // ★結合用バッファ
+    let bufText = "";
+    let bufStartIndex = null;   // 使わないがデバッグ用に残してOK
+    let bufEndIndex = null;     // これを pIndex にする（コメント挿入は末尾段落の次）
+    let bufParaCount = 0;
+
+    const MAX_JOIN_CHARS = 160; // おすすめ：160
+    const MAX_JOIN_PARAS = 3;   // おすすめ：3
+
+    const flushBuffer = () => {
+        const t = (bufText || "").trim();
+        if (t) {
+            const pid = "P" + String(pidCounter).padStart(3, "0");
+            pidCounter++;
+
+            AICHECK_PARAGRAPHS.push({
+                pid,
+                text: t,
+                section: "normal",
+                pIndex: bufEndIndex ?? 0, // ★末尾段落のindex
+            });
+        }
+        bufText = "";
+        bufStartIndex = null;
+        bufEndIndex = null;
+        bufParaCount = 0;
+    };
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
@@ -867,14 +894,15 @@ const EXCLUDE_HEADINGS = new Set([
         const text = (textRaw || "").trim();
         if (!text) continue;
 
-        // 見出し検出（■ あり / なし両対応）
+        // 見出し検出（■あり / safetyHeadsあり）
         const isHeadingLike = text.startsWith("■") || safetyHeads.has(text);
-
         if (isHeadingLike) {
+            // 見出しが来たら、バッファがあれば確定
+            flushBuffer();
+
             currentHeading = text.startsWith("■") ? text : ("■" + text);
             inExcludedSection = EXCLUDE_HEADINGS.has(currentHeading);
 
-            // 安全見出しに到達したら収集開始
             if (safetyHeads.has(text) || safetyHeads.has(currentHeading)) {
                 startCollect = true;
             }
@@ -884,19 +912,108 @@ const EXCLUDE_HEADINGS = new Set([
         if (!startCollect) continue;
         if (inExcludedSection) continue;
 
-        // ★番号だけ段落はここで除外（P付番前に落とす）
+        // 「番号だけ段落」は完全除外（AIにも渡さない）
         if (isNumberingOnlyParagraph(text)) continue;
 
-        const pid = "P" + String(pidCounter).padStart(3, "0");
-        pidCounter++;
+        // ★構造段落は結合しない（ここで確定して単独で追加）
+        if (isStructuralParagraph(text)) {
+            flushBuffer();
 
-        AICHECK_PARAGRAPHS.push({
-            pid,
-            text,
-            section: "normal",
-            pIndex: i
-        });
+            const pid = "P" + String(pidCounter).padStart(3, "0");
+            pidCounter++;
+            AICHECK_PARAGRAPHS.push({
+                pid,
+                text,
+                section: "normal",
+                pIndex: i
+            });
+            continue;
+        }
+
+        // ★次段落を先読みして、結合を止めるべきか判断
+        let nextText = "";
+        for (let j = i + 1; j < pList.length; j++) {
+            const nt = (extractTextFromParagraph(pList[j]) || "").trim();
+            if (!nt) continue;
+            // 見出しは nextText として扱う（break判定材料）
+            nextText = nt;
+            break;
+        }
+
+        // バッファに追加（スペースで自然につなぐ）
+        if (!bufText) {
+            bufText = text;
+            bufStartIndex = i;
+            bufEndIndex = i;
+            bufParaCount = 1;
+        } else {
+            bufText = (bufText + " " + text).replace(/\s{2,}/g, " ").trim();
+            bufEndIndex = i;
+            bufParaCount++;
+        }
+
+        // ★暴走防止：上限で強制確定
+        const overLimit =
+            (bufText.length >= MAX_JOIN_CHARS) ||
+            (bufParaCount >= MAX_JOIN_PARAS);
+
+        // ★終端判定：ここで止めるべきなら確定
+        const shouldBreak = shouldBreakBeforeNext(bufText, nextText);
+
+        if (overLimit || shouldBreak) {
+            flushBuffer();
+        }
     }
+
+    // 最後の残り
+    flushBuffer();
+}
+
+/* === AIチェック用：途中改行の段落結合ヘルパー === */
+
+// 見出し/箇条書き/注意ラベル/番号段落っぽいものは「別項目」として扱い、結合しない
+function isStructuralParagraph(text) {
+    if (!text) return false;
+    const s = String(text).trim();
+    if (!s) return true;
+
+    // 見出し
+    if (s.startsWith("■") || /^【.+】$/.test(s)) return true;
+
+    // 箇条書き/注意/危険ラベル等
+    if (s.startsWith("・") || s.startsWith("※")) return true;
+    if (/^<[^>]+>$/.test(s)) return true; // <危険> など
+
+    // 典型的な番号開始（1. / 1) / (1) / ① など）
+    if (/^(\(?\d+\)?[.\)）]|[\u2460-\u2473\u2474-\u2487\u2776-\u277F])\s*/.test(s)) return true;
+
+    // 「番号だけ段落」は構造扱い（すでに別関数でも除外してるが保険）
+    if (isNumberingOnlyParagraph(s)) return true;
+
+    return false;
+}
+
+// 文の終端っぽいか（「。」が無い文もあるので複数条件）
+function isSentenceEndLike(text) {
+    if (!text) return false;
+    const s = String(text).trim();
+    if (!s) return true;
+
+    // 明確な終端
+    if (/[。！？!?]$/.test(s)) return true;
+
+    // 閉じ記号で終わっていて、そこそこ長いなら終端扱い（注記/見出し風の完結文）
+    if (/[）\]】〕」]$/.test(s) && s.length >= 12) return true;
+
+    return false;
+}
+
+// 次段落が来たら「ここで結合を止めるべき」か
+function shouldBreakBeforeNext(currText, nextText) {
+    if (!nextText) return true;                 // 次が無い＝終わり
+    if (isStructuralParagraph(nextText)) return true; // 次が構造要素なら止める
+    if (isSentenceEndLike(currText)) return true;     // いまの段落が終端なら止める
+    return false;
 }
 
 
