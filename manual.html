@@ -1232,6 +1232,29 @@ if (/(?:とすると|にすると|とすれば).{0,20}(?:分かりやす|理解�
 // ④ 「〜となります」を「〜します」等へ寄せるだけの語尾調整提案を捨てる（意味が同じなら不要）
 if (/(?:〜|)と(なります|します)の表現/.test(c)) return true;
 
+// ⑤ コメントが「本文の復唱」なら捨てる（今回の症状対策）
+if (para && typeof para.text === "string") {
+  const base = para.text.trim();
+
+  // コメントから引用符っぽいものを剥がして比較
+  const stripped = c
+    .replace(/^[「『"”]+/, "")
+    .replace(/[」』"”]+$/, "")
+    .trim();
+
+  // ほぼ同一ならコメントとして無意味なので除外
+  if (stripped === base) return true;
+
+  // 長文で大部分が一致する場合も除外（ざっくり判定）
+  if (base.length >= 20 && stripped.length >= 20) {
+    const b = base.replace(/\s+/g, "");
+    const s = stripped.replace(/\s+/g, "");
+    if (s.includes(b) || b.includes(s)) return true;
+  }
+}
+
+
+    
     return false; // 基本通す
 }
 
@@ -1782,6 +1805,9 @@ function buildAiCheckPromptForDocx() {
 - 表記ルールに関連するコメントは「違反がある場合のみ」出す（違反が無いなら沈黙）。
 - 表記ルール違反を指摘する場合は、必ず「本文に実際に含まれている誤表記（from）」をそのまま引用し、from→to を書くこと。
   本文に from が存在しない場合、表記ルール関連のコメントは一切出してはいけない。
+- コメント本文に「原文そのもの」を書くのは禁止（引用・復唱禁止）。
+- コメントは必ず「何をどう直すか」だけを書く（例：『冗長なので「〜」を削除』）。
+
 
 
 - 語尾や言い回しの好み（例：「〜すると分かりやすい」等）の提案は禁止。
