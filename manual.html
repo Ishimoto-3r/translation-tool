@@ -919,21 +919,33 @@ function mergeDocxParagraphsForAiCheck(paragraphs) {
   const out = [];
   let buf = "";
 
+  // ★追加：段落要素を必ず「文字列」に正規化
+  const toText = (p) => {
+    if (p == null) return "";
+    if (typeof p === "string") return p;
+    if (typeof p === "number" || typeof p === "boolean") return String(p);
+
+    // docx系のパーサでありがちな { text: ... } / { value: ... }
+    if (typeof p === "object") {
+      if (typeof p.text === "string") return p.text;
+      if (p.text != null) return String(p.text);
+      if (typeof p.value === "string") return p.value;
+      if (p.value != null) return String(p.value);
+      // 最後の保険（[object Object] になり得るが落ちないこと優先）
+      return String(p);
+    }
+
+    return String(p);
+  };
+
   const endsSentence = (s) => /[。！？!?]$/.test(s);
   const endsQuoteLike = (s) => /[」』】）\]]$/.test(s);
 
   const startsContinuation = (s) => {
     const t = (s || "").trim();
-
-    // 例：『顧客詳細に戻る』で / を / に / から / など
     if (/^(で|を|に|へ|と|が|は|も|や|の|から|まで|より|など|等|、)/.test(t)) return true;
-
-    // UI文言の続きになりがちな語
     if (/^(ボタン|キー|リンク|メニュー|画面|ページ|項目|設定|選択|クリック|タップ)/.test(t)) return true;
-
-    // 丁寧表現の続き
     if (/^(してください|します|できます|ください|となります|場合は)/.test(t)) return true;
-
     return false;
   };
 
@@ -941,26 +953,16 @@ function mergeDocxParagraphsForAiCheck(paragraphs) {
     const a = (prev || "").trim();
     const b = (next || "").trim();
     if (!a || !b) return false;
-
-    // 文末（。！？）で終わってたら基本は結合しない
     if (endsSentence(a)) return false;
-
-    // ★今回の残り：『〜』で改段落 → 次段落が「で/を/に…」などで続く
     if (endsQuoteLike(a) && startsContinuation(b)) return true;
-
-    // 短文が改段落で分割されているケースも吸収（保守的に）
     if (a.length <= 60 && b.length <= 60) return true;
-
     return false;
   };
 
-  const joinText = (a, b) => {
-    // 末尾/先頭が日本語ならスペース無しで連結（Wordの不自然な空白も増やさない）
-    return (a || "") + (b || "");
-  };
+  const joinText = (a, b) => (a || "") + (b || "");
 
-  for (const p of paragraphs) {
-    const text = (p || "").trim();
+  for (const p of (paragraphs || [])) {
+    const text = toText(p).trim(); // ★ここが重要
     if (!text) continue;
 
     if (!buf) {
@@ -979,6 +981,7 @@ function mergeDocxParagraphsForAiCheck(paragraphs) {
   if (buf) out.push(buf);
   return out;
 }
+
 
     
 
