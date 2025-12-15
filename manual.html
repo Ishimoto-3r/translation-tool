@@ -811,6 +811,54 @@ function extractTextFromParagraph(pElem) {
     return texts.join("").replace(/\r/g, "");
 }
 
+
+// === docx 段落結合（AIチェック用）===
+// collected: [{ text, pIndex }]
+function mergeDocxParagraphsForAiCheck(collected) {
+  const out = [];
+  let bufText = "";
+  let bufLastIndex = null;
+
+  const flush = () => {
+    const t = (bufText || "").trim();
+    if (t) out.push({ text: t, pIndexLast: bufLastIndex });
+    bufText = "";
+    bufLastIndex = null;
+  };
+
+  for (let i = 0; i < collected.length; i++) {
+    const curr = collected[i];
+    const next = collected[i + 1];
+
+    const currText = (curr.text || "").trim();
+    const nextText = (next?.text || "").trim();
+
+    if (!currText) continue;
+
+    // 構造段落（見出し/箇条書き/番号っぽい等）は単独で確定
+    if (isStructuralParagraph(currText)) {
+      flush();
+      out.push({ text: currText, pIndexLast: curr.pIndex });
+      continue;
+    }
+
+    // バッファに追加
+    if (!bufText) bufText = currText;
+    else bufText += currText;  // ←改行由来の分割を「連結」する意図ならこれでOK（必要なら " " に変更）
+    bufLastIndex = curr.pIndex;
+
+    // 次に進む前に切るべきなら flush
+    if (shouldBreakBeforeNext(currText, nextText)) {
+      flush();
+    }
+  }
+
+  flush();
+  return out;
+}
+
+
+    
 // ★修正版：docx(ArrayBuffer) → AICHECK_PARAGRAPHS を確実に構築（これ1つだけ残す）
 async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     AICHECK_PARAGRAPHS = [];
