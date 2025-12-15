@@ -807,6 +807,7 @@ function extractTextFromParagraph(pElem) {
     return texts.join("").replace(/\r/g, "");
 }
 
+a// ★置き換え：docx 段落解析（「■安全上のご注意」より前は除外 + 除外セクション対応）
 async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     AICHECK_PARAGRAPHS = [];
 
@@ -821,7 +822,7 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
 
     let pidCounter = 0;
 
-    // 除外セクション（元の仕様を維持）
+    // 除外セクション（維持）
     const EXCLUDE_HEADINGS = new Set([
         "■サポート・企業情報",
         "■ご使用済みの製品の廃棄に関して",
@@ -830,12 +831,13 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     let currentHeading = "";
     let inExcludedSection = false;
 
-    // ★追加：安全上のご注意以降かどうか
-    let reachedSafety = false;
+    // ★「■安全上のご注意」より前はチェック不要
+    let startCollect = false;
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
-        const text = extractTextFromParagraph(p).trim();
+        const textRaw = extractTextFromParagraph(p);
+        const text = (textRaw || "").trim();
         if (!text) continue;
 
         // 見出し検出（■）
@@ -843,12 +845,15 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
             currentHeading = text.trim();
             inExcludedSection = EXCLUDE_HEADINGS.has(currentHeading);
 
-            // ★ここがポイント：「■安全上のご注意」に入ったら main 扱い
+            // ★ここで開始
             if (currentHeading === "■安全上のご注意") {
-                reachedSafety = true;
+                startCollect = true;
             }
-            continue; // 見出し行はAIへ渡さない
+            continue; // 見出し行自体は渡さない
         }
+
+        // ★開始前はスキップ（＝タイトル/定型句は全部チェックしない）
+        if (!startCollect) continue;
 
         if (inExcludedSection) continue;
 
@@ -858,11 +863,12 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         AICHECK_PARAGRAPHS.push({
             pid,
             text,
-            section: reachedSafety ? "main" : "intro", // ★追加
+            section: "normal",
             pIndex: i
         });
     }
 }
+
 
 
 /**
@@ -924,64 +930,59 @@ return { commentsByPid, totalComment };
 }
 
 
-/**
- * コメント内容から「レイアウト系」「問題なし系」などを除外する判定
- * @param {string} content コメント本文
- * @param {boolean} isTemplatePara 対象段落がテンプレ由来かどうか
- */
-// ★置き換え：コメント抑制ロジック（読みやすさ/分割/冗長性は「理由付き」のみ許可）
+// ★置き換え：コメント抑制ロジック（不要指摘をまとめて除外）
 function shouldSuppressComment(content, isTemplatePara, para) {
     if (!content) return true;
 
-    // テンプレ段落はコメント不要（現仕様）
+    // テンプレ段落は原則コメント禁止（現仕様維持）
     if (isTemplatePara) return true;
 
     const c = String(content).trim();
     if (!c) return true;
 
-    // --- 修正不要系コメントは出さない ---
+    // ①「問題ありません/適切です」系は不要
     const noIssuePhrases = [
         "問題ありません",
         "問題はありません",
         "問題はない",
         "修正の必要はありません",
         "修正の必要はない",
-        "適切です",
+        "問題となる表現はありません",
+        "問題となる箇所はありません",
         "ラベルとして適切です",
-        "このままでよい",
-        "現状で問題ありません",
-        "指摘はありません",
-        "修正不要",
+        "適切です",
+        "妥当です",
+        "OKです",
+        "良いです",
     ];
     if (noIssuePhrases.some(p => c.includes(p))) return true;
 
-    // --- ★追加：括弧・全角半角・記号表記に関する指摘は不要 ---
-    const bracketStylePatterns = [
-        "全角",
-        "半角",
-        "括弧",
-        "（",
-        "）",
-        "(",
-        ")",
-        "記号",
-        "表記ルールの観点",
-        "表記ルールの点",
-        "表記を統一",
-        "表記を揃",
-        "表記の統一",
-        "表記の揃",
-        "スペースを空け",
-        "スペースの有無",
-    ];
-    if (bracketStylePatterns.some(p => c.includes(p))) {
+    // ①「と同様に/同様に」で始まるコメント（前提が無いと意味不明になりがち）
+    if (/^(と同様に|同様に|同じく)\s*[、，]/.test(c) || /^(と同様に|同様に|同じく)/.test(c)) {
         return true;
     }
 
-    // --- ■安全上のご注意より前はコメント不要 ---
-    if (para && para.section === "intro") return true;
+    // 括弧の表記ゆれ（全角/半角）指摘は不要
+    if (c.includes("全角") || c.includes("半角")) return true;
+    if (c.includes("括弧") && (c.includes("全角") || c.includes("半角") || c.includes("統一") || c.includes("揃") )) {
+        return true;
+    }
 
-    return false; // それ以外は通す
+    // スラッシュ（/ と ／）の半角全角指摘は不要
+    if (c.includes("スラッシュ") || c.includes("/と／") || c.includes("／と/") || c.includes("／") && c.includes("統一")) {
+        return true;
+    }
+
+    // 画像上の番号（赤丸番号など）に関するコメントは不要
+    // 例：「(3,5,9...)が重複」などの“番号列”＋「画像/番号/赤丸/各部の名称」絡みを除外
+    const hasNumberCluster =
+        /[（(]?\s*\d{1,2}(?:\s*[、,]\s*\d{1,2}){3,}\s*[)）]?/.test(c) ||
+        /(?:\d{1,2}\s*){4,}/.test(c);
+    const mentionsImageNumber =
+        c.includes("画像") || c.includes("番号") || c.includes("赤丸") || c.includes("各部の名称") || c.includes("ナンバリング");
+    if (hasNumberCluster && mentionsImageNumber) return true;
+
+    return false; // 基本通す
 }
 
 
@@ -1007,19 +1008,18 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
     const body = xmlDoc.getElementsByTagNameNS(wNs, "body")[0];
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
-    // pid → 段落インデックス
+    // pid → 元 document.xml の段落インデックス
     const indexByPid = new Map();
-    AICHECK_PARAGRAPHS.forEach(p => {
-        indexByPid.set(p.pid, p.pIndex);
-    });
+    AICHECK_PARAGRAPHS.forEach(p => indexByPid.set(p.pid, p.pIndex));
 
-    // インデックス昇順 → 逆順で挿入
+    // 挿入順（後ろから入れる）
     const pidList = Object.keys(commentsByPid || {}).sort((a, b) => {
         const ia = indexByPid.get(a);
         const ib = indexByPid.get(b);
         return (ia ?? 0) - (ib ?? 0);
     });
 
+    // ★重要：表内段落でも「baseP の親」に insert する（body 固定だと表外に飛ぶ）
     for (let i = pidList.length - 1; i >= 0; i--) {
         const pid = pidList[i];
         const idx = indexByPid.get(pid);
@@ -1031,10 +1031,11 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
         const commentText = (commentsByPid[pid] || "").trim();
         if (!commentText) continue;
 
+        const parent = baseP.parentNode; // w:tc / w:body など
+        if (!parent) continue;
+
+        // コメント段落（赤字＋黄色ハイライト）
         const commentP = xmlDoc.createElementNS(wNs, "w:p");
-
-
-
         const r = xmlDoc.createElementNS(wNs, "w:r");
         const rPr = xmlDoc.createElementNS(wNs, "w:rPr");
 
@@ -1052,19 +1053,16 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
         r.appendChild(rPr);
         r.appendChild(t);
         commentP.appendChild(r);
-// ★修正：baseP と同じ親（表セル内など）にコメント段落を挿入する
-const parent = baseP.parentNode;
-if (!parent) continue;
 
-if (baseP.nextSibling) {
-    parent.insertBefore(commentP, baseP.nextSibling);
-} else {
-    parent.appendChild(commentP);
-}
-
+        // baseP の直後に挿入
+        if (baseP.nextSibling) {
+            parent.insertBefore(commentP, baseP.nextSibling);
+        } else {
+            parent.appendChild(commentP);
+        }
     }
 
-    // ■総評
+    // ■総評（w:body の末尾に追加）
     if (totalComment && totalComment.trim()) {
         const totalP = xmlDoc.createElementNS(wNs, "w:p");
         const r = xmlDoc.createElementNS(wNs, "w:r");
@@ -1099,6 +1097,7 @@ if (baseP.nextSibling) {
 
     saveAs(outBlob, fileName);
 }
+
 
 
 
