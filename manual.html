@@ -905,30 +905,59 @@ return { commentsByPid, totalComment };
  */
 // ★置き換え：コメント抑制ロジック（読みやすさ/分割/冗長性は「理由付き」のみ許可）
 function shouldSuppressComment(content, isTemplatePara, para) {
-  if (!content) return true;
+    if (!content) return true;
 
-  // テンプレ段落は原則コメント禁止（現仕様維持）
-  if (isTemplatePara) return true;
+    // テンプレ段落はコメント不要（現仕様）
+    if (isTemplatePara) return true;
 
-  const c = String(content).trim();
-  if (!c) return true;
+    const c = String(content).trim();
+    if (!c) return true;
 
-  // 「問題ありません」系は捨てる
-  const noIssuePhrases = [
-    "問題ありません",
-    "問題はありません",
-    "問題はない",
-    "修正の必要はありません",
-    "修正の必要はない",
-    "適切です",
-    "ラベルとして適切です",
-    "このままでよい",
-    "現状で問題ありません",
-  ];
-  if (noIssuePhrases.some(p => c.includes(p))) return true;
+    // --- 修正不要系コメントは出さない ---
+    const noIssuePhrases = [
+        "問題ありません",
+        "問題はありません",
+        "問題はない",
+        "修正の必要はありません",
+        "修正の必要はない",
+        "適切です",
+        "ラベルとして適切です",
+        "このままでよい",
+        "現状で問題ありません",
+        "指摘はありません",
+        "修正不要",
+    ];
+    if (noIssuePhrases.some(p => c.includes(p))) return true;
 
-  return false;
+    // --- ★追加：括弧・全角半角・記号表記に関する指摘は不要 ---
+    const bracketStylePatterns = [
+        "全角",
+        "半角",
+        "括弧",
+        "（",
+        "）",
+        "(",
+        ")",
+        "記号",
+        "表記ルールの観点",
+        "表記ルールの点",
+        "表記を統一",
+        "表記を揃",
+        "表記の統一",
+        "表記の揃",
+        "スペースを空け",
+        "スペースの有無",
+    ];
+    if (bracketStylePatterns.some(p => c.includes(p))) {
+        return true;
+    }
+
+    // --- ■安全上のご注意より前はコメント不要 ---
+    if (para && para.section === "intro") return true;
+
+    return false; // それ以外は通す
 }
+
 
 
 
