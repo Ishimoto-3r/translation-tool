@@ -915,68 +915,69 @@ function normalizeWordTextForAiCheck(textRaw) {
 }
 
     
-    function mergeDocxParagraphsForAiCheck(items) {
-    // items: [{text, pIndex}]
-    const out = [];
-    if (!Array.isArray(items) || !items.length) return out;
+function mergeDocxParagraphsForAiCheck(paragraphs) {
+  const out = [];
+  let buf = "";
 
-    const isBullet = (t) => /^([•・\-]|[0-9０-９]+\.)\s*/.test((t||"").trim());
-    const endsSentenceLike = (t) => {
-        const s = (t || "").trim();
-        if (!s) return true;
+  const endsSentence = (s) => /[。！？!?]$/.test(s);
+  const endsQuoteLike = (s) => /[」』】）\]]$/.test(s);
 
-        // 末尾が句点/終端記号なら「終わってる」扱い
-        if (/[。．.!！？\?]$/.test(s)) return true;
-        if (/[」』】）)\]]$/.test(s)) return true;
+  const startsContinuation = (s) => {
+    const t = (s || "").trim();
 
-        // マニュアルで句点を省略しがちな終端（ここは増やしてOK）
-        if (/(ください|します|します。|ました|です|ます|ません|可能です|できます|となります)$/.test(s)) return true;
+    // 例：『顧客詳細に戻る』で / を / に / から / など
+    if (/^(で|を|に|へ|と|が|は|も|や|の|から|まで|より|など|等|、)/.test(t)) return true;
 
-        return false;
-    };
+    // UI文言の続きになりがちな語
+    if (/^(ボタン|キー|リンク|メニュー|画面|ページ|項目|設定|選択|クリック|タップ)/.test(t)) return true;
 
-    const shouldMerge = (prev, next) => {
-        const a = (prev || "").trim();
-        const b = (next || "").trim();
-        if (!a || !b) return false;
+    // 丁寧表現の続き
+    if (/^(してください|します|できます|ください|となります|場合は)/.test(t)) return true;
 
-        // 箇条書き同士は基本結合しない（別項目になりやすい）
-        if (isBullet(a) && isBullet(b)) return false;
+    return false;
+  };
 
-        // 片方だけ箇条書きなら「折り返し」の可能性もあるので、
-        // prevが箇条書きで、終端してない時だけ結合を許可
-        if (isBullet(a) && !isBullet(b)) {
-            return !endsSentenceLike(a);
-        }
+  const shouldJoin = (prev, next) => {
+    const a = (prev || "").trim();
+    const b = (next || "").trim();
+    if (!a || !b) return false;
 
-        // prevが文として終端してたら結合しない
-        if (endsSentenceLike(a)) return false;
+    // 文末（。！？）で終わってたら基本は結合しない
+    if (endsSentence(a)) return false;
 
-        // nextが見出しっぽい/区切りっぽいものは結合しない
-        if (b.startsWith("■") || b.startsWith("<")) return false;
+    // ★今回の残り：『〜』で改段落 → 次段落が「で/を/に…」などで続く
+    if (endsQuoteLike(a) && startsContinuation(b)) return true;
 
-        return true;
-    };
+    // 短文が改段落で分割されているケースも吸収（保守的に）
+    if (a.length <= 60 && b.length <= 60) return true;
 
-    let curText = items[0].text;
-    let curLast = items[0].pIndex;
+    return false;
+  };
 
-    for (let i = 1; i < items.length; i++) {
-        const nxt = items[i];
+  const joinText = (a, b) => {
+    // 末尾/先頭が日本語ならスペース無しで連結（Wordの不自然な空白も増やさない）
+    return (a || "") + (b || "");
+  };
 
-        if (shouldMerge(curText, nxt.text)) {
-            // 日本語なので基本は空白なしで結合（必要なら1スペースに変更可）
-            curText = (curText || "").trimEnd() + (nxt.text || "").trimStart();
-            curLast = nxt.pIndex;
-        } else {
-            out.push({ text: curText, pIndexLast: curLast });
-            curText = nxt.text;
-            curLast = nxt.pIndex;
-        }
+  for (const p of paragraphs) {
+    const text = (p || "").trim();
+    if (!text) continue;
+
+    if (!buf) {
+      buf = text;
+      continue;
     }
 
-    out.push({ text: curText, pIndexLast: curLast });
-    return out;
+    if (shouldJoin(buf, text)) {
+      buf = joinText(buf, text);
+    } else {
+      out.push(buf);
+      buf = text;
+    }
+  }
+
+  if (buf) out.push(buf);
+  return out;
 }
 
     
