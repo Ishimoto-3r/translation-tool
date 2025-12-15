@@ -811,18 +811,30 @@ function extractTextFromParagraph(pElem) {
     return texts.join("").replace(/\r/g, "");
 }
 
-// ★置き換え：docx 段落解析（途中改行を結合してAIに渡す版）
+// ★修正版：docx(ArrayBuffer) → AICHECK_PARAGRAPHS を確実に構築（これ1つだけ残す）
 async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     AICHECK_PARAGRAPHS = [];
 
+    if (typeof JSZip === "undefined") {
+        throw new Error("JSZip is not loaded.");
+    }
+
     const zip = await JSZip.loadAsync(arrayBuffer);
     const docFile = zip.file("word/document.xml");
-    if (!docFile) return;
+    if (!docFile) {
+        throw new Error("word/document.xml not found in docx");
+    }
 
     const docXml = await docFile.async("text");
 
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(docXml, "application/xml");
+
+    // パースエラー検知
+    const perr = xmlDoc.getElementsByTagName("parsererror");
+    if (perr && perr.length) {
+        throw new Error("Failed to parse document.xml");
+    }
 
     const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
@@ -832,12 +844,6 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         "安全上のご注意","安全上の注意"
     ]);
 
-    const allTexts = pList
-        .map(p => (extractTextFromParagraph(p) || "").trim())
-        .filter(Boolean);
-
-    const hasSafetyHeading = allTexts.some(t => safetyHeads.has(t));
-
     const EXCLUDE_HEADINGS = new Set([
         "■サポート・企業情報",
         "■ご使用済みの製品の廃棄に関して",
@@ -845,7 +851,14 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         "■技適マーク",
     ]);
 
-    // --- ここから「段落を一旦収集→結合」 ---
+    // まず全文から「安全見出しがあるか」を確認
+    const allTexts = pList
+        .map(p => (extractTextFromParagraph(p) || "").trim())
+        .filter(Boolean);
+
+    const hasSafetyHeading = allTexts.some(t => safetyHeads.has(t));
+
+    // 収集
     let currentHeading = "";
     let inExcludedSection = false;
     let startCollect = !hasSafetyHeading;
@@ -854,9 +867,8 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
-    const textRaw = extractTextFromParagraph(p);
-const text = normalizeWordTextForAiCheck(textRaw);
-
+        const textRaw = extractTextFromParagraph(p);
+        const text = normalizeWordTextForAiCheck(textRaw);
         if (!text) continue;
 
         const isHeadingLike = text.startsWith("■") || safetyHeads.has(text);
@@ -880,9 +892,10 @@ const text = normalizeWordTextForAiCheck(textRaw);
         collected.push({ text, pIndex: i });
     }
 
-    // --- 「文の途中改行っぽい段落」を結合 ---
+    // 段落結合（結合関数は既存のものを使う）
     const merged = mergeDocxParagraphsForAiCheck(collected);
 
+    // PID 付与して AICHECK_PARAGRAPHS に格納
     let pidCounter = 0;
     for (const m of merged) {
         const pid = "P" + String(pidCounter).padStart(3, "0");
@@ -892,11 +905,14 @@ const text = normalizeWordTextForAiCheck(textRaw);
             pid,
             text: m.text,
             section: "normal",
-            // ★コメント挿入位置は「結合した最後の段落」にする
+            // 結合後コメント挿入位置：最後の段落
             pIndex: m.pIndexLast
         });
     }
+
+    return AICHECK_PARAGRAPHS;
 }
+
 
 function normalizeWordTextForAiCheck(textRaw) {
   let s = (textRaw || "");
