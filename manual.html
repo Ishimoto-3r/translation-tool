@@ -1693,6 +1693,20 @@ async function exportAiCheckedWord(aiText, originalName) {
     saveAs(blob, fileName);
 }
 
+/**
+ * 丸付き番号・数字・記号だけの段落かどうか判定
+ * 例: "①", "②", "1", "1 2 3", "①②③", "1-2-3"
+ */
+function isNumberingOnlyParagraph(text) {
+    if (!text) return true;
+
+    const t = text
+        .replace(/\s+/g, "")
+        .replace(/[‐-–—ー]/g, "-");
+
+    // 丸付き数字・通常数字・記号のみ
+    return /^[0-9０-９\-()（）\u2460-\u2473\u2474-\u2487\u2776-\u277F]+$/.test(t);
+}
 
 
 // AIから返ってきたテキスト（元行＋【コメント】行）を、AICHECK_DOC にマージする
