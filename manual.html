@@ -768,27 +768,31 @@ function selectCompany(code, el){
 
 /* === docx 段落解析＆コメント挿入用ヘルパー === */
 
-
 function isNumberingOnlyParagraph(text) {
     if (!text) return false;
     const s = String(text).trim();
     if (!s) return false;
 
-    // 空白除去
-    const t = s.replace(/\s+/g, "");
+    // 空白除去 + 文字種正規化（全角→半角など）
+    const t = s.normalize("NFKC").replace(/\s+/g, "");
 
-    // 例： (1)(2)(3) / （1）（2） / ①②③ / 1,2,3 / 1.2.3 みたいな「番号だけ」の行を除外
+    // ①②③ / (1)(2) / （1）（2） / 1,2,3 / 1.2.3 / 1-2-3 等「番号だけ」系
     const onlyNumSymbols =
-  /^[0-9０-９()（）［\[\]【】{}｛｝<>＜＞.,．，、・\-ー＋+×xX*＊#＃\u2460-\u2473\u2474-\u2487\u2776-\u277F]+$/;
+        /^[0-9０-９()（）［\[\]【】{}｛｝<>＜＞.,．，、・\-ー＋+×xX*＊#＃\u2460-\u2473\u2474-\u2487\u2776-\u277F]+$/;
 
     if (onlyNumSymbols.test(t)) return true;
 
-    // 例： (1)(2)(3)(4) のように括弧付き数字が連続するパターン
+    // 括弧付き数字が2回以上連続（例：(1)(2)(3) / （1）（2））
     const repeatedParenNums = /^([（(]?\s*\d+\s*[)）]?\s*){2,}$/;
     if (repeatedParenNums.test(s)) return true;
 
+    // 丸付き数字が3個以上含まれていて本文が短い（画像番号列など）
+    const circledCount = (s.match(/[\u2460-\u2473\u2474-\u2487\u2776-\u277F]/g) || []).length;
+    if (circledCount >= 3 && t.length <= 30) return true;
+
     return false;
 }
+
 
 
 
@@ -807,12 +811,18 @@ function extractTextFromParagraph(pElem) {
     return texts.join("").replace(/\r/g, "");
 }
 
-a// ★置き換え：docx 段落解析（「■安全上のご注意」より前は除外 + 除外セクション対応）
+// ★置き換え：docx 段落解析（「■安全上のご注意」より前は除外 + 除外セクション対応）
 async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     AICHECK_PARAGRAPHS = [];
 
     const zip = await JSZip.loadAsync(arrayBuffer);
-    const docXml = await zip.file("word/document.xml").async("text");
+    const docFile = zip.file("word/document.xml");
+    if (!docFile) {
+        // docxとして不正（または特殊構造）
+        return;
+    }
+
+    const docXml = await docFile.async("text");
 
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(docXml, "application/xml");
@@ -820,9 +830,21 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
+    // まず「安全上の注意」見出しが存在するかを事前スキャン（表記ゆれ対応）
+    const safetyHeads = new Set([
+        "■安全上のご注意",
+        "■安全上の注意",
+        "■ 安全上のご注意",
+        "■ 安全上の注意",
+        "安全上のご注意",
+        "安全上の注意"
+    ]);
+
+    const allTexts = pList.map(p => (extractTextFromParagraph(p) || "").trim()).filter(Boolean);
+    const hasSafetyHeading = allTexts.some(t => safetyHeads.has(t));
+
     let pidCounter = 0;
 
-    // 除外セクション（維持）
     const EXCLUDE_HEADINGS = new Set([
         "■サポート・企業情報",
         "■ご使用済みの製品の廃棄に関して",
@@ -831,8 +853,10 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     let currentHeading = "";
     let inExcludedSection = false;
 
-    // ★「■安全上のご注意」より前はチェック不要
-    let startCollect = false;
+    // ★ルール：
+    // ・安全見出しが「存在する」ファイル → その見出し以降だけを収集
+    // ・存在しないファイル → 先頭から収集（0件防止）
+    let startCollect = !hasSafetyHeading;
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
@@ -840,22 +864,25 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         const text = (textRaw || "").trim();
         if (!text) continue;
 
-        // 見出し検出（■）
-        if (text.startsWith("■")) {
-            currentHeading = text.trim();
+        // 見出し検出（■ あり / なし両対応）
+        const isHeadingLike = text.startsWith("■") || safetyHeads.has(text);
+
+        if (isHeadingLike) {
+            currentHeading = text.startsWith("■") ? text : ("■" + text);
             inExcludedSection = EXCLUDE_HEADINGS.has(currentHeading);
 
-            // ★ここで開始
-            if (currentHeading === "■安全上のご注意") {
+            // 安全見出しに到達したら収集開始
+            if (safetyHeads.has(text) || safetyHeads.has(currentHeading)) {
                 startCollect = true;
             }
             continue; // 見出し行自体は渡さない
         }
 
-        // ★開始前はスキップ（＝タイトル/定型句は全部チェックしない）
         if (!startCollect) continue;
-
         if (inExcludedSection) continue;
+
+        // ★番号だけ段落はここで除外（P付番前に落とす）
+        if (isNumberingOnlyParagraph(text)) continue;
 
         const pid = "P" + String(pidCounter).padStart(3, "0");
         pidCounter++;
@@ -981,6 +1008,8 @@ function shouldSuppressComment(content, isTemplatePara, para) {
     const mentionsImageNumber =
         c.includes("画像") || c.includes("番号") || c.includes("赤丸") || c.includes("各部の名称") || c.includes("ナンバリング");
     if (hasNumberCluster && mentionsImageNumber) return true;
+    // 段落本文が「番号だけ」ならコメント自体を出さない（保険）
+    if (para && isNumberingOnlyParagraph(para.text)) return true;
 
     return false; // 基本通す
 }
@@ -1693,20 +1722,6 @@ async function exportAiCheckedWord(aiText, originalName) {
     saveAs(blob, fileName);
 }
 
-/**
- * 丸付き番号・数字・記号だけの段落かどうか判定
- * 例: "①", "②", "1", "1 2 3", "①②③", "1-2-3"
- */
-function isNumberingOnlyParagraph(text) {
-    if (!text) return true;
-
-    const t = text
-        .replace(/\s+/g, "")
-        .replace(/[‐-–—ー]/g, "-");
-
-    // 丸付き数字・通常数字・記号のみ
-    return /^[0-9０-９\-()（）\u2460-\u2473\u2474-\u2487\u2776-\u277F]+$/.test(t);
-}
 
 
 // AIから返ってきたテキスト（元行＋【コメント】行）を、AICHECK_DOC にマージする
