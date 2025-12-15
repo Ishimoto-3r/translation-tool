@@ -787,7 +787,6 @@ function extractTextFromParagraph(pElem) {
  * - section: "normal" / "support"
  */
 // ★置き換え：docx 段落解析
-// ★置き換え：docx 段落解析（除外セクション対応）
 async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     AICHECK_PARAGRAPHS = [];
 
@@ -798,35 +797,46 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     const xmlDoc = parser.parseFromString(docXml, "application/xml");
 
     const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const body = xmlDoc.getElementsByTagNameNS(wNs, "body")[0];
+    if (!body) return;
+
     const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
 
     let pidCounter = 0;
+    let inSupport = false;
 
-    // 見出しで「除外セクション」だけは維持（ここだけは必要最低限）
-    const EXCLUDE_HEADINGS = new Set([
-        "■サポート・企業情報",
-        "■ご使用済みの製品の廃棄に関して",
-    ]);
+    const isImageNumberLine = (text) => {
+        // ①〜⑳ が 3 個以上出てくる行 → 「①②③④⑤…」のような番号列とみなして除外
+        const m = text.match(/[\u2460-\u2473]/g); // ①〜⑳
+        if (m && m.length >= 3) return true;
+        return false;
+    };
 
-    let currentHeading = "";
-    let inExcludedSection = false;
+    const isShortLabelLine = (text) => {
+        // 写真ラベルのような「固定ネジ」「チルト調整ネジ」など
+        const t = text.trim();
+        if (!t) return true;
+        if (t.length > 20) return false;                 // 長い文章は対象
+        if (/[。．！？?]/.test(t)) return false;         // 文末記号がある＝文章
+        if (/(です|ます|ください|してください)/.test(t)) return false; // 明らかに文章
+        return true; // 単語・短いラベル → AI チェック対象外
+    };
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
         const text = extractTextFromParagraph(p).trim();
         if (!text) continue;
 
-        // 見出し検出（■）
-        if (text.startsWith("■")) {
-            currentHeading = text.trim();
-            inExcludedSection = EXCLUDE_HEADINGS.has(currentHeading);
-            continue; // 見出し行自体は渡さない
+        // ■サポート・企業情報 ～ 次の ■ まで は別セクション扱い
+        if (text.startsWith("■サポート・企業情報")) {
+            inSupport = true;
+        } else if (inSupport && text.startsWith("■") && !text.startsWith("■サポート・企業情報")) {
+            inSupport = false;
         }
 
-        if (inExcludedSection) continue;
-
-        // ★ここが重要：写真番号列 / 短いラベル行 などは “除外しない”
-        // （＝前の量に戻す）
+        // 写真番号列・短いラベル行は AI に渡さない
+        if (isImageNumberLine(text)) continue;
+        if (isShortLabelLine(text)) continue;
 
         const pid = "P" + String(pidCounter).padStart(3, "0");
         pidCounter++;
@@ -834,7 +844,7 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         AICHECK_PARAGRAPHS.push({
             pid,
             text,
-            section: "normal",
+            section: inSupport ? "support" : "normal",
             pIndex: i
         });
     }
@@ -897,33 +907,70 @@ function parseAiCheckResponse(rawText) {
  * @param {string} content コメント本文
  * @param {boolean} isTemplatePara 対象段落がテンプレ由来かどうか
  */
-// ★置き換え：コメント抑制ロジック（読みやすさ/分割/冗長性は「理由付き」のみ許可）
+// ★置き換え：コメント抑制ロジック
 function shouldSuppressComment(content, isTemplatePara, para) {
     if (!content) return true;
 
-    // テンプレ段落は原則コメント禁止（ここは現仕様を維持）
+    // テンプレ段落は原則コメント禁止
     if (isTemplatePara) return true;
 
-    const c = String(content).trim();
-    if (!c) return true;
+    // レイアウト・表記揃え系の NG キーワード
+    const ngKeywords = [
+        "インデント", "字下げ", "スペース", "空白", "空白スペース",
+        "余分なスペース", "余計なスペース", "余白",
+        "全角", "半角", "全角・半角", "全角/半角", "全角／半角",
+        "コロン", "：",
+        "体裁", "レイアウト",
+        "行頭をそろえ", "行頭を揃え",
+        "先頭をそろえ", "先頭を揃え",
+        "表記をそろえ", "表記を揃え", "表記を統一",
+        "書式をそろえ", "書式を揃え", "書式を統一",
+        "スタイルをそろえ", "スタイルを揃え", "スタイルを統一",
+        "他項目と同じスタイル", "他項目と同じ書式",
+        "他項目と同様に揃え", "他の行と同じように揃え",
+        "フォントサイズ", "フォントをそろえ", "フォントを揃え",
+        "見た目をそろえ", "見た目を揃え"
+    ];
 
-    // 「問題ありません」系だけは捨てる（これは維持）
+    if (ngKeywords.some(k => content.includes(k))) {
+        return true;
+    }
+
+    // 「問題ありません」系コメントは全部捨てる
     if (
-        c.includes("問題ありません") ||
-        c.includes("問題はありません") ||
-        c.includes("問題はない") ||
-        c.includes("修正の必要はありません") ||
-        c.includes("修正の必要はない")
-    ) return true;
+        content.includes("問題ありません") ||
+        content.includes("問題はありません") ||
+        content.includes("問題はない") ||
+        content.includes("修正の必要はありません") ||
+        content.includes("修正の必要はない") ||
+        (content.includes("このままで") && content.includes("問題"))
+    ) {
+        return true;
+    }
 
-    // ★レイアウト/表記揃え系の大量NGは、いったん撤去して量を戻す
-    // ★改行指摘の抑制も、いったん撤去して量を戻す
-    // ★表記ルール関連の誤検出抑制も、いったん撤去して量を戻す
+    // 表記ルール関連：段落がすでに「to」側だけを使っているなら、誤検出とみなして捨てる
+    if (para && Array.isArray(AI_TERM_RULES) && AI_TERM_RULES.length) {
+        const text = para.text || "";
+        for (const rule of AI_TERM_RULES) {
+            const from = rule.from || "";
+            const to   = rule.to   || "";
+            if (!from || !to) continue;
 
-    return false; // 基本通す
+            const hasFrom = text.includes(from);
+            const hasTo   = text.includes(to);
+
+            // 段落中はすでに「to」のみ／「from」は含まれない
+            if (!hasFrom && hasTo) {
+                // かつコメントが「表記ルール」「to」を含んでいる → 余計な指摘
+                if (content.includes("表記ルール") && content.includes(to)) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
 }
-
-
 
 
 /**
@@ -970,7 +1017,14 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
 
         const commentP = xmlDoc.createElementNS(wNs, "w:p");
 
-
+        // 元段落の書式をコピーするが、番号書式 w:numPr だけ削除しておく
+        const basePPr = baseP.getElementsByTagNameNS(wNs, "pPr")[0];
+        if (basePPr) {
+            const clonedPPr = basePPr.cloneNode(true);
+            const numPrList = clonedPPr.getElementsByTagNameNS(wNs, "numPr");
+            Array.from(numPrList).forEach(n => clonedPPr.removeChild(n)); // ★番号を継承させない
+            commentP.appendChild(clonedPPr);
+        }
 
         const r = xmlDoc.createElementNS(wNs, "w:r");
         const rPr = xmlDoc.createElementNS(wNs, "w:rPr");
@@ -1429,6 +1483,7 @@ function buildAiCheckPrompt() {
 
 // ★置き換え：docx モード用プロンプト
 function buildAiCheckPromptForDocx() {
+    // ← ここ、元コードでは TEMPLLES になっていたのでバグっていました
     const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
     const ruleLines = (AI_TERM_RULES || [])
         .map(r => `${r.from} → ${r.to}`)
@@ -1444,68 +1499,97 @@ function buildAiCheckPromptForDocx() {
 日本語だけで回答してください。
 
 目的：
-1. 誤字脱字・文法・不自然表現を指摘する。
-2. 読みやすさ改善を“積極的に”提案する（分割提案／冗長性削減／重複の整理／曖昧さ解消）。
-3. 表記ルールに反する表現があれば統一表記を提案する。
+1. 与えられたマニュアル原稿について、日本語として不自然な表現・誤字脱字・文法ミスを指摘する。
+2. 取扱説明書として一般的で自然な言い回しになっているかを確認する。
+3. 「各部の名称」と本文中の表記の対応・表記ゆれを確認する。
+4. 「■使用方法」セクションの流れが、ユーザーにとって自然でわかりやすい順序になっているか確認する。
 
 重要ルール：
-- 体裁やレイアウトに関する指摘は禁止（空白/インデント/全半角/句読点の統一/フォント/揃え等）。
-- 改行方式（Shift+Enter など）に触れない。
-- 「問題ありません」系のコメントは禁止。
-- テンプレート文章一覧は database 由来の定型文だが、
-  “誤字脱字”だけでなく「読みやすさ（分割/冗長/誤解防止）」や「表記ルール違反」も改善余地があれば指摘してよい。
-  ただし、テンプレ文の“内容改変”を強制するのではなく、改善提案として簡潔に書く。
+- 下記「テンプレート文章一覧」に含まれる文は database 由来の定型文です。
+  これらと完全一致またはほぼ同じ内容の文については、誤字以外は指摘しないでください。
+- テンプレート由来の文は、必ずそのまま残し、修正案も付けないでください。
+- チェック対象は、ユーザーが独自に追加・編集したと考えられる部分を優先してください。
+- 「表記ルール」に反する表記（例：バッテリー → バッテリ）を見つけた場合は、
+  統一表記の提案をコメントで示してください。
+- 体裁やレイアウトに関する指摘は絶対にしてはいけません。
+  特に次のような内容は指摘禁止です：
+  ・行頭や行末の空白、インデント（字下げ）の違い
+  ・空白スペースの有無や数の違い
+  ・全角と半角の違い（スペース、英数字、括弧、記号、コロンなど）
+  ・「：」と「:」の違い、句読点・カンマ・ピリオドの有無の違い
+  ・段落の揃え方や余白、レイアウト、装飾に関するコメント
 
-番号・ページ番号ルール：
-- コメント本文にページ番号（P123 等）を書かない。
+- 写真の上に直接載っている番号やラベル（「①〜⑩」「固定ネジ」「チルト調整ネジ」など）は、
+  それ自体の書き方についてコメントしないでください。
+  写真ラベルの説明文（文章）だけを対象にしてください。
+
+番号・ページ番号に関する追加ルール：
+- 「各部の名称」などの番号をコメントで参照するときは、
+  文頭を「1. 」「1)」「①」などの番号だけで始めないでください。
+- ページ番号や「P178」「P181」「（P178, P181）」のような表記は
+  コメント本文に一切書かないでください。
+
+■サポート・企業情報セクションについて：
+- 「■サポート・企業情報」以降～次の「■」見出しまでの段落は、
+  すでにチェック対象から除外されています。
+- これらの段落に対するコメントは、一切出力しないでください。
 
 出力フォーマット（厳守）：
+- 入力で与えた各段落には ID が振られています（P000, P001, ...）。
+- 問題がある段落だけについて、次の形式で1行ずつ出力してください：
+
 P000: コメント本文
 P010: コメント本文
-TOTAL: 総評本文
-※Markdownや箇条書きは禁止。すべてプレーンテキスト。
 
-表記ルール一覧：
+- コメントは、どこをどのように直すと良いかが具体的にわかるように書いてください。
+- 「問題ありません」「このままで問題ありません」など、
+  問題がないことだけを伝えるコメントは書かないでください。
+- 全体に対する総評は、最後に1行だけ
+
+TOTAL: 総評本文
+
+という形式で出力してください。
+- Markdown 記法や箇条書きは使用せず、すべてプレーンテキストで出力してください。
+
+表記ルール一覧（統一ルール）：
 ${ruleLines || "（ルールなし）"}
 
-テンプレート文章一覧：
+テンプレート文章一覧（database 由来。これらの文は原則として指摘しない）：
 ${tmplLines || "（なし）"}
 
-チェック対象の段落一覧：
+チェック対象の段落一覧（ID と本文）：
 ${listText}
 `.trim();
 }
 
 // ★置き換え：ページ番号表記をコメントから徹底的に除去
-// ★置き換え：ページ番号表記をコメントから徹底的に除去（P/Ｐ/p対応）
 function removePageRefsFromComment(text) {
     if (!text) return "";
 
     let s = text;
 
-    // P / Ｐ / p を許容
-    const P = "[PＰp]";
+    // 1) 括弧付きのページ表記: （P108-P109 や P132-P133）など
+    s = s.replace(/[（(]\s*P\d{1,4}(?:\s*[〜~\-－]\s*\d{1,4})?(?:\s*[、,や]\s*P?\d{1,4}(?:\s*[〜~\-－]\s*\d{1,4})?)*\s*[)）]/g, "");
 
-    // 1) 括弧付き: （P108-P109）, (Ｐ108〜109) 等
-    s = s.replace(new RegExp(`[（(]\\s*${P}\\s*\\d{1,4}(?:\\s*[〜~\\-－]\\s*${P}?\\s*\\d{1,4})?(?:\\s*[、,や]\\s*${P}?\\s*\\d{1,4}(?:\\s*[〜~\\-－]\\s*\\d{1,4})?)*\\s*[)）]`, "g"), "");
+    // 2) 範囲・複数ページ: P108-P109, P108〜P109, P108-109, P108〜109 など
+    s = s.replace(/P\d{1,4}\s*[〜~\-－]\s*\d{1,4}/g, "");
+    s = s.replace(/P\d{1,4}\s*[、,や]\s*\d{1,4}/g, "");
 
-    // 2) 範囲: P108-P109, Ｐ108〜109
-    s = s.replace(new RegExp(`${P}\\s*\\d{1,4}\\s*[〜~\\-－]\\s*${P}?\\s*\\d{1,4}`, "g"), "");
+    // 3) 単独のページ番号: P108, P132 など
+    s = s.replace(/P\d{1,4}ページ?/g, "");
+    s = s.replace(/P\d{1,4}/g, "");
 
-    // 3) 複数: P108, P181 / P108や181
-    s = s.replace(new RegExp(`${P}\\s*\\d{1,4}\\s*[、,や]\\s*${P}?\\s*\\d{1,4}`, "g"), "");
-
-    // 4) 単独: P108 / P108ページ
-    s = s.replace(new RegExp(`${P}\\s*\\d{1,4}\\s*ページ?`, "g"), "");
-    s = s.replace(new RegExp(`${P}\\s*\\d{1,4}`, "g"), "");
-
-    // 後処理
+    // 4) ページ番号の削除で残った「や」「、」「,」だけのつなぎを整理
     s = s.replace(/[、,や]\s*(?=。|$)/g, "");
     s = s.replace(/\s{2,}/g, " ");
-    s = s.replace(/^[、,や\s]+/, "").replace(/[、,や\s]+$/, "");
+
+    // 5) 先頭・末尾の不要な記号・スペースを削る
+    s = s.replace(/^[、,や\s]+/, "");
+    s = s.replace(/[、,や\s]+$/, "");
 
     return s.trim();
 }
+
 
 
 async function runAiCheck() {
