@@ -781,13 +781,6 @@ function extractTextFromParagraph(pElem) {
     return texts.join("").replace(/\r/g, "");
 }
 
-/**
- * 元 docx (ArrayBuffer) から、AI 用の段落リストを作る。
- * - AICHECK_PARAGRAPHS に { pid, text, section, pIndex } を格納
- * - section: "normal" / "support"
- */
-// ★置き換え：docx 段落解析
-// ★置き換え：docx 段落解析（除外セクション対応）
 async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     AICHECK_PARAGRAPHS = [];
 
@@ -802,7 +795,7 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
 
     let pidCounter = 0;
 
-    // 見出しで「除外セクション」だけは維持（ここだけは必要最低限）
+    // 除外セクション（元の仕様を維持）
     const EXCLUDE_HEADINGS = new Set([
         "■サポート・企業情報",
         "■ご使用済みの製品の廃棄に関して",
@@ -810,6 +803,9 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
 
     let currentHeading = "";
     let inExcludedSection = false;
+
+    // ★追加：安全上のご注意以降かどうか
+    let reachedSafety = false;
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
@@ -820,13 +816,15 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         if (text.startsWith("■")) {
             currentHeading = text.trim();
             inExcludedSection = EXCLUDE_HEADINGS.has(currentHeading);
-            continue; // 見出し行自体は渡さない
+
+            // ★ここがポイント：「■安全上のご注意」に入ったら main 扱い
+            if (currentHeading === "■安全上のご注意") {
+                reachedSafety = true;
+            }
+            continue; // 見出し行はAIへ渡さない
         }
 
         if (inExcludedSection) continue;
-
-        // ★ここが重要：写真番号列 / 短いラベル行 などは “除外しない”
-        // （＝前の量に戻す）
 
         const pid = "P" + String(pidCounter).padStart(3, "0");
         pidCounter++;
@@ -834,7 +832,7 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         AICHECK_PARAGRAPHS.push({
             pid,
             text,
-            section: "normal",
+            section: reachedSafety ? "main" : "intro", // ★追加
             pIndex: i
         });
     }
@@ -873,7 +871,11 @@ function parseAiCheckResponse(rawText) {
         let commentText = (m[2] || "").trim();
 
         const para = findParagraphByPid(pid);
-        if (!para || para.section === "support") continue;
+if (!para || para.section === "support") continue;
+
+// ★追加：■安全上のご注意より前はコメント不要
+if (para.section === "intro") continue;
+
 
         // ページ番号などを削除
         commentText = removePageRefsFromComment(commentText);
@@ -888,7 +890,11 @@ function parseAiCheckResponse(rawText) {
         commentsByPid[pid] = commentText;
     }
 
-    return { commentsByPid, totalComment };
+    if (!totalComment) {
+    totalComment = "全体として重大な問題は見当たりませんでした。指摘が必要な箇所のみコメントしています。";
+}
+return { commentsByPid, totalComment };
+
 }
 
 
@@ -899,29 +905,31 @@ function parseAiCheckResponse(rawText) {
  */
 // ★置き換え：コメント抑制ロジック（読みやすさ/分割/冗長性は「理由付き」のみ許可）
 function shouldSuppressComment(content, isTemplatePara, para) {
-    if (!content) return true;
+  if (!content) return true;
 
-    // テンプレ段落は原則コメント禁止（ここは現仕様を維持）
-    if (isTemplatePara) return true;
+  // テンプレ段落は原則コメント禁止（現仕様維持）
+  if (isTemplatePara) return true;
 
-    const c = String(content).trim();
-    if (!c) return true;
+  const c = String(content).trim();
+  if (!c) return true;
 
-    // 「問題ありません」系だけは捨てる（これは維持）
-    if (
-        c.includes("問題ありません") ||
-        c.includes("問題はありません") ||
-        c.includes("問題はない") ||
-        c.includes("修正の必要はありません") ||
-        c.includes("修正の必要はない")
-    ) return true;
+  // 「問題ありません」系は捨てる
+  const noIssuePhrases = [
+    "問題ありません",
+    "問題はありません",
+    "問題はない",
+    "修正の必要はありません",
+    "修正の必要はない",
+    "適切です",
+    "ラベルとして適切です",
+    "このままでよい",
+    "現状で問題ありません",
+  ];
+  if (noIssuePhrases.some(p => c.includes(p))) return true;
 
-    // ★レイアウト/表記揃え系の大量NGは、いったん撤去して量を戻す
-    // ★改行指摘の抑制も、いったん撤去して量を戻す
-    // ★表記ルール関連の誤検出抑制も、いったん撤去して量を戻す
-
-    return false; // 基本通す
+  return false;
 }
+
 
 
 
@@ -1450,8 +1458,9 @@ function buildAiCheckPromptForDocx() {
 
 重要ルール：
 - 体裁やレイアウトに関する指摘は禁止（空白/インデント/全半角/句読点の統一/フォント/揃え等）。
-- 改行方式（Shift+Enter など）に触れない。
-- 「問題ありません」系のコメントは禁止。
+- 改行方式（Shift+Enter など）による、一文が長すぎるなどの指摘は不要。
+- 「問題ありません」「適切です」「良いです」「このままでよい」など
+  “修正不要”を伝えるコメントは禁止。指摘がない段落は出力しない。
 - テンプレート文章一覧は database 由来の定型文だが、
   “誤字脱字”だけでなく「読みやすさ（分割/冗長/誤解防止）」や「表記ルール違反」も改善余地があれば指摘してよい。
   ただし、テンプレ文の“内容改変”を強制するのではなく、改善提案として簡潔に書く。
