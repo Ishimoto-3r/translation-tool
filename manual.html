@@ -845,10 +845,13 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
 
     let pidCounter = 0;
 
-    const EXCLUDE_HEADINGS = new Set([
-        "■サポート・企業情報",
-        "■ご使用済みの製品の廃棄に関して",
-    ]);
+const EXCLUDE_HEADINGS = new Set([
+    "■サポート・企業情報",
+    "■ご使用済みの製品の廃棄に関して",
+    "■電波に関する注意事項",
+    "■技適マーク",
+]);
+
 
     let currentHeading = "";
     let inExcludedSection = false;
@@ -1010,6 +1013,11 @@ function shouldSuppressComment(content, isTemplatePara, para) {
     if (hasNumberCluster && mentionsImageNumber) return true;
     // 段落本文が「番号だけ」ならコメント自体を出さない（保険）
     if (para && isNumberingOnlyParagraph(para.text)) return true;
+// ②「そろえる/統一」系の曖昧コメントは落とす（置換が書かれていない限り不要）
+const vagueUnify =
+  /(表記|書式|先頭).*(そろ|揃|統一)|他項目.*(そろ|揃|統一)|同じスタイル|同様に揃/;
+const hasReplacementArrow = /→/.test(c);
+if (vagueUnify.test(c) && !hasReplacementArrow) return true;
 
     return false; // 基本通す
 }
@@ -1551,6 +1559,13 @@ function buildAiCheckPromptForDocx() {
 - テンプレート文章一覧は database 由来の定型文だが、
   “誤字脱字”だけでなく「読みやすさ（分割/冗長/誤解防止）」や「表記ルール違反」も改善余地があれば指摘してよい。
   ただし、テンプレ文の“内容改変”を強制するのではなく、改善提案として簡潔に書く。
+- 表記ルールに“合致している”場合は、表記ゆれとして指摘してはいけません。
+- 表記ゆれの指摘をする場合は、必ず「置換提案（from→to）」を1つ以上含めてください。
+  例）「インジケーター → インジケータ」
+- 「表記をそろえる／揃える／統一する／他項目と同じにする」など、
+  置換内容が特定できない曖昧なコメントは禁止です。
+- 表記ルール一覧に無い単語は、表記ゆれとして指摘しないでください。
+
 
 番号・ページ番号ルール：
 - コメント本文にページ番号（P123 等）を書かない。
