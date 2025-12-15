@@ -361,7 +361,54 @@ body {
             z-index:9999;
         }
         #toast.show { opacity:1; }
+
+/* ===== 上部ナビ（他ツールと同等の見た目） ===== */
+.tool-nav{
+  background-color:#374151;
+  padding:0.75rem 1rem;
+  text-align:center;
+  box-shadow:0 2px 4px rgba(0,0,0,0.1);
+
+  position: sticky;
+  top: 0;
+  z-index: 100;
+
+  display:flex;
+  justify-content:center;
+  flex-wrap:wrap;
+  gap:6px 10px;
+}
+
+.tool-nav a{
+  color:#f3f4f6;
+  text-decoration:none;
+  font-weight:500;
+  padding:0.5rem 0.75rem;
+  border-radius:6px;
+  transition:background-color 0.2s;
+  margin:0;
+}
+
+.tool-nav a:hover{ background-color:#4b5563; }
+.tool-nav a.active{
+  background-color:#172554;
+  color:#fff;
+  font-weight:600;
+}
+
+
+        
     </style>
+    <nav class="tool-nav">
+  <a href="/index.html">翻訳ツール</a>
+  <a href="/report.html">修理レポート</a>
+  <a href="/verify.html">検証結果翻訳</a>
+  <a href="/column-translate.html">列指定翻訳</a>
+  <a href="/sheet-translate.html">シート翻訳</a>
+  <a href="/word-translate.html">Word翻訳</a>
+  <a href="/manual.html" class="active">マニュアル</a>
+</nav>
+
 </head>
 
 <body class="bg-gray-100 text-gray-800">
