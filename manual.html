@@ -816,14 +816,16 @@ function extractTextFromParagraph(pElem) {
 // collected: [{ text, pIndex }]
 function mergeDocxParagraphsForAiCheck(collected) {
   const out = [];
-  let bufText = "";
-  let bufLastIndex = null;
+  if (!Array.isArray(collected) || !collected.length) return out;
+
+  let buf = "";
+  let lastIndex = null;
 
   const flush = () => {
-    const t = (bufText || "").trim();
-    if (t) out.push({ text: t, pIndexLast: bufLastIndex });
-    bufText = "";
-    bufLastIndex = null;
+    const t = (buf || "").trim();
+    if (t) out.push({ text: t, pIndexLast: lastIndex });
+    buf = "";
+    lastIndex = null;
   };
 
   for (let i = 0; i < collected.length; i++) {
@@ -831,31 +833,22 @@ function mergeDocxParagraphsForAiCheck(collected) {
     const next = collected[i + 1];
 
     const currText = (curr.text || "").trim();
-    const nextText = (next?.text || "").trim();
-
     if (!currText) continue;
 
-    // 構造段落（見出し/箇条書き/番号っぽい等）は単独で確定
-    if (isStructuralParagraph(currText)) {
-      flush();
-      out.push({ text: currText, pIndexLast: curr.pIndex });
-      continue;
-    }
+    if (!buf) buf = currText;
+    else buf += " " + currText;
 
-    // バッファに追加
-    if (!bufText) bufText = currText;
-    else bufText += currText;  // ←改行由来の分割を「連結」する意図ならこれでOK（必要なら " " に変更）
-    bufLastIndex = curr.pIndex;
+    lastIndex = curr.pIndex;
 
-    // 次に進む前に切るべきなら flush
+    const nextText = next ? (next.text || "").trim() : "";
     if (shouldBreakBeforeNext(currText, nextText)) {
       flush();
     }
   }
-
   flush();
   return out;
 }
+
 
 
     
@@ -1037,57 +1030,74 @@ function shouldBreakBeforeNext(currText, nextText) {
  */
 // ★置き換え：AI 返答 → コメントマップへ
 function parseAiCheckResponse(rawText) {
-    const lines = (rawText || "").split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const lines = (rawText || "").split(/\r?\n/);
 
-    const commentsByPid = {};
-    let totalComment = "";
+  const commentsByPid = {};
+  let totalComment = "";
 
-    const tmplSet = new Set(
-        (TEMPLATES || []).map(t => (t.text || "").trim()).filter(Boolean)
-    );
+  const tmplSet = new Set((TEMPLATES || []).map(t => (t.text || "").trim()).filter(Boolean));
+  const findParagraphByPid = (pid) => AICHECK_PARAGRAPHS.find(p => p.pid === pid);
 
-    const findParagraphByPid = (pid) =>
-        AICHECK_PARAGRAPHS.find(p => p.pid === pid);
+  let currentPid = null;
+  let buf = [];
 
-    for (const line of lines) {
-        if (line.toUpperCase().startsWith("TOTAL:")) {
-            totalComment = line.replace(/^TOTAL:\s*/i, "").trim();
-            totalComment = removePageRefsFromComment(totalComment);
-            continue;
-        }
+  const flush = () => {
+    if (!currentPid) return;
 
-        const m = line.match(/^P(\d{3})\s*[:：]\s*(.+)$/);
-        if (!m) continue;
+    let commentText = buf.join(" ").replace(/\s+/g, " ").trim();
+    commentText = removePageRefsFromComment(commentText);
 
-        const pid = "P" + m[1];
-        let commentText = (m[2] || "").trim();
+    const para = findParagraphByPid(currentPid);
+    currentPid = null;
+    buf = [];
 
-        const para = findParagraphByPid(pid);
-if (!para || para.section === "support") continue;
+    if (!para || para.section === "support") return;
 
-// ★追加：①②③など「番号だけの段落」はコメント対象外
-if (isNumberingOnlyParagraph(para.text)) continue;
+    // 番号だけ段落は対象外
+    if (isNumberingOnlyParagraph(para.text)) return;
 
-// ページ番号などを削除
-commentText = removePageRefsFromComment(commentText);
-if (!commentText) continue;
+    // 原文の書き写し（分析ゼロ）を捨てる
+    const norm = (s) => String(s || "").replace(/\s+/g, "").normalize("NFKC");
+    if (norm(commentText) === norm(para.text)) return;
 
-const isTemplatePara = tmplSet.has((para.text || "").trim());
+    const isTemplatePara = tmplSet.has((para.text || "").trim());
+    if (shouldSuppressComment(commentText, isTemplatePara, para)) return;
 
-if (shouldSuppressComment(commentText, isTemplatePara, para)) {
-    continue;
-}
+    if (commentText) commentsByPid[para.pid] = commentText;
+  };
 
-commentsByPid[pid] = commentText;
+  for (const raw of lines) {
+    const line = (raw || "").trim();
+    if (!line) continue;
 
+    if (/^TOTAL\s*:/i.test(line)) {
+      flush();
+      totalComment = removePageRefsFromComment(line.replace(/^TOTAL\s*:\s*/i, "").trim());
+      continue;
     }
 
-    if (!totalComment) {
-    totalComment = "全体として重大な問題は見当たりませんでした。指摘が必要な箇所のみコメントしています。";
-}
-return { commentsByPid, totalComment };
+    const m = line.match(/^P(\d{3})\s*[:：]\s*(.*)$/);
+    if (m) {
+      flush();
+      currentPid = "P" + m[1];
+      const first = (m[2] || "").trim();
+      if (first) buf.push(first);
+      continue;
+    }
 
+    // PIDの続き行は、同じコメントとして吸収（ここが重要）
+    if (currentPid) buf.push(line);
+  }
+
+  flush();
+
+  if (!totalComment) {
+    totalComment = "全体として重大な問題は見当たりませんでした。指摘が必要な箇所のみコメントしています。";
+  }
+
+  return { commentsByPid, totalComment };
 }
+
 
 
 // ★置き換え：コメント抑制ロジック（不要指摘をまとめて除外）
