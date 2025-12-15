@@ -915,106 +915,71 @@ function normalizeWordTextForAiCheck(textRaw) {
 }
 
     
-// ★置換：改行分割された文をAIチェック用に結合（docx構造にも耐える）
-function mergeDocxParagraphsForAiCheck(paragraphs) {
-  const isNil = (v) => v == null;
+// ★置換：docx(ArrayBuffer) → 段落テキスト配列 を確実に作る（文字数0対策の本丸）
+async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
+  // 必須：JSZip（すでに読み込まれている前提が多い）
+  if (typeof JSZip === "undefined") {
+    throw new Error("JSZip is not loaded. Please include JSZip before parsing .docx");
+  }
 
-  // --- 1) どんな構造でも「テキスト」だけを再帰抽出（文字数0対策の本丸）
-  const toText = (p) => {
-    const walk = (x) => {
-      if (isNil(x)) return "";
-      if (typeof x === "string") return x;
-      if (typeof x === "number" || typeof x === "boolean") return String(x);
+  const zip = await JSZip.loadAsync(arrayBuffer);
 
-      if (Array.isArray(x)) return x.map(walk).join("");
+  // docx本文XML
+  const docXmlFile = zip.file("word/document.xml");
+  if (!docXmlFile) {
+    throw new Error("word/document.xml not found in docx");
+  }
 
-      if (typeof x === "object") {
-        // よくあるキー
-        if (typeof x.text === "string") return x.text;
-        if (typeof x.value === "string") return x.value;
-        if (typeof x._text === "string") return x._text;
+  const xmlText = await docXmlFile.async("string");
 
-        // docx系でありがちな構造
-        if (Array.isArray(x.children)) return x.children.map(walk).join("");
-        if (Array.isArray(x.runs)) return x.runs.map(walk).join("");
-        if (Array.isArray(x.content)) return x.content.map(walk).join("");
-        if (Array.isArray(x.items)) return x.items.map(walk).join("");
+  // XMLパース
+  const parser = new DOMParser();
+  const xml = parser.parseFromString(xmlText, "application/xml");
 
-        // それ以外は捨てる（[object Object] を混ぜない）
-        return "";
-      }
-      return "";
-    };
+  // パースエラー検知
+  const perr = xml.getElementsByTagName("parsererror");
+  if (perr && perr.length) {
+    throw new Error("Failed to parse document.xml");
+  }
 
-    return walk(p);
-  };
+  // w:p（段落）ごとに w:t（テキスト）を連結
+  const paragraphs = [];
+  const pNodes = Array.from(xml.getElementsByTagName("w:p"));
 
-  const normalize = (s) =>
-    (s || "")
+  for (const p of pNodes) {
+    // w:t を全て拾う（途中改行 w:br はスペース扱い）
+    const tNodes = Array.from(p.getElementsByTagName("w:t"));
+    let text = tNodes.map((n) => (n.textContent || "")).join("");
+
+    // 改行要素がある場合はスペースを入れる（読みやすさ・文結合の安定化）
+    const brNodes = p.getElementsByTagName("w:br");
+    if (brNodes && brNodes.length) {
+      // brがあってテキストが空になるパターンがあるので保険
+      text = text.replace(/\s+/g, " ").trim();
+    }
+
+    // 正規化
+    text = (text || "")
       .replace(/\r/g, "")
       .replace(/\u00A0/g, " ")
       .replace(/[ \t]+/g, " ")
       .trim();
 
-  const isBulletOrNumbering = (s) =>
-    /^([・●■□◆◇▶▷✓✔☑]|※|[-–—]|[0-9０-９]+[.)）]|[①-⑳]|[㋐-㋾]|[a-zA-Z][.)])\s*/.test(s);
-
-  const isHeadingLike = (s) =>
-    /^【.+】$/.test(s) || /^［.+］$/.test(s) || /^＜.+＞$/.test(s) || /^<.+>$/.test(s);
-
-  // 文末とみなす記号（ここで終わっていれば次行に結合しない）
-  const endsSentence = (s) => /[。．\.！？!?】］）)\]]\s*$/.test(s);
-
-  // 次行がこのパターンなら「新しい塊」とみなす（無理に結合しない）
-  const startsNewBlock = (s) =>
-    s === "" ||
-    isHeadingLike(s) ||
-    isBulletOrNumbering(s);
-
-  // --- 2) paragraphs → 行テキスト配列にする
-  const lines = (Array.isArray(paragraphs) ? paragraphs : [])
-    .map((p) => normalize(toText(p)))
-    .filter((t) => t !== "");
-
-  // --- 3) 改行で切れた文を結合
-  const merged = [];
-  let buf = "";
-
-  for (let i = 0; i < lines.length; i++) {
-    const cur = lines[i];
-    const next = lines[i + 1] ?? "";
-
-    if (buf === "") {
-      buf = cur;
-    } else {
-      // 原則：バッファに続ける（ただし新ブロック扱いなら確定）
-      if (startsNewBlock(cur)) {
-        merged.push(buf);
-        buf = cur;
-      } else {
-        buf += (buf.endsWith(" ") ? "" : " ") + cur;
-      }
-    }
-
-    // ここで確定する条件：
-    // 1) 句点等で終わっている
-    // 2) 次行が「新ブロック」っぽい
-    // 3) 句点が無い原稿対策：長くなり過ぎたら切る（安全弁）
-    if (
-      endsSentence(buf) ||
-      startsNewBlock(next) ||
-      buf.length >= 180
-    ) {
-      merged.push(buf.trim());
-      buf = "";
-    }
+    if (text) paragraphs.push(text);
   }
 
-  if (buf.trim()) merged.push(buf.trim());
+  // ここで空なら、本文が特殊（テキストが別XMLにある等）。最低限の保険で全w:tを拾う
+  if (paragraphs.length === 0) {
+    const allT = Array.from(xml.getElementsByTagName("w:t"))
+      .map((n) => (n.textContent || "").trim())
+      .filter(Boolean);
 
-  return merged;
+    const joined = allT.join(" ").replace(/[ \t]+/g, " ").trim();
+    if (joined) return [joined];
+  }
+
+  return paragraphs;
 }
-
 
 
     
