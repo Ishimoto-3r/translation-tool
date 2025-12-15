@@ -854,8 +854,9 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
 
     for (let i = 0; i < pList.length; i++) {
         const p = pList[i];
-        const textRaw = extractTextFromParagraph(p);
-        const text = (textRaw || "").trim();
+    const textRaw = extractTextFromParagraph(p);
+const text = normalizeWordTextForAiCheck(textRaw);
+
         if (!text) continue;
 
         const isHeadingLike = text.startsWith("■") || safetyHeads.has(text);
@@ -897,6 +898,23 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
     }
 }
 
+function normalizeWordTextForAiCheck(textRaw) {
+  let s = (textRaw || "");
+
+  // 1) 段落内の手動改行（Shift+Enter 等）を「消す」
+  //   ※ ここが今回の残り1件に一番効く
+  s = s.replace(/\r\n|\r|\n/g, "");
+
+  // 2) Word由来の余計な空白を整形（必要なら弱めてOK）
+  s = s.replace(/[ \t]+/g, " ");
+  s = s.replace(/　+/g, " ");            // 全角スペース連続を圧縮
+  s = s.replace(/\s+([、。．.!！？\?」』】）)\]])/g, "$1"); // 句読点/閉じ括弧の前の空白除去
+  s = s.replace(/([「『（【\[])\s+/g, "$1");              // 開き括弧直後の空白除去
+
+  return s.trim();
+}
+
+    
     function mergeDocxParagraphsForAiCheck(items) {
     // items: [{text, pIndex}]
     const out = [];
