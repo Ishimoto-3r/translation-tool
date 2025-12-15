@@ -905,21 +905,21 @@ function parseAiCheckResponse(rawText) {
         const para = findParagraphByPid(pid);
 if (!para || para.section === "support") continue;
 
-// ★追加：■安全上のご注意より前はコメント不要
-if (para.section === "intro") continue;
+// ★追加：①②③など「番号だけの段落」はコメント対象外
+if (isNumberingOnlyParagraph(para.text)) continue;
 
+// ページ番号などを削除
+commentText = removePageRefsFromComment(commentText);
+if (!commentText) continue;
 
-        // ページ番号などを削除
-        commentText = removePageRefsFromComment(commentText);
-        if (!commentText) continue;
+const isTemplatePara = tmplSet.has((para.text || "").trim());
 
-        const isTemplatePara = tmplSet.has((para.text || "").trim());
+if (shouldSuppressComment(commentText, isTemplatePara, para)) {
+    continue;
+}
 
-        if (shouldSuppressComment(commentText, isTemplatePara, para)) {
-            continue;
-        }
+commentsByPid[pid] = commentText;
 
-        commentsByPid[pid] = commentText;
     }
 
     if (!totalComment) {
