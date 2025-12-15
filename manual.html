@@ -768,6 +768,30 @@ function selectCompany(code, el){
 
 /* === docx 段落解析＆コメント挿入用ヘルパー === */
 
+
+function isNumberingOnlyParagraph(text) {
+    if (!text) return false;
+    const s = String(text).trim();
+    if (!s) return false;
+
+    // 空白除去
+    const t = s.replace(/\s+/g, "");
+
+    // 例： (1)(2)(3) / （1）（2） / ①②③ / 1,2,3 / 1.2.3 みたいな「番号だけ」の行を除外
+    const onlyNumSymbols = /^[0-9０-９()（）［\[\]【】{}｛｝<>＜＞.,．,，、・\-ー＋+×xX*＊#＃①-⑳⑴-⑳❶-❿]+$/;
+    if (onlyNumSymbols.test(t)) return true;
+
+    // 例： (1)(2)(3)(4) のように括弧付き数字が連続するパターン
+    const repeatedParenNums = /^([（(]?\s*\d+\s*[)）]?\s*){2,}$/;
+    if (repeatedParenNums.test(s)) return true;
+
+    return false;
+}
+
+
+
+
+    
 /**
  * word/document.xml の w:p からテキストを抽出
  */
@@ -1026,12 +1050,16 @@ async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, total
         r.appendChild(rPr);
         r.appendChild(t);
         commentP.appendChild(r);
+// ★修正：baseP と同じ親（表セル内など）にコメント段落を挿入する
+const parent = baseP.parentNode;
+if (!parent) continue;
 
-        if (baseP.nextSibling) {
-            body.insertBefore(commentP, baseP.nextSibling);
-        } else {
-            body.appendChild(commentP);
-        }
+if (baseP.nextSibling) {
+    parent.insertBefore(commentP, baseP.nextSibling);
+} else {
+    parent.appendChild(commentP);
+}
+
     }
 
     // ■総評
