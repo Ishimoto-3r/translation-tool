@@ -39,7 +39,8 @@ model: MODEL_TRANSLATE,
         ],
         // --- ★★★ 修正 (temperatureを削除) ★★★ ---
         // "temperature": 0.2, // ⬅️ この行を削除
-        "reasoning_effort": "minimal", 
+"reasoning_effort": "none",
+
         "verbosity": "low"
         // --- ★★★ ここまで ★★★ ---
       })
@@ -63,4 +64,5 @@ model: MODEL_TRANSLATE,
     response.status(500).json({ error: 'サーバー内部でエラーが発生しました。' });
   }
 }
+
 
