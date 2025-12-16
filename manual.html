@@ -412,25 +412,73 @@ body {
   font-weight:600;
 }
 
+/* ===== ナビを「グループの箱」に見せる ===== */
+.tool-nav{
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:12px;
+}
+
+/* グループの外枠 */
+.nav-groupbox{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 10px;
+  border:1px solid rgba(255,255,255,0.18);
+  border-radius:10px;
+  background: rgba(255,255,255,0.06);
+}
+
+/* 左のラベル（翻訳 / その他） */
+.nav-label{
+  font-size:12px;
+  font-weight:700;
+  color: rgba(255,255,255,0.8);
+  padding:4px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,0.18);
+  background: rgba(0,0,0,0.18);
+  line-height:1;
+}
+
+/* リンク列 */
+.nav-links{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+/* tool-nav a の margin が残ってたら無効化（効いてない感の原因になりがち） */
+.tool-nav a{ margin:0; }
 
         
     </style>
 <nav class="tool-nav">
-  <div class="nav-group">
-    <a href="/index.html">翻訳ツール</a>
-    <a href="/verify.html">検証結果翻訳</a>
-    <a href="/column-translate.html">列指定翻訳</a>
-    <a href="/sheet-translate.html">シート翻訳</a>
-    <a href="/word-translate.html">Word翻訳</a>
+  <div class="nav-groupbox">
+    <div class="nav-label">翻訳</div>
+    <div class="nav-links">
+      <a href="/index.html">翻訳ツール</a>
+      <a href="/verify.html">検証結果翻訳</a>
+      <a href="/column-translate.html">列指定翻訳</a>
+      <a href="/sheet-translate.html">シート翻訳</a>
+      <a href="/word-translate.html">Word翻訳</a>
+    </div>
   </div>
 
-  <div class="nav-sep" aria-hidden="true"></div>
-
-  <div class="nav-group">
-    <a href="/report.html">修理レポート</a>
-    <a href="/manual.html" class="active">マニュアル</a>
+  <div class="nav-groupbox">
+    <div class="nav-label">その他</div>
+    <div class="nav-links">
+      <a href="/report.html">修理レポート</a>
+      <a href="/manual.html" class="active">マニュアル</a>
+    </div>
   </div>
 </nav>
+
 
 
 </head>
