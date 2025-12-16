@@ -29,6 +29,27 @@ document.getElementById("run").addEventListener("click", async () => {
         });
 
         resultBox.textContent = manualText;
+                // === AIチェック（5.2 / medium / low）を実行 ===
+        resultBox.textContent = "AIチェック中…";
+
+        const aiRes = await fetch("/api/manual-ai", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                prompt: manualText,
+                mode: "check"
+            })
+        });
+
+        const aiData = await aiRes.json();
+
+        if (!aiRes.ok) {
+            resultBox.textContent = "AIチェックでエラー: " + (aiData.error || aiRes.status);
+            return;
+        }
+
+        resultBox.textContent = aiData.text || "";
+
     } catch (err) {
         console.error(err);
         resultBox.textContent = "エラー: " + err.toString();
