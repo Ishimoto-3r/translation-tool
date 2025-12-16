@@ -362,22 +362,6 @@ body {
         }
         #toast.show { opacity:1; }
 
-/* ===== 上部ナビ（他ツールと同等の見た目） ===== */
-.tool-nav{
-  background-color:#374151;
-  padding:0.75rem 1rem;
-  text-align:center;
-  box-shadow:0 2px 4px rgba(0,0,0,0.1);
-
-  /* ここから追加（グループ化） */
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  gap:10px;
-}
 
 .tool-nav .nav-group{
   display:flex;
@@ -395,15 +379,6 @@ body {
 /* 既存の a スタイルはそのまま使ってOK（あれば触らない） */
 
 
-.tool-nav a{
-  color:#f3f4f6;
-  text-decoration:none;
-  font-weight:500;
-  padding:0.5rem 0.75rem;
-  border-radius:6px;
-  transition:background-color 0.2s;
-  margin:0;
-}
 
 .tool-nav a:hover{ background-color:#4b5563; }
 .tool-nav a.active{
@@ -412,72 +387,7 @@ body {
   font-weight:600;
 }
 
-/* ===== ナビを「グループの箱」に見せる ===== */
-.tool-nav{
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  gap:12px;
-}
 
-/* グループの外枠 */
-.nav-groupbox{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  padding:8px 10px;
-  border:1px solid rgba(255,255,255,0.18);
-  border-radius:10px;
-  background: rgba(255,255,255,0.06);
-}
-
-/* 左のラベル（翻訳 / その他） */
-.nav-label{
-  font-size:12px;
-  font-weight:700;
-  color: rgba(255,255,255,0.8);
-  padding:4px 8px;
-  border-radius:999px;
-  border:1px solid rgba(255,255,255,0.18);
-  background: rgba(0,0,0,0.18);
-  line-height:1;
-}
-
-/* リンク列 */
-.nav-links{
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-
-/* tool-nav a の margin が残ってたら無効化（効いてない感の原因になりがち） */
-.tool-nav a{ margin:0; }
-
-/* ===== ナビ：グループ感を出しつつ見出しは非ボタン化 ===== */
-.tool-nav{
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  gap:12px;
-}
-
-/* グループの箱 */
-.nav-groupbox{
-  position: relative;
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:12px 10px 10px;
-  border:1px solid rgba(255,255,255,0.18);
-  border-radius:10px;
-  background: rgba(255,255,255,0.06);
-}
 
 /* 押せない見出し（箱の外側） */
 .nav-heading{
@@ -502,8 +412,6 @@ body {
   gap:8px;
 }
 
-/* 余計な余白対策 */
-.tool-nav a{ margin:0; }
 
   /* ===== 見出しを「UIのタイトル」に格上げ ===== */
 .ui-section-title{
@@ -561,7 +469,7 @@ body {
   color:#374151;
 }
       
-/* ===== Top Nav (Group + One-click) ===== */
+/* ===== Top Nav（翻訳ツールと完全統一） ===== */
 .tool-nav{
   position: sticky;
   top: 0;
@@ -576,7 +484,6 @@ body {
   align-items:center;
 }
 
-/* グループの“箱” */
 .tool-nav .nav-groupbox{
   display:flex;
   flex-direction:column;
@@ -587,7 +494,6 @@ body {
   background: rgba(255,255,255,.04);
 }
 
-/* 見出しは「ボタンに見せない」 */
 .tool-nav .nav-heading{
   font-size: 12px;
   font-weight: 700;
@@ -596,16 +502,14 @@ body {
   line-height: 1;
   padding-left: 4px;
   user-select: none;
+  pointer-events: none;
 }
 
-/* リンク列 */
 .tool-nav .nav-links{
   display:flex;
   gap: 8px;
-  align-items:center;
 }
 
-/* リンクを“ピル”に統一（見出しと見分ける） */
 .tool-nav a{
   color:#f3f4f6;
   text-decoration:none;
@@ -615,29 +519,12 @@ body {
   border-radius: 999px;
   background: rgba(255,255,255,.06);
   transition: background-color .15s, transform .05s;
-  margin: 0; /* 既存CSSのmarginを無効化 */
-  display:inline-flex;
-  align-items:center;
-  gap: 6px;
 }
-.tool-nav a:hover{
-  background: rgba(255,255,255,.12);
-}
-.tool-nav a:active{
-  transform: translateY(1px);
-}
+.tool-nav a:hover{ background: rgba(255,255,255,.12); }
+.tool-nav a.active{ background:#172554; color:#fff; }
 
-/* 現在ページ */
-.tool-nav a.active{
-  background:#172554;
-  color:#fff;
-}
+.tool-nav .nav-heading::before{ content:"🧩 "; }
 
-/* 重要：見出しがリンクと同じ位置に見えないように */
-.tool-nav .nav-heading::before{
-  content: "🧩 ";
-  opacity: .9;
-}
 
         
     </style>
