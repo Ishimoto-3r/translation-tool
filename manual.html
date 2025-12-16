@@ -941,6 +941,21 @@ function selectCompany(code, el){
     }
 }
 
+// 画像ラベルだけの段落を除外（例：（画像1）, 画像1, (画像 1)）
+function isImageLabelOnlyParagraph(text) {
+  const s = String(text || "").trim();
+
+  // （画像1）/ (画像1) / （画像 1）/ 画像1 / 画像 1
+  if (/^[（(]?\s*画像\s*\d+\s*[)）]?$/.test(s)) return true;
+
+  // ついでに「図1」も同様に除外したい場合は有効化
+  // if (/^[（(]?\s*図\s*\d+\s*[)）]?$/.test(s)) return true;
+
+  return false;
+}
+
+
+    
 /* === docx 段落解析＆コメント挿入用ヘルパー === */
 
 function isNumberingOnlyParagraph(text) {
@@ -1060,12 +1075,19 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         "安全上のご注意","安全上の注意"
     ]);
 
-    const EXCLUDE_HEADINGS = new Set([
-        "■サポート・企業情報",
-        "■ご使用済みの製品の廃棄に関して",
-        "■電波に関する注意事項",
-        "■技適マーク",
-    ]);
+const EXCLUDE_HEADINGS = new Set([
+  "■サポート・企業情報",
+  "■ご使用済みの製品の廃棄に関して",
+  "■電波に関する注意事項",
+  "■技適マーク",
+
+  // ★追加：仕様はAIチェック対象外
+  "■仕様",
+  "■ 仕様",
+  "仕様",
+  " 仕様",
+]);
+
 
     // まず全文から「安全見出しがあるか」を確認
     const allTexts = pList
@@ -1103,9 +1125,16 @@ async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
         if (inExcludedSection) continue;
 
         // 番号だけ段落は除外
-        if (isNumberingOnlyParagraph(text)) continue;
+if (isNumberingOnlyParagraph(text)) continue;
 
-        collected.push({ text, pIndex: i });
+// <危険> / <警告> など「トークン見出し」だけの行は除外
+if (/^<[^>]+>$/.test(text)) continue;
+
+// （画像1）/ 画像1 など「画像ラベルだけ」の行は除外
+if (isImageLabelOnlyParagraph(text)) continue;
+
+collected.push({ text, pIndex: i });
+
     }
 
     // 段落結合（結合関数は既存のものを使う）
