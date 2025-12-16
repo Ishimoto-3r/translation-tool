@@ -1770,43 +1770,97 @@ window.removeFile = function(type, idx){
 
 // ② 参考資料：画像 / PDF / Word / テキスト
 async function loadRefs(files){
-    const el = document.getElementById("refFileList");
+  const el = document.getElementById("refFileList");
+  if (!files || !files.length) return;
 
-    for (let f of files) {
-        try {
-            // 画像ファイル → USAGE_IMAGES に保存（Word出力やAIコンテキスト用）
-            if (f.type && f.type.startsWith("image/")) {
-                const dataUrl = await new Promise((resolve, reject) => {
-                    const r = new FileReader();
-                    r.onload  = e => resolve(e.target.result);
-                    r.onerror = reject;
-                    r.readAsDataURL(f);
-                });
+  for (let f of files) {
+    try {
+      // 画像ファイル → USAGE_IMAGES に保存（Word出力やAIコンテキスト用）
+      if (f.type && f.type.startsWith("image/")) {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload  = e => resolve(e.target.result);
+          r.onerror = reject;
+          r.readAsDataURL(f);
+        });
 
-                USAGE_IMAGES.push({ name: f.name, dataUrl });
-                el.innerHTML += `
-                    <div class="file-item text-[10px] flex items-center gap-1">
-                        <span>[画像] ${f.name}</span>
-                        <i class="fas fa-check text-green-500"></i>
-                    </div>`;
-                continue;  // 画像はここで終わり
-            }
+        USAGE_IMAGES.push({ name: f.name, dataUrl });
+        el.innerHTML += `
+          <div class="file-item text-[10px] flex items-center gap-1">
+            <span>[画像] ${f.name}</span>
+            <i class="fas fa-check text-green-500"></i>
+          </div>`;
+        continue;
+      }
 
-         
-            // ★全文を保持する（トークン量はプロンプト側で制限する）
-            REF_TEXT += `\n【参考:${f.name}】\n${txt}\n`;
+      // 文書系 → テキスト抽出
+      const txt = await extractTextFromFile(f);
 
-            el.innerHTML += `
-                <div class="file-item text-[10px] flex items-center gap-1">
-                    <span>[文書] ${f.name}</span>
-                    <i class="fas fa-check text-green-500"></i>
-                </div>`;
-        } catch (e) {
-            console.error(e);
-            alert("ファイル読込失敗: " + f.name);
-        }
+      // ★全文を保持する（トークン量はプロンプト側で制限する）
+      REF_TEXT += `\n【参考:${f.name}】\n${txt}\n`;
+
+      el.innerHTML += `
+        <div class="file-item text-[10px] flex items-center gap-1">
+          <span>[文書] ${f.name}</span>
+          <i class="fas fa-check text-green-500"></i>
+        </div>`;
+    } catch (e) {
+      console.error(e);
+      alert("ファイル読込失敗: " + f.name);
     }
+  }
 }
+async function extractTextFromFile(file){
+  const name = (file.name || "").toLowerCase();
+  const ext  = name.includes(".") ? name.split(".").pop() : "";
+  const type = (file.type || "").toLowerCase();
+
+  // 1) plain text
+  if (type.startsWith("text/") || ext === "txt" || ext === "md" || ext === "csv") {
+    return await file.text();
+  }
+
+  // 2) PDF
+  if (type === "application/pdf" || ext === "pdf") {
+    return await extractPdfText(file);
+  }
+
+  // 3) DOCX（Word）
+  if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || ext === "docx") {
+    return await extractDocxText(file);
+  }
+
+  // その他は最低限：バイナリ扱い
+  return `（未対応形式: ${file.type || ext || "unknown"}）`;
+}
+
+async function extractDocxText(file){
+  if (typeof mammoth === "undefined") {
+    throw new Error("mammoth が読み込まれていません（CDN確認）");
+  }
+  const ab = await file.arrayBuffer();
+  const res = await mammoth.extractRawText({ arrayBuffer: ab });
+  return (res && res.value ? res.value : "").trim();
+}
+
+async function extractPdfText(file){
+  if (typeof pdfjsLib === "undefined") {
+    throw new Error("pdfjsLib が読み込まれていません（CDN確認）");
+  }
+
+  const ab = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+
+  const texts = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const pageText = content.items.map(it => (it && it.str) ? it.str : "").join(" ");
+    texts.push(pageText);
+  }
+  return texts.join("\n").trim();
+}
+
 
 // === マニュアル原稿AIチェック関連 ===
 function handleAiCheckFiles(files) {
