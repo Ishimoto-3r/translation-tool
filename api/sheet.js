@@ -11,6 +11,8 @@ module.exports = async (req, res) => {
   }
 
   try {
+    const MODEL_TRANSLATE = process.env.MODEL_TRANSLATE || "gpt-5.1";
+
     // context (ユーザー入力のヒント) を受け取る
     const { rows, toLang, context } = req.body;
     const apiKey = process.env.OPENAI_API_KEY;
@@ -51,7 +53,8 @@ module.exports = async (req, res) => {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-5',
+model: MODEL_TRANSLATE,
+
         messages: [
           { "role": "system", "content": systemPrompt },
           { "role": "user", "content": JSON.stringify({ rows: rows }) }
