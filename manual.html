@@ -2905,7 +2905,7 @@ ${hint || ""}
   }
 
   try {
-    const raw = await callAI(prompt, img.dataUrl);
+    const raw = await callAI(prompt, img.dataUrl, "image");
     img.names = normalizeNameText(raw);
 
     // 番号は 1 から振り直し
@@ -3297,8 +3297,11 @@ ${refUsage || "（該当箇所なし）"}
 【安全上のご注意追記】
 （必要だと思う追記だけ「・」付き箇条書きで書く。不要なら空欄のままでよい）
 `;
-        const imgContext = USAGE_IMAGES[0]?.dataUrl;
-        const aiText = await callAI(prompt, imgContext);
+const imgContext = USAGE_IMAGES[0]?.dataUrl || null;
+
+// 画像がある時だけ "image"、無い時は "check"
+const aiText = await callAI(prompt, imgContext, imgContext ? "image" : "check");
+
         const raw = aiText.trim();
 
         const usageLabelAll = "【使用方法全文】";
@@ -3506,21 +3509,16 @@ function buildDraft(){
     return L.join("\n");
 }
 
-/* ---- AI 呼び出し（バックエンド経由版） ---- */
-async function callAI(prompt, img) {
-  // img は dataURL または null を想定
- const payload = {
-  prompt,
-  image: (typeof img === "string" && img.length > 0) ? img : null,
-  mode: "check"
-};
-
+async function callAI(prompt, img, mode = "check") {
+  const payload = {
+    prompt,
+    mode, // "check" | "image"
+    image: (typeof img === "string" && img.length > 0) ? img : null
+  };
 
   const res = await fetch("/api/manual-ai", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
 
@@ -3531,8 +3529,6 @@ async function callAI(prompt, img) {
   }
 
   const data = await res.json();
-
-  // manual-ai.js が { text: "〜AIの返事〜" } を返す想定
   if (!data || typeof data.text !== "string") {
     console.error("[callAI] unexpected response:", data);
     throw new Error("manual-ai API response format error");
