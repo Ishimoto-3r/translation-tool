@@ -363,47 +363,12 @@ body {
         #toast.show { opacity:1; }
 
 
-.tool-nav .nav-group{
-  display:flex;
-  align-items:center;
-  gap:10px;
-}
-
-.tool-nav .nav-sep{
-  width:1px;
-  height:22px;
-  background:rgba(255,255,255,0.25);
-  margin:0 6px;
-}
-
-/* 既存の a スタイルはそのまま使ってOK（あれば触らない） */
 
 
 
-.tool-nav a:hover{ background-color:#4b5563; }
-.tool-nav a.active{
-  background-color:#172554;
-  color:#fff;
-  font-weight:600;
-}
 
 
 
-/* 押せない見出し（箱の外側） */
-.nav-heading{
-  position:absolute;
-  top:-9px;
-  left:10px;
-  padding:0 8px;
-  font-size:11px;
-  font-weight:700;
-  letter-spacing:.02em;
-  color: rgba(255,255,255,0.75);
-  background:#374151;   /* ナビ背景と同化 */
-  border:none;
-  border-radius:6px;
-  pointer-events:none;  /* クリック不可 */
-}
 
 /* リンク列 */
 .nav-links{
@@ -469,20 +434,7 @@ body {
   color:#374151;
 }
       
-/* ===== Top Nav（翻訳ツールと完全統一） ===== */
-.tool-nav{
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background:#374151;
-  padding: 10px 16px;
-  box-shadow: 0 2px 4px rgba(0,0,0,.12);
 
-  display:flex;
-  justify-content:center;
-  gap: 14px;
-  align-items:center;
-}
 
 .tool-nav .nav-groupbox{
   display:flex;
@@ -510,18 +462,7 @@ body {
   gap: 8px;
 }
 
-.tool-nav a{
-  color:#f3f4f6;
-  text-decoration:none;
-  font-weight: 600;
-  font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(255,255,255,.06);
-  transition: background-color .15s, transform .05s;
-}
-.tool-nav a:hover{ background: rgba(255,255,255,.12); }
-.tool-nav a.active{ background:#172554; color:#fff; }
+
 
 .tool-nav .nav-heading::before{ content:"🧩 "; }
 
@@ -593,7 +534,72 @@ body{
   margin: 0;
 }
 
-        
+    /* ===== Top Nav（共通・統一版） ===== */
+.tool-nav{
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: #374151;
+  padding: 10px 16px 14px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.18);
+}
+
+.tool-nav__inner{
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.tool-nav__group{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-nav__label{
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(243,244,246,0.75);
+  line-height: 1;
+  user-select: none;
+}
+
+.tool-nav__pill{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(6px);
+}
+
+.tool-nav__pill a{
+  color: #f3f4f6;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  transition: background-color .15s ease, transform .15s ease;
+}
+
+.tool-nav__pill a:hover{
+  background: rgba(255,255,255,0.10);
+  transform: translateY(-1px);
+}
+
+.tool-nav__pill a.active{
+  background: #172554;
+  border: 1px solid rgba(255,255,255,0.18);
+}
+
+/* ナビ直下が詰まるなら */
+body{ margin:0; }
+    
     </style>
 
 
@@ -603,26 +609,31 @@ body{
 </head>
 
 <body class="bg-gray-100 text-gray-800">
-    <nav class="tool-nav">
-  <div class="nav-groupbox">
-    <div class="nav-heading">翻訳</div>
-    <div class="nav-links">
-      <a href="/index.html">翻訳ツール</a>
-      <a href="/verify.html">検証結果翻訳</a>
-      <a href="/column-translate.html">列指定翻訳</a>
-      <a href="/sheet-translate.html">シート翻訳</a>
-      <a href="/word-translate.html">Word翻訳</a>
-    </div>
-  </div>
+<nav class="tool-nav">
+  <div class="tool-nav__inner">
 
-  <div class="nav-groupbox">
-    <div class="nav-heading">その他</div>
-    <div class="nav-links">
-      <a href="/report.html">修理レポート</a>
-      <a href="/manual.html" class="active">マニュアル</a>
+    <div class="tool-nav__group">
+      <div class="tool-nav__label">🧩 翻訳</div>
+      <div class="tool-nav__pill">
+        <a href="/index.html">翻訳ツール</a>
+        <a href="/verify.html">検証結果翻訳</a>
+        <a href="/column-translate.html">列指定翻訳</a>
+        <a href="/sheet-translate.html">シート翻訳</a>
+        <a href="/word-translate.html">Word翻訳</a>
+      </div>
     </div>
+
+    <div class="tool-nav__group">
+      <div class="tool-nav__label">🧩 その他</div>
+      <div class="tool-nav__pill">
+        <a href="/report.html">修理レポート</a>
+        <a href="/manual.html" class="active">マニュアル</a>
+      </div>
+    </div>
+
   </div>
 </nav>
+
 
 <div id="loadingOverlay">
     <div class="spinner"></div>
