@@ -1,6 +1,23 @@
 // api/manual-ai.js
 import OpenAI from "openai";
-const MODEL_MANUAL = process.env.MODEL_MANUAL || "gpt-5.2";
+const MODEL_MANUAL_CHECK =
+  process.env.MODEL_MANUAL_CHECK ||
+  process.env.MODEL_MANUAL || // 互換用（今は残す）
+  "gpt-5.2";
+
+const MODEL_MANUAL_IMAGE =
+  process.env.MODEL_MANUAL_IMAGE || "gpt-5.1";
+
+const MANUAL_CHECK_REASONING =
+  process.env.MANUAL_CHECK_REASONING || "medium";
+const MANUAL_CHECK_VERBOSITY =
+  process.env.MANUAL_CHECK_VERBOSITY || "low";
+
+const MANUAL_IMAGE_REASONING =
+  process.env.MANUAL_IMAGE_REASONING || "none";
+const MANUAL_IMAGE_VERBOSITY =
+  process.env.MANUAL_IMAGE_VERBOSITY || "low";
+
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -14,7 +31,8 @@ export default async function handler(req, res) {
   try {
     const body =
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-    const { prompt, image } = body;
+const { prompt, image, mode } = body;
+
 
     if (!prompt) {
       return res.status(400).json({ error: "PromptRequired" });
@@ -40,10 +58,15 @@ export default async function handler(req, res) {
 
     messages.push({ role: "user", content: userContent });
 
+const isCheck = (mode || "check") === "check";
+
 const completion = await client.chat.completions.create({
-  model: MODEL_MANUAL,
+  model: isCheck ? MODEL_MANUAL_CHECK : MODEL_MANUAL_IMAGE,
   messages,
+  reasoning_effort: isCheck ? MANUAL_CHECK_REASONING : MANUAL_IMAGE_REASONING,
+  verbosity: isCheck ? MANUAL_CHECK_VERBOSITY : MANUAL_IMAGE_VERBOSITY,
 });
+
 
 
     const text = completion.choices[0]?.message?.content ?? "";
