@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIマニュアル原稿作成支援ツール (最新版)</title>
+    <title>AIマニュアル原稿作成支援ツール</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/docx@7.1.0/build/index.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -369,15 +369,31 @@ body {
   text-align:center;
   box-shadow:0 2px 4px rgba(0,0,0,0.1);
 
+  /* ここから追加（グループ化） */
   position: sticky;
   top: 0;
   z-index: 100;
-
   display:flex;
   justify-content:center;
-  flex-wrap:wrap;
-  gap:6px 10px;
+  align-items:center;
+  gap:10px;
 }
+
+.tool-nav .nav-group{
+  display:flex;
+  align-items:center;
+  gap:10px;
+}
+
+.tool-nav .nav-sep{
+  width:1px;
+  height:22px;
+  background:rgba(255,255,255,0.25);
+  margin:0 6px;
+}
+
+/* 既存の a スタイルはそのまま使ってOK（あれば触らない） */
+
 
 .tool-nav a{
   color:#f3f4f6;
@@ -399,15 +415,23 @@ body {
 
         
     </style>
-    <nav class="tool-nav">
-  <a href="/index.html">翻訳ツール</a>
-  <a href="/report.html">修理レポート</a>
-  <a href="/verify.html">検証結果翻訳</a>
-  <a href="/column-translate.html">列指定翻訳</a>
-  <a href="/sheet-translate.html">シート翻訳</a>
-  <a href="/word-translate.html">Word翻訳</a>
-  <a href="/manual.html" class="active">マニュアル</a>
+<nav class="tool-nav">
+  <div class="nav-group">
+    <a href="/index.html">翻訳ツール</a>
+    <a href="/verify.html">検証結果翻訳</a>
+    <a href="/column-translate.html">列指定翻訳</a>
+    <a href="/sheet-translate.html">シート翻訳</a>
+    <a href="/word-translate.html">Word翻訳</a>
+  </div>
+
+  <div class="nav-sep" aria-hidden="true"></div>
+
+  <div class="nav-group">
+    <a href="/report.html">修理レポート</a>
+    <a href="/manual.html" class="active">マニュアル</a>
+  </div>
 </nav>
+
 
 </head>
 
