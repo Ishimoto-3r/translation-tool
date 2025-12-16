@@ -62,7 +62,8 @@ model: MODEL_TRANSLATE,
         response_format: { type: "json_object" }, 
         
         // 速度向上のための設定（維持）
-        reasoning_effort: "minimal",
+reasoning_effort: "none",
+
         verbosity: "low"
       })
     });
