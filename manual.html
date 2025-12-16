@@ -505,7 +505,62 @@ body {
 /* 余計な余白対策 */
 .tool-nav a{ margin:0; }
 
-        
+  /* ===== 見出しを「UIのタイトル」に格上げ ===== */
+.ui-section-title{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-weight:800;
+  color:#111827;
+  font-size:14px;
+  margin:0 0 10px;
+}
+.ui-section-title .ui-ico{
+  width:26px;
+  height:26px;
+  border-radius:8px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  background:#eef2ff;
+  color:#1d4ed8;
+  font-size:14px;
+  box-shadow:0 1px 0 rgba(0,0,0,0.04);
+}
+.ui-section-sub{
+  font-size:11px;
+  color:#6b7280;
+  margin:-6px 0 10px 34px;
+}
+
+/* 左カラムの「1. 製品情報」「2. AI解析・資料」を見出し化 */
+.section-label{
+  font-size:13px;
+  font-weight:800;
+  padding-left:10px;
+  margin-bottom:10px;
+  border-left-width:6px;
+  letter-spacing:.02em;
+}
+
+/* 中央カラムのブロックタイトル（名義選択 / 安全・注意ジャンル）を強調 */
+.panel-title{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  font-size:13px;
+  font-weight:800;
+  color:#111827;
+}
+.panel-title .pill{
+  font-size:11px;
+  font-weight:800;
+  padding:2px 8px;
+  border-radius:999px;
+  background:#f3f4f6;
+  color:#374151;
+}
+      
         
     </style>
 <nav class="tool-nav">
@@ -535,6 +590,27 @@ body {
 </head>
 
 <body class="bg-gray-100 text-gray-800">
+    <nav class="tool-nav">
+  <div class="nav-groupbox">
+    <div class="nav-heading">翻訳</div>
+    <div class="nav-links">
+      <a href="/index.html">翻訳ツール</a>
+      <a href="/verify.html">検証結果翻訳</a>
+      <a href="/column-translate.html">列指定翻訳</a>
+      <a href="/sheet-translate.html">シート翻訳</a>
+      <a href="/word-translate.html">Word翻訳</a>
+    </div>
+  </div>
+
+  <div class="nav-groupbox">
+    <div class="nav-heading">その他</div>
+    <div class="nav-links">
+      <a href="/report.html">修理レポート</a>
+      <a href="/manual.html" class="active">マニュアル</a>
+    </div>
+  </div>
+</nav>
+
 <div id="loadingOverlay">
     <div class="spinner"></div>
     <div id="loadingText" class="mt-4 text-blue-600 font-bold text-lg">処理中...</div>
@@ -542,16 +618,12 @@ body {
 
 <div id="toast"></div>
 
-<div class="flex-none bg-white shadow z-10 p-3 border-b relative">
-    <div class="container mx-auto max-w-full px-4 flex justify-between items-center">
-        <h1 class="text-lg font-bold text-gray-800 flex items-center gap-2">
-            <i class="fas fa-check-circle text-green-600"></i> マニュアル作成 Tool
-        </h1>
-        <div class="flex gap-2 items-center">
+<h1 class="text-xl font-extrabold text-gray-900 flex items-center gap-2 tracking-tight">
+  <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-600 text-white shadow-sm">🛠️</span>
+  <span>マニュアル原稿作成支援ツール</span>
+  <span class="text-xs font-semibold text-gray-500 ml-1">for 3R</span>
+</h1>
 
-        </div>
-    </div>
-</div>
 
 <div class="flex-1 container mx-auto max-w-full px-4 py-3 grid-layout">
     <!-- 左カラム -->
@@ -560,7 +632,7 @@ body {
 
 
         <div class="mb-6">
-    <h3 class="section-label border-blue-500 text-blue-700">1. 製品情報</h3>
+<h3 class="section-label border-blue-500 text-blue-700">📦 1. 製品情報</h3>
     <div class="space-y-2">
 
         <label class="text-[10px] font-bold text-gray-600 block">
@@ -587,7 +659,8 @@ body {
 
 
         <div class="mb-4">
-            <h3 class="section-label border-purple-500 text-purple-700">2. AI解析・資料</h3>
+<h3 class="section-label border-purple-500 text-purple-700">🧠 2. AI解析・資料</h3>
+
 
             <!-- ① 各部名称・ナンバリング（そのまま） -->
             <div class="mb-2">
@@ -628,7 +701,12 @@ body {
     <div class="col-panel bg-gray-50">
         <div class="mb-4 bg-white p-3 rounded shadow-sm">
             <div class="flex justify-between mb-2">
-                <span class="text-xs font-bold">名義選択 (必須)</span>
+        <div class="panel-title">
+  <span class="pill">必須</span>
+  <span>名義選択</span>
+  <span class="text-xs text-gray-500">🏷️</span>
+</div>
+
             </div>
                  <div class="flex gap-2">
                 <div class="company-card flex-1" onclick="selectCompany('3R', this)">
@@ -646,7 +724,11 @@ body {
 
         <div class="flex-1 overflow-hidden flex flex-col">
             <div class="flex justify-between items-center mb-2 px-1">
-                <span class="text-xs font-bold text-gray-700">安全・注意ジャンル</span>
+         <div class="panel-title">
+  <span>安全・注意ジャンル</span>
+  <span class="text-xs text-gray-500">⚠️</span>
+</div>
+
                 <button onclick="clearChecks('genreArea')"
                         class="text-[10px] text-red-500 hover:underline">全解除</button>
             </div>
