@@ -435,171 +435,70 @@ body {
 }
       
 
+/* ===== 共通ヘッダー（翻訳ツールと同じ見た目） ===== */
+.tool-nav{
+  position: sticky;
+  top: 0;
+  z-index: 9999;
+  background: #374151;              /* 透けさせない（うっすら文字が見える対策） */
+  box-shadow: 0 2px 4px rgba(0,0,0,.18);
+}
 
-.tool-nav .nav-groupbox{
-  display:flex;
-  flex-direction:column;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255,255,255,.14);
-  border-radius: 10px;
+.tool-nav-inner{
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 10px 16px;
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+}
+
+.nav-group{
+  display: flex;
+  flex-direction: column;            /* 見出しを“上”、ボタン群を“下”にする */
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,.12);
   background: rgba(255,255,255,.04);
 }
 
-.tool-nav .nav-heading{
+.nav-group-title{
   font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  color: rgba(243,244,246,.75);
+  font-weight: 800;
+  color: #cbd5e1;
+  letter-spacing: .02em;
   line-height: 1;
-  padding-left: 4px;
-  user-select: none;
-  pointer-events: none;
 }
 
-.tool-nav .nav-links{
-  display:flex;
+.nav-links{
+  display: flex;
   gap: 8px;
 }
 
-
-
-.tool-nav .nav-heading::before{ content:"🧩 "; }
-
-/* ===== 上部ナビ：画像の見た目（2グループ + ピル） ===== */
-.tool-nav{
-  position: sticky;
-  top: 0;
-  z-index: 1000;
-  background: #374151;
-  padding: 10px 16px 14px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.18);
-}
-
-.tool-nav__inner{
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.tool-nav__group{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.tool-nav__label{
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(243,244,246,0.75);
-  line-height: 1;
-  user-select: none;
-}
-
-.tool-nav__pill{
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
-  backdrop-filter: blur(6px);
-}
-
-.tool-nav__pill a{
+.tool-nav a{
   color: #f3f4f6;
   text-decoration: none;
   font-weight: 700;
   font-size: 14px;
-  padding: 10px 14px;
-  border-radius: 10px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
   transition: background-color .15s ease, transform .15s ease;
 }
 
-.tool-nav__pill a:hover{
-  background: rgba(255,255,255,0.10);
+.tool-nav a:hover{
+  background: rgba(255,255,255,.12);
   transform: translateY(-1px);
 }
 
-.tool-nav__pill a.active{
+.tool-nav a.active{
   background: #172554;
-  border: 1px solid rgba(255,255,255,0.18);
+  color: #ffffff;
 }
 
-/* ナビ直下の詰まり対策（必要なら） */
-body{
-  margin: 0;
-}
 
-    /* ===== Top Nav（共通・統一版） ===== */
-.tool-nav{
-  position: sticky;
-  top: 0;
-  z-index: 1000;
-  background: #374151;
-  padding: 10px 16px 14px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.18);
-}
-
-.tool-nav__inner{
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  gap: 14px;
-}
-
-.tool-nav__group{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-}
-
-.tool-nav__label{
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(243,244,246,0.75);
-  line-height: 1;
-  user-select: none;
-}
-
-.tool-nav__pill{
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px;
-  border-radius: 12px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.10);
-  backdrop-filter: blur(6px);
-}
-
-.tool-nav__pill a{
-  color: #f3f4f6;
-  text-decoration: none;
-  font-weight: 700;
-  font-size: 14px;
-  padding: 10px 14px;
-  border-radius: 10px;
-  transition: background-color .15s ease, transform .15s ease;
-}
-
-.tool-nav__pill a:hover{
-  background: rgba(255,255,255,0.10);
-  transform: translateY(-1px);
-}
-
-.tool-nav__pill a.active{
-  background: #172554;
-  border: 1px solid rgba(255,255,255,0.18);
-}
-
-/* ナビ直下が詰まるなら */
-body{ margin:0; }
-    
     </style>
 
 
@@ -609,12 +508,12 @@ body{ margin:0; }
 </head>
 
 <body class="bg-gray-100 text-gray-800">
-<nav class="tool-nav">
-  <div class="tool-nav__inner">
+    <nav class="tool-nav">
+  <div class="tool-nav-inner">
 
-    <div class="tool-nav__group">
-      <div class="tool-nav__label">🧩 翻訳</div>
-      <div class="tool-nav__pill">
+    <div class="nav-group">
+      <div class="nav-group-title">🧩 翻訳</div>
+      <div class="nav-links">
         <a href="/index.html">翻訳ツール</a>
         <a href="/verify.html">検証結果翻訳</a>
         <a href="/column-translate.html">列指定翻訳</a>
@@ -623,9 +522,9 @@ body{ margin:0; }
       </div>
     </div>
 
-    <div class="tool-nav__group">
-      <div class="tool-nav__label">🧩 その他</div>
-      <div class="tool-nav__pill">
+    <div class="nav-group">
+      <div class="nav-group-title">🧩 その他</div>
+      <div class="nav-links">
         <a href="/report.html">修理レポート</a>
         <a href="/manual.html" class="active">マニュアル</a>
       </div>
