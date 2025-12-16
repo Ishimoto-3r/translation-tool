@@ -525,6 +525,73 @@ body {
 
 .tool-nav .nav-heading::before{ content:"🧩 "; }
 
+/* ===== 上部ナビ：画像の見た目（2グループ + ピル） ===== */
+.tool-nav{
+  position: sticky;
+  top: 0;
+  z-index: 1000;
+  background: #374151;
+  padding: 10px 16px 14px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.18);
+}
+
+.tool-nav__inner{
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.tool-nav__group{
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-nav__label{
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(243,244,246,0.75);
+  line-height: 1;
+  user-select: none;
+}
+
+.tool-nav__pill{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.10);
+  backdrop-filter: blur(6px);
+}
+
+.tool-nav__pill a{
+  color: #f3f4f6;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 14px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  transition: background-color .15s ease, transform .15s ease;
+}
+
+.tool-nav__pill a:hover{
+  background: rgba(255,255,255,0.10);
+  transform: translateY(-1px);
+}
+
+.tool-nav__pill a.active{
+  background: #172554;
+  border: 1px solid rgba(255,255,255,0.18);
+}
+
+/* ナビ直下の詰まり対策（必要なら） */
+body{
+  margin: 0;
+}
 
         
     </style>
