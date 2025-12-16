@@ -63,7 +63,8 @@ model: MODEL_TRANSLATE, // 環境変数で切替
           { "role": "user", "content": JSON.stringify({ rows: rows }) }
         ],
         response_format: { type: "json_object" },
-        reasoning_effort: "minimal",
+reasoning_effort: "none",
+
         verbosity: "low"
       })
     });
