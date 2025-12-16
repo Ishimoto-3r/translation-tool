@@ -7,6 +7,9 @@ export default async function handler(request, response) {
   }
 
   try {
+
+    const MODEL_REPORT = process.env.MODEL_REPORT || "gpt-5.2";
+
     // 2. フロントエンド(report.js)から送られてきたプロンプトを取得
     const { finalPrompt } = request.body;
 
@@ -29,7 +32,8 @@ export default async function handler(request, response) {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-5',
+model: MODEL_REPORT,
+
         messages: [
           { "role": "user", "content": finalPrompt }
         ],
