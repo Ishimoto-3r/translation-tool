@@ -456,11 +456,61 @@ body {
 /* tool-nav a の margin が残ってたら無効化（効いてない感の原因になりがち） */
 .tool-nav a{ margin:0; }
 
+/* ===== ナビ：グループ感を出しつつ見出しは非ボタン化 ===== */
+.tool-nav{
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  gap:12px;
+}
+
+/* グループの箱 */
+.nav-groupbox{
+  position: relative;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:12px 10px 10px;
+  border:1px solid rgba(255,255,255,0.18);
+  border-radius:10px;
+  background: rgba(255,255,255,0.06);
+}
+
+/* 押せない見出し（箱の外側） */
+.nav-heading{
+  position:absolute;
+  top:-9px;
+  left:10px;
+  padding:0 8px;
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.02em;
+  color: rgba(255,255,255,0.75);
+  background:#374151;   /* ナビ背景と同化 */
+  border:none;
+  border-radius:6px;
+  pointer-events:none;  /* クリック不可 */
+}
+
+/* リンク列 */
+.nav-links{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+/* 余計な余白対策 */
+.tool-nav a{ margin:0; }
+
+        
         
     </style>
 <nav class="tool-nav">
   <div class="nav-groupbox">
-    <div class="nav-label">翻訳</div>
+    <div class="nav-heading">翻訳</div>
     <div class="nav-links">
       <a href="/index.html">翻訳ツール</a>
       <a href="/verify.html">検証結果翻訳</a>
@@ -471,13 +521,14 @@ body {
   </div>
 
   <div class="nav-groupbox">
-    <div class="nav-label">その他</div>
+    <div class="nav-heading">その他</div>
     <div class="nav-links">
       <a href="/report.html">修理レポート</a>
       <a href="/manual.html" class="active">マニュアル</a>
     </div>
   </div>
 </nav>
+
 
 
 
