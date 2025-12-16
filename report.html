@@ -259,6 +259,83 @@
     font-weight: 600;
 }
         
+/* ===== Top Nav (Group + One-click) ===== */
+.tool-nav{
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background:#374151;
+  padding: 10px 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,.12);
+
+  display:flex;
+  justify-content:center;
+  gap: 14px;
+  align-items:center;
+}
+
+/* グループの“箱” */
+.tool-nav .nav-groupbox{
+  display:flex;
+  flex-direction:column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 10px;
+  background: rgba(255,255,255,.04);
+}
+
+/* 見出しは「ボタンに見せない」 */
+.tool-nav .nav-heading{
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: rgba(243,244,246,.75);
+  line-height: 1;
+  padding-left: 4px;
+  user-select: none;
+}
+
+/* リンク列 */
+.tool-nav .nav-links{
+  display:flex;
+  gap: 8px;
+  align-items:center;
+}
+
+/* リンクを“ピル”に統一（見出しと見分ける） */
+.tool-nav a{
+  color:#f3f4f6;
+  text-decoration:none;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  transition: background-color .15s, transform .05s;
+  margin: 0; /* 既存CSSのmarginを無効化 */
+  display:inline-flex;
+  align-items:center;
+  gap: 6px;
+}
+.tool-nav a:hover{
+  background: rgba(255,255,255,.12);
+}
+.tool-nav a:active{
+  transform: translateY(1px);
+}
+
+/* 現在ページ */
+.tool-nav a.active{
+  background:#172554;
+  color:#fff;
+}
+
+/* 重要：見出しがリンクと同じ位置に見えないように */
+.tool-nav .nav-heading::before{
+  content: "🧩 ";
+  opacity: .9;
+}
 
         
     </style>
