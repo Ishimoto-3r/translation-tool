@@ -7,6 +7,8 @@ export default async function handler(request, response) {
   }
 
   try {
+
+    const MODEL_TRANSLATE = process.env.MODEL_TRANSLATE || "gpt-5.1";
     // 2. フロントエンドから送られてきたプロンプトを取得
     const { systemPrompt, userPrompt } = request.body;
 
@@ -29,7 +31,8 @@ export default async function handler(request, response) {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-5',
+model: MODEL_TRANSLATE,
+
         messages: [
           { "role": "system", "content": systemPrompt },
           { "role": "user", "content": userPrompt }
@@ -60,3 +63,4 @@ export default async function handler(request, response) {
     response.status(500).json({ error: 'サーバー内部でエラーが発生しました。' });
   }
 }
+
