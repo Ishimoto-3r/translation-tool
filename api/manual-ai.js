@@ -1,5 +1,6 @@
 // api/manual-ai.js
 import OpenAI from "openai";
+const MODEL_MANUAL = process.env.MODEL_MANUAL || "gpt-5.2";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -39,10 +40,11 @@ export default async function handler(req, res) {
 
     messages.push({ role: "user", content: userContent });
 
-    const completion = await client.chat.completions.create({
-      model: "gpt-5.1",
-      messages,
-    });
+const completion = await client.chat.completions.create({
+  model: MODEL_MANUAL,
+  messages,
+});
+
 
     const text = completion.choices[0]?.message?.content ?? "";
 
