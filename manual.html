@@ -3509,10 +3509,12 @@ function buildDraft(){
 /* ---- AI 呼び出し（バックエンド経由版） ---- */
 async function callAI(prompt, img) {
   // img は dataURL または null を想定
-  const payload = {
-    prompt,
-    image: (typeof img === "string" && img.length > 0) ? img : null
-  };
+ const payload = {
+  prompt,
+  image: (typeof img === "string" && img.length > 0) ? img : null,
+  mode: "check"
+};
+
 
   const res = await fetch("/api/manual-ai", {
     method: "POST",
