@@ -2166,11 +2166,12 @@ const aiTextRaw = await callAI(prompt, null);
 // ★追加：表示/解析/マージの前にフィルタを通す
 const aiText = filterAiCheckOutput(aiTextRaw);
 
+// 指摘が無い場合は何も表示せず、そのまま終了
 if (!aiText || !aiText.trim()) {
-  setStep("AIから有効な結果が返ってきませんでした。");
-  alert("AIチェック結果が取得できませんでした。");
+  setStep("AIチェック完了（指摘なし）");
   return;
 }
+
 
 // 3/3：コメント解析→Word に追記
 setStep("3/3：コメントを解析し、Wordに追記しています…");
@@ -2207,10 +2208,11 @@ async function exportAiCheckedWord(aiText, originalName) {
 
    
   // ★追加：マージ前にフィルタ
-  const filtered = filterAiCheckOutput(aiText);
-    
-    // ★ まず AIコメント（【コメント】行）を AICHECK_DOC にマージ
-    mergeAiCommentsIntoDoc(aiText);
+const filtered = filterAiCheckOutput(aiText);
+
+// ★ まず AIコメント（【コメント】行）を AICHECK_DOC にマージ
+mergeAiCommentsIntoDoc(filtered);
+
 
     // ★ フォントと画像の基本スタイルを追加
     // head 要素が無い場合は作る
