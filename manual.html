@@ -3427,20 +3427,24 @@ function buildDraft(){
         if (seen.has(t)) return;
         seen.add(t);
 
-        const c = r.category || "";
-        if (c.includes("技適")) s.Giteki.push(t);
-        else if (c.includes("電波")) s.Radio.push(t);
-        else if (c.includes("危険")) s.Danger.push(t);
-        else if (c.includes("警告")) s.Warning.push(t);
-        else if (c.includes("注意") && !c.includes("使用")) s.Caution.push(t);
-        else if (c.includes("使用")) s.UsageC.push(t);
-        else if (c.includes("各部")) s.Parts.push(t);
-        else if (c.includes("使用方法")) s.Usage.push(t);
-        else if (c.includes("お手入れ")) s.Maint.push(t);
-        else if (c.includes("廃棄")) s.Disp.push(t);
-        else if (c.includes("仕様")) s.Spec.push(t);
-        else if (r.label.includes("共通冒頭")) s.Intro.push(t);
-        else s.Other.push(t);
+     const c = r.category || "";
+if (c.includes("技適")) s.Giteki.push(t);
+else if (c.includes("電波")) s.Radio.push(t);
+else if (c.includes("危険")) s.Danger.push(t);
+else if (c.includes("警告")) s.Warning.push(t);
+else if (c.includes("注意") && !c.includes("使用")) s.Caution.push(t);
+
+// ★ここを先に判定（「ご使用済み…」で「使用」に誤爆しないようにする）
+else if (c.includes("廃棄")) s.Disp.push(t);
+
+else if (c.includes("使用")) s.UsageC.push(t);
+else if (c.includes("各部")) s.Parts.push(t);
+else if (c.includes("使用方法")) s.Usage.push(t);
+else if (c.includes("お手入れ")) s.Maint.push(t);
+else if (c.includes("仕様")) s.Spec.push(t);
+else if (r.label.includes("共通冒頭")) s.Intro.push(t);
+else s.Other.push(t);
+
     });
 
     const L = [
