@@ -2159,19 +2159,23 @@ async function runAiCheck() {
         setStep("1/3：AIチェック用の指示文を準備しています…");
         const prompt = buildAiCheckPrompt();  // docx モード固定
 
-        // 2/3
-        setStep("2/3：AIに送信中です（応答待ち: 数十秒かかる場合があります）…");
-        const aiText = await callAI(prompt, null);
+   // 2/3
+setStep("2/3：AIに送信中です（応答待ち: 数十秒かかる場合があります）…");
+const aiTextRaw = await callAI(prompt, null);
 
-        if (!aiText || !aiText.trim()) {
-            setStep("AIから有効な結果が返ってきませんでした。");
-            alert("AIチェック結果が取得できませんでした。");
-            return;
-        }
+// ★追加：表示/解析/マージの前にフィルタを通す
+const aiText = filterAiCheckOutput(aiTextRaw);
 
-        // 3/3：コメント解析→Word に追記
-        setStep("3/3：コメントを解析し、Wordに追記しています…");
-        const { commentsByPid, totalComment } = parseAiCheckResponse(aiText);
+if (!aiText || !aiText.trim()) {
+  setStep("AIから有効な結果が返ってきませんでした。");
+  alert("AIチェック結果が取得できませんでした。");
+  return;
+}
+
+// 3/3：コメント解析→Word に追記
+setStep("3/3：コメントを解析し、Wordに追記しています…");
+const { commentsByPid, totalComment } = parseAiCheckResponse(aiText);
+
 
         await exportAiCheckedDocxWithComments(
             AICHECK_DOCX_BUFFER,
@@ -2201,6 +2205,10 @@ async function exportAiCheckedWord(aiText, originalName) {
         return;
     }
 
+   
+  // ★追加：マージ前にフィルタ
+  const filtered = filterAiCheckOutput(aiText);
+    
     // ★ まず AIコメント（【コメント】行）を AICHECK_DOC にマージ
     mergeAiCommentsIntoDoc(aiText);
 
@@ -3538,6 +3546,31 @@ function buildDraft(){
     return L.join("\n");
 }
 
+function filterAiCheckOutput(text) {
+  const lines = String(text || "").split(/\r?\n/);
+
+  const filtered = lines.filter(line => {
+    const s = line.trim();
+    if (!s) return true;
+
+    // ① 見出しに関する指摘っぽいものを除外
+    if (/(見出し|タイトル|項目名|章立て|構成|危険見出し|警告見出し)/.test(s)) return false;
+
+    // ② 単語だけ（画像1 等）への指摘を除外
+    if (/^[（(]?\s*画像\s*\d+\s*[)）]?$/.test(s)) return false;
+
+    // ③ ■仕様への指摘を除外
+    if (/(■\s*仕様|仕様セクション|仕様欄|仕様の記載)/.test(s)) return false;
+
+    return true;
+  });
+const out = filtered.join("\n").trim();
+return out; // 何も無ければ空文字を返す
+
+}
+
+
+    
 async function callAI(prompt, img, mode = "check") {
   const payload = {
     prompt,
