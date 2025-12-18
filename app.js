@@ -3,46 +3,47 @@
  * ★ 元の callOpenAIAPI から書き換えています ★
  */
 async function callOpenAIAPI(systemPrompt, userPrompt, sourceLang, targetLang) {
-  const response = await fetch('/api/translate', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemPrompt,
-      userPrompt,
-      sourceLang,
-      targetLang
-            })
-        });
+  try {
+    const response = await fetch('/api/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemPrompt,
+        userPrompt,
+        sourceLang,
+        targetLang
+      })
+    });
 
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            console.error("バックエンドAPIエラー:", errorData);
-            
-            // Vercelバックエンドからのエラーメッセージをトーストで表示
-            const errorMessage = errorData.error || `APIエラー (Status: ${response.status})`;
-            showToast(errorMessage);
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      console.error("バックエンドAPIエラー:", errorData);
 
-            throw new Error(errorMessage);
-        }
-
-        const data = await response.json();
-        
-        if (!data.translatedText) {
-             console.error("APIレスポンスの形式が不正です:", data);
-             showToast("APIから予期しない形式の応答がありました。");
-             throw new Error("Invalid API response format");
-        }
-        
-        return data.translatedText; // バックエンドが整形した結果を返す
-
-    } catch (error) { 
-        console.error("通信エラー:", error);
-        if (!error.message.startsWith("APIエラー")) { // 既にトーストが表示されているエラーは除く
-             showToast("翻訳サーバーへの通信に失敗しました。");
-        }
-        return null; // エラー時はnullを返す
+      const errorMessage = errorData.error || `APIエラー (Status: ${response.status})`;
+      showToast(errorMessage);
+      throw new Error(errorMessage);
     }
+
+    const data = await response.json();
+
+    if (!data.translatedText) {
+      console.error("APIレスポンスの形式が不正です:", data);
+      showToast("APIから予期しない形式の応答がありました。");
+      throw new Error("Invalid API response format");
+    }
+
+    return data.translatedText;
+
+  } catch (error) {
+    console.error("通信エラー:", error);
+    // 既にトーストが出ている想定のエラーは重ねて出さない
+    if (!String(error?.message || "").startsWith("APIエラー")) {
+      showToast("翻訳サーバーへの通信に失敗しました。");
+    }
+    return null;
+  }
 }
+
 
 function hasKana(s) {
   return /[\u3040-\u309F\u30A0-\u30FF]/.test(s || "");
@@ -97,7 +98,8 @@ if (isJapaneseTarget && text.trim() && !hasKana(translatedText)) {
 余計な解説は不要。翻訳結果のみ返してください。
 `.trim();
 
-  translatedText = await callOpenAIAPI(hardPrompt, text);
+translatedText = await callOpenAIAPI(hardPrompt, text, sourceLang, targetLang);
+
 }
 
 
@@ -360,5 +362,6 @@ window.clearText = window.clearText || clearText;
 window.copyToClipboard = window.copyToClipboard || copyToClipboard;
 window.toggleComparisonLog = window.toggleComparisonLog || toggleComparisonLog;
 window.copyComparisonLog = window.copyComparisonLog || copyComparisonLog;
+
 
 
