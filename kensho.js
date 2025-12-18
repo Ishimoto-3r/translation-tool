@@ -61,7 +61,7 @@ async function loadDb() {
 
   DB = data;
 
-  // ※ db-badge表示は不要（要望④）
+  // label/list 表示は無し（要望④）
   setStatus("読み込み完了");
   hideOverlay();
   return data;
@@ -76,7 +76,7 @@ function renderLabels(labelMaster) {
 
   for (const [genre, items] of byGenre.entries()) {
     const card = document.createElement("div");
-    card.className = "border rounded-xl p-2 bg-white";
+    card.className = "border rounded-xl p-3 bg-white";
 
     const head = document.createElement("div");
     head.className = "flex items-center justify-between mb-2";
@@ -95,25 +95,26 @@ function renderLabels(labelMaster) {
     head.appendChild(title);
     head.appendChild(clear);
 
-    // ジャンル内を2列にして縦長を抑える
+    // ✅ ①：ジャンル内は「1列＝各項目1行」
     const list = document.createElement("div");
-    list.className = "grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-1";
+    list.className = "space-y-1";
 
     for (const it of items) {
       const row = document.createElement("label");
-      // 折り返し禁止 + 省略（…）表示で見やすく（要望③）
+
+      // ✅ ①：省略（…）しない。折返しOKで全文見えるように。
       row.className =
-        "flex items-center gap-2 text-sm cursor-pointer rounded-md px-2 py-2 border border-slate-200 hover:bg-slate-50 select-none " +
-        "whitespace-nowrap overflow-hidden";
+        "flex items-start gap-2 text-sm cursor-pointer rounded-md px-2 py-2 " +
+        "border border-slate-200 hover:bg-slate-50 select-none";
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.dataset.label = it.label;
-      cb.className = "h-5 w-5";
+      cb.className = "h-5 w-5 mt-[2px]";
 
       const sp = document.createElement("span");
       sp.textContent = it.label;
-      sp.className = "overflow-hidden text-ellipsis";
+      sp.className = "leading-snug whitespace-normal break-words";
 
       row.appendChild(cb);
       row.appendChild(sp);
@@ -183,7 +184,7 @@ async function handleImages(files) {
   for (const u of imagesDataUrl) {
     const img = document.createElement("img");
     img.src = u;
-    img.className = "w-16 h-16 object-cover rounded-lg";
+    img.className = "w-16 h-16 object-cover rounded-lg border";
     thumbs.appendChild(img);
   }
 }
@@ -202,7 +203,6 @@ async function onGenerate() {
       memo: $("memo").value.trim(),
     };
 
-    // Excel生成（サーバ側）開始
     setStep(1, "Excel生成中（書式維持）");
 
     const res = await fetch("/api/kensho-generate", {
@@ -220,7 +220,6 @@ async function onGenerate() {
       throw new Error("生成失敗: " + t);
     }
 
-    // ダウンロード準備
     setStep(3, "ダウンロード準備");
 
     const blob = await res.blob();
@@ -272,7 +271,6 @@ async function onDownloadMassTemplate() {
 
 (async function init() {
   setupDrop();
-
   $("btn-generate").addEventListener("click", onGenerate);
   $("btn-mass").addEventListener("click", onDownloadMassTemplate);
 
