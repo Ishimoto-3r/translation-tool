@@ -56,6 +56,22 @@ ${jpGreetingRules}
     const reasoning_effort = process.env.TRANSLATE_REASONING || "low";
     const verbosity = process.env.TRANSLATE_VERBOSITY || "low";
 
+
+function normalizeForCompare(s) {
+  return String(s || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[、。．，,.!！?？：:；;（）()\[\]「」『』"“”'’`]/g, "")
+    .toLowerCase();
+}
+
+function looksJapanese(s) {
+  // かな（ひらがな/カタカナ）が入ってたら日本語っぽい
+  return /[\u3040-\u309F\u30A0-\u30FF]/.test(String(s || ""));
+}
+
+
+    
     // JSON固定（フロント側は data.translatedText を受けるだけにする）
     async function callOnce(extraHint = "") {
       const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -122,10 +138,20 @@ response_format: { type: "json_object" },
 
     // --- 全方向の根本治療：同文返し（未翻訳）を検知して1回だけ再試行 ---
     // ※「こんにちは」→「你好」などの短文で起きやすい事故を潰す
-    const inText = String(userPrompt).trim();
-    const outText = String(translatedText).trim();
+const inText = String(userPrompt || "");
+const outText = String(translatedText || "");
 
-    const shouldRetry = inText && outText && (inText === outText);
+// 1) 記号差分だけなら未翻訳扱い（こんにちは → こんにちは。を潰す）
+const sameAfterNormalize =
+  normalizeForCompare(inText) &&
+  normalizeForCompare(inText) === normalizeForCompare(outText);
+
+// 2) ターゲットが中国語なのに、かなが入ってたら未翻訳扱い
+const targetLooksChinese = (guessedTarget === "中国語");
+const jpKanaInChinese = targetLooksChinese && looksJapanese(outText);
+
+const shouldRetry = sameAfterNormalize || jpKanaInChinese;
+
 
     if (shouldRetry) {
       translatedText = await callOnce(
@@ -154,4 +180,5 @@ response_format: { type: "json_object" },
     return res.status(500).json({ error: "Internal Server Error", detail: String(e) });
   }
 }
+
 
