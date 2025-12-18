@@ -43,6 +43,12 @@ export default async function handler(req, res) {
 - 挨拶・定型表現は日本語の自然な定型に正規化してください。
   例：下午好=こんにちは / 早上好=おはようございます / 晚上好=こんばんは
 - 「午後好」のような不自然な直訳は禁止です。
+- 中国語の業務・物流用語は、日本語で一般的に使われる表現に置き換えてください。
+  例：
+  实货 → 実際の製品 / 納品された製品 / 実機（文脈に応じて）
+  出货 → 出荷
+  批次 → ロット
+
 `.trim()
       : "";
 
@@ -180,5 +186,6 @@ const shouldRetry = sameAfterNormalize || jpKanaInChinese;
     return res.status(500).json({ error: "Internal Server Error", detail: String(e) });
   }
 }
+
 
 
