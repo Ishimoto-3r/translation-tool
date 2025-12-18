@@ -1,9 +1,11 @@
-// kensho.js（置き換え）
+// kensho.js（全文置き換え）
 let DB = null;
 let imagesDataUrl = [];
 const $ = (id) => document.getElementById(id);
 
-function setStatus(msg) { $("status").textContent = msg; }
+function setStatus(msg) {
+  $("status").textContent = msg;
+}
 
 function showOverlay(title, msg) {
   $("overlay-title").textContent = title || "処理中…";
@@ -16,6 +18,16 @@ function hideOverlay() {
   $("overlay").classList.remove("flex");
 }
 
+// 進捗（分数表示）
+const STEPS = ["SharePoint読み込み", "Excel生成", "AI提案", "ダウンロード準備"];
+function setStep(stepIndex, msg) {
+  const n = stepIndex + 1;
+  const N = STEPS.length;
+  const text = `${msg}（${n}/${N}）`;
+  setStatus(text);
+  showOverlay("実行中…", text);
+}
+
 function groupBy(arr, keyFn) {
   const m = new Map();
   for (const x of arr) {
@@ -25,28 +37,31 @@ function groupBy(arr, keyFn) {
   }
   return m;
 }
+
 function sortLabels(items) {
   return items.slice().sort((a, b) => {
     const g1 = a.uiGenreOrder ?? 9999;
     const g2 = b.uiGenreOrder ?? 9999;
     if (g1 !== g2) return g1 - g2;
+
     const i1 = a.uiItemOrder ?? 9999;
     const i2 = b.uiItemOrder ?? 9999;
     if (i1 !== i2) return i1 - i2;
+
     return a.label.localeCompare(b.label, "ja");
   });
 }
 
 async function loadDb() {
-  showOverlay("SharePointから読み込み中…", "database を取得しています");
-  setStatus("読み込み中…");
+  setStep(0, "SharePointから読み込み中");
 
   const res = await fetch("/api/kensho-db");
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.status);
 
   DB = data;
-  $("db-badge").textContent = `label=${data.labelMaster?.length ?? 0} / list=${data.itemList?.length ?? 0}`;
+
+  // ※ db-badge表示は不要（要望④）
   setStatus("読み込み完了");
   hideOverlay();
   return data;
@@ -56,12 +71,12 @@ function renderLabels(labelMaster) {
   const root = $("labels");
   root.innerHTML = "";
 
-  const visible = labelMaster.filter(x => !x.uiHidden);
-  const byGenre = groupBy(sortLabels(visible), x => x.uiGenre);
+  const visible = (labelMaster || []).filter((x) => !x.uiHidden);
+  const byGenre = groupBy(sortLabels(visible), (x) => x.uiGenre);
 
   for (const [genre, items] of byGenre.entries()) {
     const card = document.createElement("div");
-    card.className = "border rounded-xl p-2";
+    card.className = "border rounded-xl p-2 bg-white";
 
     const head = document.createElement("div");
     head.className = "flex items-center justify-between mb-2";
@@ -74,19 +89,22 @@ function renderLabels(labelMaster) {
     clear.className = "text-xs text-blue-600 hover:underline";
     clear.textContent = "解除";
     clear.addEventListener("click", () => {
-      card.querySelectorAll("input[type=checkbox]").forEach(cb => (cb.checked = false));
+      card.querySelectorAll("input[type=checkbox]").forEach((cb) => (cb.checked = false));
     });
 
     head.appendChild(title);
     head.appendChild(clear);
 
-    // ✅ ジャンル内を2列にして縦長を抑える
+    // ジャンル内を2列にして縦長を抑える
     const list = document.createElement("div");
     list.className = "grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-1";
 
     for (const it of items) {
       const row = document.createElement("label");
-      row.className = "flex items-center gap-2 text-sm cursor-pointer rounded-lg px-2 py-2 hover:bg-slate-50 select-none";
+      // 折り返し禁止 + 省略（…）表示で見やすく（要望③）
+      row.className =
+        "flex items-center gap-2 text-sm cursor-pointer rounded-md px-2 py-2 border border-slate-200 hover:bg-slate-50 select-none " +
+        "whitespace-nowrap overflow-hidden";
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
@@ -95,6 +113,7 @@ function renderLabels(labelMaster) {
 
       const sp = document.createElement("span");
       sp.textContent = it.label;
+      sp.className = "overflow-hidden text-ellipsis";
 
       row.appendChild(cb);
       row.appendChild(sp);
@@ -109,19 +128,21 @@ function renderLabels(labelMaster) {
 
 function getSelectedLabels() {
   const cbs = Array.from(document.querySelectorAll("#labels input[type=checkbox]"));
-  return cbs.filter(x => x.checked).map(x => x.dataset.label);
-}
-function clearAllChecks() {
-  document.querySelectorAll("#labels input[type=checkbox]").forEach(cb => (cb.checked = false));
+  return cbs.filter((x) => x.checked).map((x) => x.dataset.label);
 }
 
 function readFilesAsDataURL(files) {
-  return Promise.all(Array.from(files).map(f => new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result));
-    r.onerror = reject;
-    r.readAsDataURL(f);
-  })));
+  return Promise.all(
+    Array.from(files).map(
+      (f) =>
+        new Promise((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result));
+          r.onerror = reject;
+          r.readAsDataURL(f);
+        })
+    )
+  );
 }
 
 function setupDrop() {
@@ -129,8 +150,15 @@ function setupDrop() {
   const input = $("img");
 
   drop.addEventListener("click", () => input.click());
-  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("bg-slate-50"); });
-  drop.addEventListener("dragleave", () => drop.classList.remove("bg-slate-50"));
+
+  drop.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    drop.classList.add("bg-slate-50");
+  });
+
+  drop.addEventListener("dragleave", () => {
+    drop.classList.remove("bg-slate-50");
+  });
 
   drop.addEventListener("drop", async (e) => {
     e.preventDefault();
@@ -163,7 +191,10 @@ async function handleImages(files) {
 async function onGenerate() {
   try {
     const selected = getSelectedLabels();
-    if (selected.length === 0) { setStatus("選択がありません"); return; }
+    if (selected.length === 0) {
+      setStatus("選択がありません");
+      return;
+    }
 
     const productInfo = {
       name: $("name").value.trim(),
@@ -171,20 +202,26 @@ async function onGenerate() {
       memo: $("memo").value.trim(),
     };
 
-    showOverlay("実行中…", "Excel生成中（書式維持）");
-    setStatus("実行中…");
+    // Excel生成（サーバ側）開始
+    setStep(1, "Excel生成中（書式維持）");
 
-    // ✅ Excelはサーバ側で生成（書式維持）
     const res = await fetch("/api/kensho-generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ selectedLabels: selected, productInfo, images: imagesDataUrl }),
+      body: JSON.stringify({
+        selectedLabels: selected,
+        productInfo,
+        images: imagesDataUrl,
+      }),
     });
 
     if (!res.ok) {
       const t = await res.text();
       throw new Error("生成失敗: " + t);
     }
+
+    // ダウンロード準備
+    setStep(3, "ダウンロード準備");
 
     const blob = await res.blob();
     const name = productInfo.name || "無題";
@@ -235,7 +272,7 @@ async function onDownloadMassTemplate() {
 
 (async function init() {
   setupDrop();
-  $("btn-clear-all").addEventListener("click", clearAllChecks);
+
   $("btn-generate").addEventListener("click", onGenerate);
   $("btn-mass").addEventListener("click", onDownloadMassTemplate);
 
