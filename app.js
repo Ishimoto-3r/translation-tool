@@ -46,6 +46,11 @@ async function callOpenAIAPI(systemPrompt, userPrompt) {
     }
 }
 
+function hasKana(s) {
+  return /[\u3040-\u309F\u30A0-\u30FF]/.test(s || "");
+}
+
+
 /**
  * 通常の翻訳処理
  */
@@ -76,7 +81,21 @@ ${isJapaneseTarget ? "原文が日本語以外の場合は、短文・単語・�
 余計な解説や前置きは不要です。翻訳結果の本文のみ返してください。
 `.trim();
 
-    const translatedText = await callOpenAIAPI(systemPrompt, text);
+let translatedText = await callOpenAIAPI(systemPrompt, text);
+
+// ★日本語ターゲット時：ひらがな/カタカナが1文字も無ければ「未翻訳」とみなして再試行
+if (isJapaneseTarget && text.trim() && !hasKana(translatedText)) {
+  const hardPrompt = `
+あなたはプロの翻訳者です。
+次の文章を「日本語（です・ます調）」に翻訳してください。
+重要：出力に中国語の文として成立する文章を出さないでください。
+必ず日本語として成立する文章にし、ひらがな/カタカナを含めてください。
+余計な解説は不要。翻訳結果のみ返してください。
+`.trim();
+
+  translatedText = await callOpenAIAPI(hardPrompt, text);
+}
+
 
         if (translatedText) {
             outputElement.value = translatedText;
@@ -322,4 +341,5 @@ function toggleComparisonLog() {
         btnElement.textContent = '[+]';
     }
 }
+
 
