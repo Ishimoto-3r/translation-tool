@@ -65,9 +65,18 @@ async function startTranslation(buttonElement, inputId, outputId, sourceLang, ta
     }
     // --- ローディングここまで ---
 
-    try {
-        const systemPrompt = `${sourceLang}を${targetLang}に翻訳してください。余計な解説は付けず、翻訳結果のテキストのみを返してください。`;
-        const translatedText = await callOpenAIAPI(systemPrompt, text);
+try {
+    const isJapaneseTarget = (targetLang === "日本語");
+
+    const systemPrompt = `
+あなたはプロの翻訳者です。
+出力は必ず「${targetLang}」で返してください。
+${isJapaneseTarget ? "原文が日本語以外の場合は、短文・単語・記号が多くても必ず日本語に翻訳してください。原文をそのまま返すことは禁止です。" : ""}
+型番・数値・記号（USB-C, ODM, 3.7V など）は可能な限り保持してください。
+余計な解説や前置きは不要です。翻訳結果の本文のみ返してください。
+`.trim();
+
+    const translatedText = await callOpenAIAPI(systemPrompt, text);
 
         if (translatedText) {
             outputElement.value = translatedText;
@@ -313,3 +322,4 @@ function toggleComparisonLog() {
         btnElement.textContent = '[+]';
     }
 }
+
