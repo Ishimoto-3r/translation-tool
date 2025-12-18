@@ -2,17 +2,15 @@
  * VercelのバックエンドAPIを呼び出す関数
  * ★ 元の callOpenAIAPI から書き換えています ★
  */
-async function callOpenAIAPI(systemPrompt, userPrompt) {
-    try {
-        // Vercelのバックエンド (/api/translate) を呼び出す
-        const response = await fetch('/api/translate', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                systemPrompt: systemPrompt,
-                userPrompt: userPrompt
+async function callOpenAIAPI(systemPrompt, userPrompt, sourceLang, targetLang) {
+  const response = await fetch('/api/translate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemPrompt,
+      userPrompt,
+      sourceLang,
+      targetLang
             })
         });
 
@@ -81,7 +79,13 @@ ${isJapaneseTarget ? "原文が日本語以外の場合は、短文・単語・�
 余計な解説や前置きは不要です。翻訳結果の本文のみ返してください。
 `.trim();
 
-let translatedText = await callOpenAIAPI(systemPrompt, text);
+let translatedText = await callOpenAIAPI(
+  systemPrompt,
+  text,
+  sourceLang,
+  targetLang
+);
+
 
 // ★日本語ターゲット時：ひらがな/カタカナが1文字も無ければ「未翻訳」とみなして再試行
 if (isJapaneseTarget && text.trim() && !hasKana(translatedText)) {
@@ -150,7 +154,13 @@ async function startReverseTranslation(buttonElement) {
     try {
         // 1. 日本語 → 中国語
         const systemPrompt = `${'日本語'}を${'中国語'}に翻訳してください。余計な解説は付けず、翻訳結果のテキストのみを返してください。`;
-        chineseText = await callOpenAIAPI(systemPrompt, jpInputText);
+chineseText = await callOpenAIAPI(
+  systemPrompt,
+  jpInputText,
+  '日本語',
+  '中国語'
+);
+
 
         if (!chineseText) {
             // ★修正：alertの代わりにトースト通知
@@ -341,5 +351,6 @@ function toggleComparisonLog() {
         btnElement.textContent = '[+]';
     }
 }
+
 
 
