@@ -353,4 +353,12 @@ function toggleComparisonLog() {
 }
 
 
+// ===== expose for inline onclick (index.html) =====
+window.startTranslation = window.startTranslation || startTranslation;
+window.startReverseTranslation = window.startReverseTranslation || startReverseTranslation;
+window.clearText = window.clearText || clearText;
+window.copyToClipboard = window.copyToClipboard || copyToClipboard;
+window.toggleComparisonLog = window.toggleComparisonLog || toggleComparisonLog;
+window.copyComparisonLog = window.copyComparisonLog || copyComparisonLog;
+
 
