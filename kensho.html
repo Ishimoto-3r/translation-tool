@@ -1,4 +1,4 @@
-<!-- kensho.html -->
+<!-- kensho.html（置き換え） -->
 <!doctype html>
 <html lang="ja">
 <head>
@@ -9,51 +9,78 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="/kensho.js" defer></script>
 </head>
+
 <body class="bg-slate-100">
-  <div class="bg-slate-700 text-white p-3">検証項目作成ツール</div>
+  <!-- 上部バー（簡易：manual風） -->
+  <header class="bg-slate-700 text-white">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="font-semibold">検証項目作成ツール</div>
+      <div class="text-sm opacity-90">ChatGPT API</div>
+    </div>
+  </header>
 
-  <main class="max-w-6xl mx-auto p-4 grid grid-cols-12 gap-4">
-    <!-- 左：入力 -->
-    <section class="col-span-3 bg-white rounded-lg p-4 shadow">
-      <div class="font-bold mb-2">製品情報</div>
+  <!-- ローディング（SharePoint/実行中 共通） -->
+  <div id="overlay" class="fixed inset-0 hidden items-center justify-center bg-black/40 z-50">
+    <div class="bg-white rounded-xl shadow-lg w-[360px] p-5">
+      <div class="flex items-center gap-3">
+        <div class="h-6 w-6 rounded-full border-4 border-slate-300 border-t-slate-700 animate-spin"></div>
+        <div>
+          <div id="overlay-title" class="font-semibold">処理中…</div>
+          <div id="overlay-msg" class="text-sm text-slate-600 mt-1">しばらくお待ちください</div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-      <label class="block text-sm">一般名称</label>
-      <input id="name" class="w-full border rounded p-2 mb-2" />
+  <main class="max-w-7xl mx-auto p-4 grid grid-cols-12 gap-4">
+    <!-- 左：製品情報 -->
+    <section class="col-span-12 md:col-span-3 bg-white rounded-xl p-4 shadow">
+      <div class="font-bold mb-3">製品情報</div>
 
-      <label class="block text-sm">特筆すべき特徴</label>
-      <textarea id="feature" class="w-full border rounded p-2 mb-2" rows="4"></textarea>
+      <label class="block text-sm mb-1">一般名称</label>
+      <input id="name" class="w-full border rounded-lg p-2 mb-3" />
 
-      <label class="block text-sm">備考</label>
-      <textarea id="memo" class="w-full border rounded p-2 mb-2" rows="3"></textarea>
+      <label class="block text-sm mb-1">特筆すべき特徴</label>
+      <textarea id="feature" class="w-full border rounded-lg p-2 mb-3" rows="4"></textarea>
 
-      <div class="mt-3 font-bold">画像（複数可）</div>
-      <div id="drop" class="mt-2 border-2 border-dashed rounded p-4 text-sm text-slate-500 cursor-pointer">
+      <label class="block text-sm mb-1">備考</label>
+      <textarea id="memo" class="w-full border rounded-lg p-2 mb-3" rows="3"></textarea>
+
+      <div class="mt-2 font-bold">画像（複数可）</div>
+      <div id="drop" class="mt-2 border-2 border-dashed rounded-xl p-4 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
         ここに画像をドラッグ＆ドロップ（またはクリック）
         <input id="img" type="file" accept="image/*" multiple class="hidden" />
       </div>
       <div id="thumbs" class="mt-2 flex flex-wrap gap-2"></div>
 
-      <button id="btn-generate" class="mt-4 w-full bg-emerald-600 text-white rounded p-2">
+      <button id="btn-generate" class="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl p-2 font-semibold">
         初回検証ファイルを生成
       </button>
 
-      <button id="btn-mass" class="mt-2 w-full bg-blue-600 text-white rounded p-2">
+      <button id="btn-mass" class="mt-2 w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl p-2 font-semibold">
         量産前フォーマットをダウンロード
       </button>
 
-      <div id="status" class="mt-3 text-sm text-slate-600"></div>
+      <div class="mt-3 flex items-center justify-between">
+        <div id="status" class="text-sm text-slate-600"></div>
+        <button id="btn-clear-all" class="text-sm text-blue-600 hover:underline">全解除</button>
+      </div>
     </section>
 
-    <!-- 中央：チェックUI -->
-    <section class="col-span-6 bg-white rounded-lg p-4 shadow">
-      <div class="font-bold mb-2">検証ラベル（ジャンル別）</div>
-      <div id="labels" class="grid grid-cols-2 gap-3"></div>
+    <!-- 中央：検証ラベル（ジャンル別） -->
+    <section class="col-span-12 md:col-span-7 bg-white rounded-xl p-4 shadow">
+      <div class="flex items-center justify-between mb-3">
+        <div class="font-bold">検証ラベル（ジャンル別）</div>
+        <div id="db-badge" class="text-xs text-slate-500"></div>
+      </div>
+      <!-- 2列→3列→4列で表示（選択しやすく） -->
+      <div id="labels" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3"></div>
     </section>
 
     <!-- 右：ログ -->
-    <section class="col-span-3 bg-white rounded-lg p-4 shadow">
+    <section class="col-span-12 md:col-span-2 bg-white rounded-xl p-4 shadow">
       <div class="font-bold mb-2">ログ</div>
-      <pre id="log" class="text-xs whitespace-pre-wrap"></pre>
+      <pre id="log" class="text-xs whitespace-pre-wrap text-slate-700"></pre>
     </section>
   </main>
 </body>
