@@ -1,10 +1,8 @@
 // kensho.js（置き換え）
 let DB = null;
 let imagesDataUrl = [];
-
 const $ = (id) => document.getElementById(id);
 
-function log(msg) { $("log").textContent += msg + "\n"; }
 function setStatus(msg) { $("status").textContent = msg; }
 
 function showOverlay(title, msg) {
@@ -27,7 +25,6 @@ function groupBy(arr, keyFn) {
   }
   return m;
 }
-
 function sortLabels(items) {
   return items.slice().sort((a, b) => {
     const g1 = a.uiGenreOrder ?? 9999;
@@ -49,7 +46,6 @@ async function loadDb() {
   if (!res.ok) throw new Error(data.error || res.status);
 
   DB = data;
-
   $("db-badge").textContent = `label=${data.labelMaster?.length ?? 0} / list=${data.itemList?.length ?? 0}`;
   setStatus("読み込み完了");
   hideOverlay();
@@ -84,19 +80,18 @@ function renderLabels(labelMaster) {
     head.appendChild(title);
     head.appendChild(clear);
 
+    // ✅ ジャンル内を2列にして縦長を抑える
     const list = document.createElement("div");
-    list.className = "space-y-1";
+    list.className = "grid grid-cols-1 sm:grid-cols-2 gap-x-2 gap-y-1";
 
     for (const it of items) {
-      // 行全体がクリックできるように label を大きく
       const row = document.createElement("label");
-      row.className =
-        "flex items-center gap-2 text-sm cursor-pointer rounded-lg px-2 py-2 hover:bg-slate-50 select-none";
+      row.className = "flex items-center gap-2 text-sm cursor-pointer rounded-lg px-2 py-2 hover:bg-slate-50 select-none";
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.dataset.label = it.label;
-      cb.className = "h-5 w-5"; // 押しやすく
+      cb.className = "h-5 w-5";
 
       const sp = document.createElement("span");
       sp.textContent = it.label;
@@ -116,7 +111,6 @@ function getSelectedLabels() {
   const cbs = Array.from(document.querySelectorAll("#labels input[type=checkbox]"));
   return cbs.filter(x => x.checked).map(x => x.dataset.label);
 }
-
 function clearAllChecks() {
   document.querySelectorAll("#labels input[type=checkbox]").forEach(cb => (cb.checked = false));
 }
@@ -135,11 +129,7 @@ function setupDrop() {
   const input = $("img");
 
   drop.addEventListener("click", () => input.click());
-
-  drop.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    drop.classList.add("bg-slate-50");
-  });
+  drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("bg-slate-50"); });
   drop.addEventListener("dragleave", () => drop.classList.remove("bg-slate-50"));
 
   drop.addEventListener("drop", async (e) => {
@@ -170,153 +160,50 @@ async function handleImages(files) {
   }
 }
 
-function parseAiJson(text) {
-  // 余計な文章が混じった時でも配列部分だけ取る
-  const m = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
-  const jsonText = m ? m[0] : text;
-  const parsed = JSON.parse(jsonText);
-  return Array.isArray(parsed) ? parsed : [];
-}
-
-async function fetchAiSuggestions({ productInfo, selectedLabels, currentRows }) {
-  const res = await fetch("/api/kensho-ai", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ productInfo, selectedLabels, currentRows, images: imagesDataUrl }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || res.status);
-  return parseAiJson(data.text || "[]");
-}
-
-// B〜H（2〜8列）で「実際に値が入っている最終行」を探す
-function findLastUsedRowBH(ws) {
-  const ref = ws["!ref"] || "A1:A1";
-  const range = XLSX.utils.decode_range(ref);
-  let last = 1;
-
-  for (let r = range.s.r; r <= range.e.r; r++) {
-    let any = false;
-    for (let c = 1; c <= 7; c++) { // B(1)〜H(7) 0-based
-      const addr = XLSX.utils.encode_cell({ r, c });
-      const cell = ws[addr];
-      const v = cell?.v;
-      if (v !== undefined && String(v).trim() !== "") {
-        any = true;
-        break;
-      }
-    }
-    if (any) last = r + 1; // 1-based
-  }
-  return last;
-}
-
-async function loadFirstTemplateWorkbook() {
-  // テンプレxlsxを取得して、そのまま土台にする（④対策）
-  const res = await fetch("/api/kensho-template?type=first");
-  if (!res.ok) throw new Error("テンプレ取得失敗");
-  const ab = await res.arrayBuffer();
-  const wb = XLSX.read(ab, { type: "array" });
-  return wb;
-}
-
-function downloadWorkbook(wb, filename) {
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-  const blob = new Blob([out], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(a.href);
-}
-
 async function onGenerate() {
   try {
-    log("--- 生成開始 ---");
-
     const selected = getSelectedLabels();
+    if (selected.length === 0) { setStatus("選択がありません"); return; }
+
     const productInfo = {
       name: $("name").value.trim(),
       feature: $("feature").value.trim(),
       memo: $("memo").value.trim(),
     };
 
-    if (selected.length === 0) {
-      setStatus("選択がありません");
-      return;
-    }
-
-    showOverlay("実行中…", "テンプレ取得中");
+    showOverlay("実行中…", "Excel生成中（書式維持）");
     setStatus("実行中…");
 
-    // 1) テンプレ取得（④：理想形に合わせる）
-    const wb = await loadFirstTemplateWorkbook();
-    const sheetName = wb.SheetNames.includes("初回検証フォーマット") ? "初回検証フォーマット" : wb.SheetNames[0];
-    const ws = wb.Sheets[sheetName];
+    // ✅ Excelはサーバ側で生成（書式維持）
+    const res = await fetch("/api/kensho-generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selectedLabels: selected, productInfo, images: imagesDataUrl }),
+    });
 
-    // 2) DB抽出分を末尾に追記
-    showOverlay("実行中…", "DB抽出中");
-    const chosen = new Set(selected);
-
-    // 重要：label(=ラベル名) と major(=大分類) を一致させる想定
-    const rows = (DB?.itemList || []).filter(x => chosen.has(x.major));
-
-    const startRow = findLastUsedRowBH(ws) + 1; // 次行から追記
-    let rowIndex = startRow;
-
-    for (const r of rows) {
-      // A空、B〜Hを機械コピー（ユーザー指示）
-      const aoa = [[ "", r.B, r.C, r.D, r.E, r.F, r.G, r.H ]];
-      XLSX.utils.sheet_add_aoa(ws, aoa, { origin: { r: rowIndex - 1, c: 0 } });
-      rowIndex++;
-    }
-    log(`DB追記: ${rows.length}行`);
-
-    // 3) AI提案
-    showOverlay("実行中…", "AI提案中");
-    const currentRows = { appendedCount: rows.length, templateSheet: sheetName };
-    const ai = await fetchAiSuggestions({ productInfo, selectedLabels: selected, currentRows });
-    log(`AI提案: ${ai.length}件`);
-
-    for (const it of ai) {
-      const text = (it?.text || "").toString();
-      const note = (it?.note || "").toString();
-      if (!text.trim()) continue;
-
-      // A空 / B=AI提案 / C=提案内容 / G=補足
-      const aoa = [[ "", "AI提案", text, "", "", "", note, "" ]];
-      XLSX.utils.sheet_add_aoa(ws, aoa, { origin: { r: rowIndex - 1, c: 0 } });
-      rowIndex++;
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error("生成失敗: " + t);
     }
 
-    // 4) シート名をユーザー向けに統一
-    // 既存テンプレのシート名が「初回検証フォーマット」なら、出力は「初回検証」にしたい
-    if (sheetName !== "初回検証") {
-      wb.Sheets["初回検証"] = ws;
-      delete wb.Sheets[sheetName];
-      const idx = wb.SheetNames.indexOf(sheetName);
-      if (idx >= 0) wb.SheetNames[idx] = "初回検証";
-    }
-
-    // 5) DL
-    showOverlay("実行中…", "Excel生成中 → ダウンロード準備");
+    const blob = await res.blob();
     const name = productInfo.name || "無題";
-    downloadWorkbook(wb, `検証_${name}.xlsx`);
+    const filename = `検証_${name}.xlsx`;
+
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(a.href);
 
     hideOverlay();
     setStatus("完了");
-    log("--- 完了 ---");
   } catch (e) {
     console.error(e);
     hideOverlay();
     setStatus("エラー: " + String(e));
-    log("ERROR: " + String(e));
   }
 }
 
@@ -348,7 +235,6 @@ async function onDownloadMassTemplate() {
 
 (async function init() {
   setupDrop();
-
   $("btn-clear-all").addEventListener("click", clearAllChecks);
   $("btn-generate").addEventListener("click", onGenerate);
   $("btn-mass").addEventListener("click", onDownloadMassTemplate);
