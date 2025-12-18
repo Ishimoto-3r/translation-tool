@@ -236,6 +236,24 @@ export default async function handler(req, res) {
     const name = (productInfo?.name || "無題").toString();
     const filename = `検証_${name}.xlsx`;
 
+// === 出力は「初回検証」シートのみ ===
+const keepName = "初回検証フォーマット";
+const outName  = "初回検証";
+
+// ① テンプレシートを outName にリネーム
+wsTpl.name = outName;
+// C1 に選択語句（カンマ区切り）
+wsTpl.getCell("C1").value = `選択語句：${selectedLabels.join(",")}`;
+
+
+    
+// ② 他のシートを削除
+wb.worksheets
+  .filter(ws => ws.name !== outName)
+  .forEach(ws => wb.removeWorksheet(ws.id));
+
+
+    
     // 7) 返却
     const out = await wb.xlsx.writeBuffer();
 
