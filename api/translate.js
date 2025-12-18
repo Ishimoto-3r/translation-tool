@@ -66,18 +66,30 @@ ${jpGreetingRules}
         },
         body: JSON.stringify({
           model,
-          messages: [
-            { role: "system", content: baseSystem },
-            {
-              role: "user",
-              content:
-                `【翻訳方向】${sourceLang || "任意"} → ${guessedTarget}\n` +
-                `【原文】\n${userPrompt}\n\n` +
-                (systemPrompt ? `【追加条件】\n${systemPrompt}\n\n` : "") +
-                (extraHint ? `【追加指示】\n${extraHint}\n` : "")
-            },
-          ],
-          response_format: { type: "json_object" },
+      messages: [
+  {
+    role: "system",
+    content:
+      baseSystem +
+      `
+
+重要：出力は必ずJSON（json_object）のみで返してください。
+フォーマットは次の通りです：
+{"translatedText":"..."}
+`,
+  },
+  {
+    role: "user",
+    content:
+      `Return ONLY JSON. Example: {"translatedText":"..."}\n\n` + // ← "json" を確実に含める
+      `【翻訳方向】${sourceLang || "任意"} → ${guessedTarget}\n` +
+      `【原文】\n${userPrompt}\n\n` +
+      (systemPrompt ? `【追加条件】\n${systemPrompt}\n\n` : "") +
+      (extraHint ? `【追加指示】\n${extraHint}\n` : "")
+  },
+],
+response_format: { type: "json_object" },
+
           reasoning_effort,
           verbosity,
         }),
@@ -142,3 +154,4 @@ ${jpGreetingRules}
     return res.status(500).json({ error: "Internal Server Error", detail: String(e) });
   }
 }
+
