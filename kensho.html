@@ -43,13 +43,17 @@
 
       <label class="block text-sm mb-1">備考</label>
       <textarea id="memo" class="w-full border rounded-lg p-2 mb-3" rows="3"></textarea>
+      
+<div id="drop" class="mt-2 border-2 border-dashed rounded-xl p-6 text-sm text-slate-600 cursor-pointer hover:bg-slate-50 min-h-[240px] flex flex-col justify-center gap-2">
+  <div class="font-medium text-slate-700">
+    ここに画像をドラッグ＆ドロップ（またはクリック）
+  </div>
+  <div class="text-xs text-slate-500">
+    製品の画像を添付すると、AIが検証内容の提案の参考にします。
+  </div>
+  <input id="img" type="file" accept="image/*" multiple class="hidden" />
+</div>
 
-      <div class="mt-2 font-bold">画像（複数可）</div>
-      <div id="drop" class="mt-2 border-2 border-dashed rounded-xl p-4 text-sm text-slate-500 cursor-pointer hover:bg-slate-50">
-        ここに画像をドラッグ＆ドロップ（またはクリック）
-        <input id="img" type="file" accept="image/*" multiple class="hidden" />
-      </div>
-      <div id="thumbs" class="mt-2 flex flex-wrap gap-2"></div>
 
       <button id="btn-generate" class="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl p-2 font-semibold">
         初回検証ファイルを生成
@@ -61,7 +65,6 @@
 
       <div class="mt-3 flex items-center justify-between">
         <div id="status" class="text-sm text-slate-600"></div>
-        <button id="btn-clear-all" class="text-sm text-blue-600 hover:underline">全解除</button>
       </div>
     </section>
 
@@ -69,7 +72,6 @@
     <section class="col-span-12 lg:col-span-9 bg-white rounded-xl p-4 shadow">
       <div class="flex items-center justify-between mb-3">
         <div class="font-bold">検証ラベル（ジャンル別）</div>
-        <div id="db-badge" class="text-xs text-slate-500"></div>
       </div>
 
       <!-- 横長・見やすさ重視 -->
