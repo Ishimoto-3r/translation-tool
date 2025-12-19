@@ -1,192 +1,176 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>プロンプト実行</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale:1.0">
+<title>単発プロンプト</title>
 
-  <style>
-    :root { --bg:#0b1020; --card:#111a33; --line:#22305f; --text:#e9eefc; --muted:#b7c2e6; --accent:#7aa2ff; --danger:#ff7a7a; }
-    body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
-    .wrap { max-width: 1100px; margin: 0 auto; padding: 18px; }
+<style>
+/* ===== 共通（index.html と同一） ===== */
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  margin:0;background:#f3f4f6;color:#1f2937;
+}
 
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-    .card { background: var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
-    .card h2 { margin:0 0 10px; font-size: 16px; }
-    .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+/* ===== Top Nav（index.htmlと同一） ===== */
+.tool-nav{
+  position:sticky;top:0;z-index:100;
+  background:#374151;padding:10px 16px;
+  box-shadow:0 2px 4px rgba(0,0,0,.12);
+  display:flex;justify-content:center;gap:14px;align-items:center;
+}
+.nav-groupbox{
+  display:flex;flex-direction:column;gap:6px;
+  padding:8px 10px;border:1px solid rgba(255,255,255,.14);
+  border-radius:10px;background:rgba(255,255,255,.04);
+}
+.nav-heading{
+  font-size:12px;font-weight:700;letter-spacing:.08em;
+  color:rgba(243,244,246,.75);user-select:none;
+}
+.nav-links{display:flex;gap:8px}
+.tool-nav a{
+  color:#f3f4f6;text-decoration:none;font-weight:600;
+  font-size:14px;padding:8px 12px;border-radius:999px;
+  background:rgba(255,255,255,.06);
+}
+.tool-nav a:hover{background:rgba(255,255,255,.12)}
+.tool-nav a.active{background:#172554;color:#fff}
 
-    textarea { width:100%; min-height: 220px; resize: vertical; border-radius: 12px; border:1px solid var(--line); background: rgba(0,0,0,.2); color: var(--text); padding: 12px; box-sizing: border-box; }
-    button { border-radius: 12px; border:1px solid var(--line); background: rgba(255,255,255,0.02); color: var(--text); padding: 10px 12px; cursor:pointer; }
-    button:hover { border-color: var(--accent); }
-    button:disabled { opacity: .55; cursor:not-allowed; }
+/* ===== Layout ===== */
+.container{
+  max-width:1200px;margin:2rem auto;padding:1.5rem 2rem;
+  background:#fff;border-radius:12px;
+  box-shadow:0 4px 12px rgba(0,0,0,.05);
+  display:grid;grid-template-columns:1fr 1fr;gap:24px;
+}
+h1{margin:0 0 12px;font-size:1.75rem}
+.section{border:1px solid #e5e7eb;border-radius:12px;padding:16px}
+textarea{
+  width:100%;height:260px;border:1px solid #d1d5db;border-radius:8px;
+  padding:12px;font-size:1rem;resize:vertical;
+}
+textarea:focus{border-color:#3b82f6;outline:none}
+.controls{display:flex;gap:8px;align-items:center;margin-top:8px}
+button{
+  background:#3b82f6;color:#fff;border:none;border-radius:8px;
+  padding:10px 18px;font-size:1rem;cursor:pointer;
+}
+button:hover{background:#2563eb}
+button.secondary{background:#6b7280}
+button.secondary:hover{background:#4b5563}
+.status{font-size:12px;color:#6b7280}
 
-    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    .status { color: var(--muted); font-size: 12px; }
-    .out { white-space: pre-wrap; background: rgba(0,0,0,.22); border:1px solid var(--line); border-radius:12px; padding: 12px; min-height: 220px; overflow:auto; }
+/* ===== Radio UI ===== */
+.opt-block{margin-top:16px}
+.opt-title{font-weight:700;margin-bottom:6px}
+.radio-row{display:flex;gap:10px;flex-wrap:wrap}
+.radio{display:flex;align-items:center;gap:6px;cursor:pointer}
+.radio input{display:none}
+.dot{width:16px;height:16px;border:2px solid #6b7280;border-radius:50%}
+.radio input:checked + .dot{
+  border-color:#2563eb;background:#2563eb;
+}
 
-    /* radio UI */
-    .opt-group { display:grid; gap:10px; margin-top:10px; }
-    .opt-block { border:1px solid var(--line); border-radius:14px; padding:12px; background: rgba(0,0,0,.12); }
-    .opt-title { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:0 0 8px; }
-    .opt-title b { font-size: 13px; }
-    .opt-title span { color: var(--muted); font-size: 12px; }
-
-    .radio-row { display:flex; flex-wrap:wrap; gap:8px; }
-    .radio {
-      display:flex; align-items:center; gap:8px;
-      padding:8px 10px;
-      border:1px solid var(--line);
-      border-radius:12px;
-      background: rgba(255,255,255,0.02);
-      user-select:none;
-      cursor:pointer;
-    }
-    .radio:hover { border-color: var(--accent); }
-    .dot {
-      width:16px; height:16px; border-radius:999px;
-      border:2px solid rgba(233,238,252,.65);
-      display:grid; place-items:center;
-      box-sizing:border-box;
-      flex:0 0 auto;
-    }
-    .dot::after{
-      content:"";
-      width:8px; height:8px; border-radius:999px;
-      background: transparent;
-    }
-    input[type="radio"] { display:none; }
-    input[type="radio"]:checked + label .dot { border-color: var(--accent); }
-    input[type="radio"]:checked + label .dot::after { background: var(--accent); }
-    .radio small { color: var(--muted); font-size: 12px; }
-
-    .disabled { opacity:.55; pointer-events:none; }
-    .warn { margin-top:8px; font-size: 12px; color: var(--danger); }
-
-    /* image drop area */
-    .drop {
-      border:1px dashed rgba(233,238,252,.35);
-      border-radius:14px;
-      padding:12px;
-      background: rgba(0,0,0,.10);
-    }
-    .drop.dragover { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,162,255,.15) inset; }
-    .thumbs { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
-    .thumb {
-      width:72px; height:72px; border-radius:12px;
-      border:1px solid var(--line);
-      object-fit: cover;
-      background: rgba(0,0,0,.2);
-    }
-    .tiny { font-size:12px; color: var(--muted); }
-    @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
-  </style>
+/* ===== Image Area ===== */
+.drop{
+  margin-top:8px;padding:12px;border:2px dashed #9ca3af;
+  border-radius:10px;background:#f9fafb;
+}
+.thumbs{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.thumbwrap{position:relative}
+.thumb{width:80px;height:80px;object-fit:cover;border-radius:8px;border:1px solid #d1d5db}
+.thumbx{
+  position:absolute;top:-6px;right:-6px;
+  width:22px;height:22px;border-radius:50%;
+  background:#ef4444;color:#fff;border:none;cursor:pointer;
+}
+.tiny{font-size:12px;color:#6b7280;margin-top:4px}
+</style>
 </head>
 
 <body>
-  <div class="wrap">
-    <div class="grid">
-      <section class="card">
-        <h2>入力</h2>
-        <textarea id="prompt" placeholder="ここにプロンプトを入力してください。"></textarea>
 
-        <div class="row" style="margin-top:10px;">
-          <button id="runBtn">実行</button>
-          <button id="clearBtn">クリア</button>
-          <span class="status" id="status"></span>
-        </div>
+<nav class="tool-nav">
+  <div class="nav-groupbox">
+    <div class="nav-heading">翻訳</div>
+    <div class="nav-links">
+      <a href="/index.html">翻訳ツール</a>
+      <a href="/verify.html">検証結果翻訳</a>
+      <a href="/column-translate.html">列指定翻訳</a>
+      <a href="/sheet-translate.html">シート翻訳</a>
+      <a href="/word-translate.html">Word翻訳</a>
+    </div>
+  </div>
+  <div class="nav-groupbox">
+    <div class="nav-heading">その他</div>
+    <div class="nav-links">
+      <a href="/report.html">修理レポート</a>
+      <a href="/manual.html">マニュアル</a>
+      <a href="/prompt.html" class="active">単発プロンプト</a>
+    </div>
+  </div>
+</nav>
 
-        <div class="hint" style="margin-top:8px;">※ Ctrl + Enter で実行</div>
+<div class="container">
+  <div class="section">
+    <h1>単発プロンプト</h1>
+    <textarea id="prompt" placeholder="ここにプロンプトを入力してください"></textarea>
 
-        <div class="opt-group">
-          <div class="opt-block">
-            <div class="opt-title">
-              <b>モデル</b>
-              <span>5.1=安定 / 5.2=複雑な指示に強い</span>
-            </div>
-            <div class="radio-row" id="modelGroup">
-              <input id="m51" type="radio" name="model" value="gpt-5.1" checked>
-              <label class="radio" for="m51"><span class="dot"></span><div>GPT-5.1 <small>（既定）</small></div></label>
+    <div class="controls">
+      <button id="runBtn">実行</button>
+      <button id="clearBtn" class="secondary">クリア</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="tiny">※ Ctrl + Enter で実行 / 単発実行（前回の回答は保持しません）</div>
 
-              <input id="m52" type="radio" name="model" value="gpt-5.2">
-              <label class="radio" for="m52"><span class="dot"></span><div>GPT-5.2 <small>（高性能）</small></div></label>
-            </div>
-          </div>
+    <div class="opt-block">
+      <div class="opt-title">モデル</div>
+      <div class="radio-row" id="modelGroup">
+        <label class="radio">
+          <input type="radio" name="model" value="gpt-5.1" checked>
+          <span class="dot"></span> GPT-5.1（安定）
+        </label>
+        <label class="radio">
+          <input type="radio" name="model" value="gpt-5.2">
+          <span class="dot"></span> GPT-5.2（高性能）
+        </label>
+      </div>
+    </div>
 
-          <div class="opt-block" id="reasoningBlock">
-            <div class="opt-title">
-              <b>reasoning（思考量）</b>
-              <span>高いほど精度↑ / 速度↓</span>
-            </div>
+    <div class="opt-block">
+      <div class="opt-title">出力量（verbosity）</div>
+      <div class="radio-row">
+        <label class="radio">
+          <input type="radio" name="verbosity" value="low" checked>
+          <span class="dot"></span> low（既定）
+        </label>
+        <label class="radio">
+          <input type="radio" name="verbosity" value="medium">
+          <span class="dot"></span> medium
+        </label>
+        <label class="radio">
+          <input type="radio" name="verbosity" value="high">
+          <span class="dot"></span> high
+        </label>
+      </div>
+    </div>
 
-            <div class="radio-row" id="reasoningGroup">
-              <input id="rnone" type="radio" name="reasoning" value="none" checked>
-              <label class="radio" for="rnone"><span class="dot"></span>none <small>（最速）</small></label>
-
-              <input id="rlow" type="radio" name="reasoning" value="low">
-              <label class="radio" for="rlow"><span class="dot"></span>low</label>
-
-              <input id="rmed" type="radio" name="reasoning" value="medium">
-              <label class="radio" for="rmed"><span class="dot"></span>medium</label>
-
-              <input id="rhigh" type="radio" name="reasoning" value="high">
-              <label class="radio" for="rhigh"><span class="dot"></span>high</label>
-
-              <input id="rxhigh" type="radio" name="reasoning" value="xhigh">
-              <label class="radio" for="rxhigh"><span class="dot"></span>xhigh</label>
-            </div>
-
-            <div class="warn" id="reasoningWarn" style="display:none;">
-              GPT-5.1 選択中は reasoning は無効（選択できません）
-            </div>
-          </div>
-
-          <div class="opt-block">
-            <div class="opt-title">
-              <b>verbosity（出力量）</b>
-              <span>low=結論 / high=詳述</span>
-            </div>
-            <div class="radio-row" id="verbosityGroup">
-              <input id="vlow" type="radio" name="verbosity" value="low">
-              <label class="radio" for="vlow"><span class="dot"></span>low</label>
-
-              <input id="vmed" type="radio" name="verbosity" value="medium" checked>
-              <label class="radio" for="vmed"><span class="dot"></span>medium <small>（既定）</small></label>
-
-              <input id="vhigh" type="radio" name="verbosity" value="high">
-              <label class="radio" for="vhigh"><span class="dot"></span>high</label>
-            </div>
-          </div>
-
-          <div class="opt-block">
-            <div class="opt-title">
-              <b>画像</b>
-              <span>ドラッグ&ドロップ / Ctrl+V で貼り付け</span>
-            </div>
-
-            <div id="dropZone" class="drop">
-              <div class="tiny">ここに画像をドロップ、またはこの枠をクリック→貼り付け（Ctrl+V）してください。</div>
-              <input id="imgPicker" type="file" accept="image/*" multiple style="display:none;">
-              <div id="thumbs" class="thumbs"></div>
-            </div>
-
-            <div class="tiny" style="margin-top:6px;">
-              ※ 画像はこのリクエスト内でのみ使用（会話履歴として保持しません）
-            </div>
-          </div>
-        </div>
-
-        <div class="hint" style="margin-top:10px;">
-          ※ このツールは「毎回単発」です（前回の回答は引き継がない設計）
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>出力（ストリーミング）</h2>
-        <div id="output" class="out"></div>
-      </section>
+    <div class="opt-block">
+      <div class="opt-title">画像（ドラッグ＆ドロップ / 貼り付け）</div>
+      <div id="dropZone" class="drop">
+        <div class="tiny" id="imgCount">画像：0枚</div>
+        <div class="thumbs" id="thumbs"></div>
+      </div>
     </div>
   </div>
 
-  <script src="/prompt.js" defer></script>
+  <div class="section">
+    <h1>出力（ストリーミング）</h1>
+    <div id="output" style="white-space:pre-wrap;min-height:300px;"></div>
+  </div>
+</div>
+
+<script src="/prompt.js" defer></script>
 </body>
 </html>
