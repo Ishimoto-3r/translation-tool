@@ -16,7 +16,6 @@ module.exports = async (req, res) => {
     const allowedVerbosity = new Set(['low', 'medium', 'high']);
     const useVerbosity = allowedVerbosity.has(verbosity) ? verbosity : 'low';
 
-    // gpt-5.2 が受ける reasoning 値
     const allowedEffort52 = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
     let effort = (reasoning || 'none').toString();
     if (!allowedEffort52.has(effort)) effort = 'none';
@@ -41,7 +40,6 @@ module.exports = async (req, res) => {
       stream: true,
     };
 
-    // 5.2 のみ reasoning を付ける（5.1は付けない）
     if (useModel === 'gpt-5.2') {
       body.reasoning = { effort };
     }
@@ -60,7 +58,6 @@ module.exports = async (req, res) => {
       return res.status(upstream.status).send(errText || 'OpenAI API error');
     }
 
-    // SSEを解析して「回答テキストdelta」だけ返す
     res.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
