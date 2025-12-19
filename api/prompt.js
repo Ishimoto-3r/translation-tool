@@ -19,7 +19,7 @@ module.exports = async (req, res) => {
     const allowedVerbosity = new Set(['low', 'medium', 'high']);
     const useVerbosity = allowedVerbosity.has(verbosity) ? verbosity : 'medium';
 
-    // reasoning effort（5.2のみ使う）
+    // reasoning effort（5.2のみ）
     const allowedEffort = new Set(['minimal', 'low', 'medium', 'high']);
     let effort = (reasoning || 'minimal').toString();
     if (!allowedEffort.has(effort)) effort = 'minimal';
@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
       stream: true,
     };
 
-    // GPT-5.2 のみ reasoning を付与（5.1は付けない＝エラー回避）
+    // GPT-5.2 のみ reasoning を付与（5.1は付けない）
     if (useModel === 'gpt-5.2') {
       body.reasoning = { effort };
     }
@@ -53,6 +53,7 @@ module.exports = async (req, res) => {
       return res.status(upstream.status).send(errText || 'OpenAI API error');
     }
 
+    // ここから：SSEを「回答テキストだけ」に変換してストリーミング返却
     res.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
@@ -62,11 +63,66 @@ module.exports = async (req, res) => {
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder('utf-8');
 
+    let buffer = '';
+    let currentEvent = '';
+    let currentData = '';
+
+    const flushMessage = () => {
+      const data = currentData.trim();
+      currentEvent = '';
+      currentData = '';
+      if (!data) return;
+
+      // OpenAIのstreamは JSON が data: に乗ってくる
+      let obj;
+      try {
+        obj = JSON.parse(data);
+      } catch {
+        return; // JSON以外は無視
+      }
+
+      // 重要：deltaだけ出す
+      if (obj.type === 'response.output_text.delta' && typeof obj.delta === 'string') {
+        res.write(obj.delta);
+      }
+
+      // done系が来てもここでは特に何もしない（最後は reader.done で終わる）
+    };
+
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      res.write(decoder.decode(value));
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSEは行単位。空行で1メッセージ終端
+      let idx;
+      while ((idx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, idx).replace(/\r$/, '');
+        buffer = buffer.slice(idx + 1);
+
+        if (line === '') {
+          // メッセージ終端
+          flushMessage();
+          continue;
+        }
+
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim();
+          continue;
+        }
+
+        if (line.startsWith('data:')) {
+          // dataは複数行になることがあるので追記
+          const chunk = line.slice(5).trimStart();
+          currentData += (currentData ? '\n' : '') + chunk;
+          continue;
+        }
+      }
     }
+
+    // 残りがあれば最後に処理
+    flushMessage();
     res.end();
   } catch (e) {
     res.status(500).send(e.message || 'Server error');
