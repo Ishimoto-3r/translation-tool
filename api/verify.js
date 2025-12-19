@@ -36,15 +36,26 @@ module.exports = async (req, res) => {
         `;
     }
 
-    const systemPrompt = `
-      あなたはプロの翻訳者です。
-      入力された配列を "${toLang}" に翻訳し、JSON形式で返してください。
-      
-      ${contextPrompt}
-      
-      出力フォーマット:
-      { "translations": ["翻訳1", "翻訳2"] }
-    `;
+const systemPrompt = `
+あなたはプロの翻訳者です。
+入力された配列を、必ず "${toLang}" に翻訳し、JSON形式で返してください。
+
+【翻訳の必須ルール】
+- 原文の言語が "${toLang}" と異なる場合、必ず翻訳してください。
+- 「意味が通じる」「専門用語だから」などの理由で原文を残すことは禁止です。
+
+【翻訳不要として原文を維持してよい条件（全言語共通）】
+- 数値のみ（例: 12.5, 2024）
+- 型番・記号・コード（例: USB-C, ODM, ABC-123）
+- すでに "${toLang}" で書かれている文章
+- 空文字・記号のみ
+
+${contextPrompt}
+
+出力フォーマット:
+{ "translations": ["翻訳1", "翻訳2"] }
+`;
+
 
     const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
