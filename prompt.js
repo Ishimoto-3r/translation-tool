@@ -78,7 +78,6 @@ async function filesToDataUrls(files){
   return out;
 }
 
-/* Ctrl+Enter で実行 */
 elPrompt.addEventListener('keydown', (e) => {
   if(e.ctrlKey && e.key === 'Enter'){
     e.preventDefault();
@@ -86,7 +85,6 @@ elPrompt.addEventListener('keydown', (e) => {
   }
 });
 
-/* クリア */
 elClear.addEventListener('click', () => {
   elPrompt.value = '';
   elOut.textContent = '';
@@ -95,7 +93,6 @@ elClear.addEventListener('click', () => {
   renderThumbs();
 });
 
-/* 画像：D&D */
 dropZone.addEventListener('dragover', (e) => {
   e.preventDefault();
   dropZone.classList.add('dragover');
@@ -110,7 +107,6 @@ dropZone.addEventListener('drop', async (e) => {
   renderThumbs();
 });
 
-/* 画像：クリックで選択 */
 dropZone.addEventListener('click', () => imgPicker.click());
 imgPicker.addEventListener('change', async () => {
   const files = Array.from(imgPicker.files || []);
@@ -120,7 +116,6 @@ imgPicker.addEventListener('change', async () => {
   imgPicker.value = '';
 });
 
-/* 画像：貼り付け */
 document.addEventListener('paste', async (e) => {
   const items = Array.from(e.clipboardData?.items || []);
   const files = items
@@ -134,7 +129,6 @@ document.addEventListener('paste', async (e) => {
   renderThumbs();
 });
 
-/* 実行（ストリーミング） */
 elRun.addEventListener('click', async () => {
   const prompt = (elPrompt.value || '').trim();
   if(!prompt && imageDataUrls.length === 0){
@@ -149,7 +143,7 @@ elRun.addEventListener('click', async () => {
   try{
     const model = getChecked('model');
     const verbosity = getChecked('verbosity');
-    const reasoning = getChecked('reasoning'); // 5.1はAPI側で無視
+    const reasoning = getChecked('reasoning');
 
     const res = await fetch('/api/prompt', {
       method:'POST',
@@ -179,5 +173,4 @@ elRun.addEventListener('click', async () => {
   }
 });
 
-/* 初期描画 */
 renderThumbs();
