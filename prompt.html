@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>🧩 プロンプト実行ツール</title>
+  <style>
+    :root { --bg:#0b1020; --card:#111a33; --line:#22305f; --text:#e9eefc; --muted:#b7c2e6; --accent:#7aa2ff; }
+    body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 18px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; background: rgba(255,255,255,0.03); border:1px solid var(--line); border-radius:14px; }
+    .brand { font-weight: 700; letter-spacing: .3px; }
+    .tool-nav { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .tool-nav a { color: var(--text); text-decoration:none; padding:8px 10px; border:1px solid var(--line); border-radius:12px; background: rgba(255,255,255,0.02); }
+    .tool-nav a:hover { border-color: var(--accent); }
+    .tool-nav a.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,162,255,.15) inset; }
+
+    /* グループ名は「ラベル見え」＝ボタンに見せない */
+    .group-label { padding:8px 10px; border-radius:12px; color: var(--muted); border:1px dashed rgba(255,255,255,0.18); background: transparent; user-select:none; }
+
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+    .card { background: var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+    .card h2 { margin:0 0 10px; font-size: 16px; }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    textarea { width:100%; min-height: 220px; resize: vertical; border-radius: 12px; border:1px solid var(--line); background: rgba(0,0,0,.2); color: var(--text); padding: 12px; box-sizing: border-box; }
+    select, button { border-radius: 12px; border:1px solid var(--line); background: rgba(255,255,255,0.02); color: var(--text); padding: 10px 12px; }
+    button { cursor:pointer; }
+    button:hover { border-color: var(--accent); }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .row > * { flex: 0 0 auto; }
+    .k { font-size: 12px; color: var(--muted); margin-top:6px; }
+    .out { white-space: pre-wrap; background: rgba(0,0,0,.22); border:1px solid var(--line); border-radius:12px; padding: 12px; min-height: 220px; }
+    .status { color: var(--muted); font-size: 12px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <header class="topbar">
+      <div class="brand">🧩 プロンプト実行ツール</div>
+
+      <!-- 既存のナビ構造に合わせて必要なら差し替え -->
+      <nav class="tool-nav">
+        <span class="group-label">翻訳</span>
+        <a href="/index.html">翻訳ツール</a>
+        <a href="/verify.html">検証結果翻訳</a>
+        <a href="/column-translate.html">列指定翻訳</a>
+        <a href="/sheet-translate.html">シート翻訳</a>
+        <a href="/word-translate.html">Word翻訳</a>
+
+        <span class="group-label">その他</span>
+        <a href="/report.html">修理レポート</a>
+        <a href="/manual.html">マニュアル</a>
+        <a class="active" href="/prompt.html">プロンプト実行</a>
+      </nav>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>入力</h2>
+        <textarea id="prompt" placeholder="ここにAIにやってほしいこと（プロンプト）を入力してください。"></textarea>
+
+        <div class="row" style="margin-top:10px;">
+          <button id="runBtn">実行</button>
+          <button id="clearBtn">クリア</button>
+          <span class="status" id="status"></span>
+        </div>
+
+        <div class="card" style="margin-top:12px;">
+          <h2>設定</h2>
+
+          <div class="row">
+            <label>
+              モデル：
+              <select id="model">
+                <option value="gpt-5.2" selected>GPT-5.2（既定）</option>
+                <option value="gpt-5.1">GPT-5.1</option>
+              </select>
+            </label>
+
+            <label>
+              reasoning：
+              <select id="reasoning">
+                <option value="minimal" selected>minimal（既定）</option>
+                <option value="none">none</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+
+            <label>
+              verbosity：
+              <select id="verbosity">
+                <option value="low">low</option>
+                <option value="medium" selected>medium（既定）</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="k">
+            <div><b>モデル</b>：5.2は最新寄りで総合力が高い傾向。5.1は安定運用向き。citeturn0search2turn0search3turn0search10</div>
+            <div><b>reasoning</b>：高いほど思考量↑で精度↑（そのぶん遅く/高コストになりやすい）。minimalは遅延を抑える用途。citeturn1view1turn1view0</div>
+            <div><b>verbosity</b>：low=短く、high=説明多め。プロンプトを変えずに情報量を調整。citeturn1view0</div>
+            <div class="hint mono">※「none」は内部的に minimal と同等扱い（reasoningトークンを極小化）</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>出力</h2>
+        <div id="output" class="out"></div>
+      </section>
+    </div>
+  </div>
+
+  <script src="/prompt.js" defer></script>
+</body>
+</html>
