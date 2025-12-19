@@ -10,80 +10,25 @@
       --bg:#0b1020; --card:#111a33; --line:#22305f; --text:#e9eefc; --muted:#b7c2e6; --accent:#7aa2ff; --danger:#ff7a7a;
       --navbg:#374151; --navpill:rgba(255,255,255,.06); --navpillHover:rgba(255,255,255,.12);
     }
-
     body{ margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
 
-    /* ===== index.html と同一デザインのナビ（センター・⭐スタンプ） ===== */
-/* ===== index.html 準拠：ナビは text-align:center 方式で中央寄せ ===== */
-.tool-nav{
-  position: sticky; top:0; z-index:100;
-  background-color: var(--navbg);
-  padding: 10px 16px;
-  box-shadow: 0 2px 4px rgba(0,0,0,.12);
-  text-align:center;              /* ★ここがindex寄せの肝 */
-  white-space: nowrap;
-}
-
-/* groupbox を inline-flex にして “全体を中央” に揃える */
-.tool-nav .nav-groupbox{
-  display:inline-flex;            /* ★inline にする */
-  flex-direction:column;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px solid rgba(255,255,255,.14);
-  border-radius: 10px;
-  background: rgba(255,255,255,.04);
-  margin: 0 10px;                 /* ★左右の間隔（index相当） */
-  vertical-align: middle;
-}
-
-.tool-nav .nav-heading{
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  color: rgba(243,244,246,.75);
-  user-select:none;
-  display:flex;
-  align-items:center;
-  gap:6px;
-}
-
-/* 重要：見出しがリンクと同じ位置に見えないように（indexと同一） */
-.tool-nav .nav-heading::before{
-  content: "⭐";
-  opacity: .9;
-}
-
-.tool-nav .nav-links{
-  display:flex;
-  gap: 8px;
-  align-items:center;
-  justify-content:center;
-}
-
-.tool-nav a{
-  color:#f3f4f6;
-  text-decoration:none;
-  font-weight: 600;
-  font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: var(--navpill);
-  transition: background-color .15s, transform .05s;
-  display:inline-flex;
-  align-items:center;
-}
-
-.tool-nav a:hover{ background: var(--navpillHover); }
-.tool-nav a:active{ transform: translateY(1px); }
-
-.tool-nav a.active{
-  background-color: #172554;
-  color: white;
-  font-weight: 700;
-}
-
+    /* ===== 上部ナビ：index.html同等の“中央寄せ”を inner で確定 ===== */
+    .tool-nav{
+      position: sticky; top:0; z-index:100;
+      background-color: var(--navbg);
+      padding: 10px 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,.12);
+    }
+    .tool-nav-inner{
+      max-width: 1100px;
+      margin: 0 auto;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+      gap:14px;
+    }
     .tool-nav .nav-groupbox{
+      width:auto !important;          /* ★縦積み化を潰す */
       display:flex;
       flex-direction:column;
       gap: 6px;
@@ -102,14 +47,18 @@
       align-items:center;
       gap:6px;
     }
+    /* 重要：見出しがリンクと同じ位置に見えないように */
     .tool-nav .nav-heading::before{
       content: "⭐";
-      opacity:.9;
+      opacity: .9;
     }
     .tool-nav .nav-links{
       display:flex;
       gap: 8px;
       align-items:center;
+      justify-content:center;
+      flex-wrap: nowrap;
+      white-space: nowrap;
     }
     .tool-nav a{
       color:#f3f4f6;
@@ -120,10 +69,8 @@
       border-radius: 999px;
       background: var(--navpill);
       transition: background-color .15s, transform .05s;
-      margin:0;
       display:inline-flex;
       align-items:center;
-      gap:6px;
     }
     .tool-nav a:hover{ background: var(--navpillHover); }
     .tool-nav a:active{ transform: translateY(1px); }
@@ -139,7 +86,6 @@
     .card{ background: var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
     .card h2{ margin:0 0 10px; font-size: 16px; }
     .hint{ color: var(--muted); font-size: 12px; line-height: 1.5; }
-
     textarea{
       width:100%; min-height: 220px; resize: vertical;
       border-radius: 12px; border:1px solid var(--line);
@@ -226,24 +172,26 @@
 </head>
 
 <body>
-  <!-- index.htmlと同じ見た目のナビ -->
   <nav class="tool-nav">
-    <div class="nav-groupbox">
-      <div class="nav-heading">翻訳</div>
-      <div class="nav-links">
-        <a href="/index.html">翻訳ツール</a>
-        <a href="/verify.html">検証結果翻訳</a>
-        <a href="/column-translate.html">列指定翻訳</a>
-        <a href="/sheet-translate.html">シート翻訳</a>
-        <a href="/word-translate.html">Word翻訳</a>
+    <div class="tool-nav-inner">
+      <div class="nav-groupbox">
+        <div class="nav-heading">翻訳</div>
+        <div class="nav-links">
+          <a href="/index.html">翻訳ツール</a>
+          <a href="/verify.html">検証結果翻訳</a>
+          <a href="/column-translate.html">列指定翻訳</a>
+          <a href="/sheet-translate.html">シート翻訳</a>
+          <a href="/word-translate.html">Word翻訳</a>
+        </div>
       </div>
-    </div>
-    <div class="nav-groupbox">
-      <div class="nav-heading">その他</div>
-      <div class="nav-links">
-        <a href="/report.html">修理レポート</a>
-        <a href="/manual.html">マニュアル</a>
-        <a class="active" href="/prompt.html">単発プロンプト</a>
+
+      <div class="nav-groupbox">
+        <div class="nav-heading">その他</div>
+        <div class="nav-links">
+          <a href="/report.html">修理レポート</a>
+          <a href="/manual.html">マニュアル</a>
+          <a class="active" href="/prompt.html">単発プロンプト</a>
+        </div>
       </div>
     </div>
   </nav>
@@ -278,13 +226,11 @@
               <label class="radio" for="m52"><span class="dot"></span><div>GPT-5.2 <small>（高性能）</small></div></label>
             </div>
 
-            <!-- ★モデル説明（消さない） -->
             <div class="tiny" style="margin-top:8px;">
               GPT-5.1：安定・高速。通常業務向き / GPT-5.2：推論力が高く複雑な指示向き（やや遅い）
             </div>
           </div>
 
-          <!-- ★5.2で推論指定できる（5.1は無効化） -->
           <div class="opt-block" id="reasoningBlock">
             <div class="opt-title">
               <b>reasoning（思考量）</b>
@@ -305,7 +251,7 @@
               <label class="radio" for="rhigh"><span class="dot"></span>high</label>
 
               <input id="rxhigh" type="radio" name="reasoning" value="xhigh">
-              <label class="radio" for="rxhigh"><span class="dot"></span>xhigh</label>
+              <label class="radio" for="rxhigh"><span class="dot"></span>xhigh <small>（最重）</small></label>
             </div>
 
             <div class="warn" id="reasoningWarn" style="display:none;">
