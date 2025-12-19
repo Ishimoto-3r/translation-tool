@@ -1,5 +1,4 @@
 module.exports = async (req, res) => {
-  // CORS（必要なら既存と揃える）
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -8,28 +7,35 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
   try {
-    const { prompt, model, reasoning, verbosity } = req.body || {};
+    const { prompt, model, reasoning, verbosity, images } = req.body || {};
     const text = (prompt || '').toString().trim();
-    if (!text) return res.status(400).send('prompt is required');
 
-    // allowlist
     const allowedModels = new Set(['gpt-5.1', 'gpt-5.2']);
     const useModel = allowedModels.has(model) ? model : 'gpt-5.1';
 
     const allowedVerbosity = new Set(['low', 'medium', 'high']);
     const useVerbosity = allowedVerbosity.has(verbosity) ? verbosity : 'medium';
 
-    // reasoning effort（5.2のみ）
-    const allowedEffort = new Set(['minimal', 'low', 'medium', 'high']);
-    let effort = (reasoning || 'minimal').toString();
-    if (!allowedEffort.has(effort)) effort = 'minimal';
+    // gpt-5.2 が受ける reasoning 値：none/low/medium/high/xhigh
+    const allowedEffort52 = new Set(['none', 'low', 'medium', 'high', 'xhigh']);
+    let effort = (reasoning || 'none').toString();
+    if (!allowedEffort52.has(effort)) effort = 'none';
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) return res.status(500).send('OPENAI_API_KEY is not set');
 
+    // 画像（dataURL）を input_image として入れる
+    const imgUrls = Array.isArray(images) ? images.filter(s => typeof s === 'string' && s.startsWith('data:image/')) : [];
+
+    if (!text && imgUrls.length === 0) return res.status(400).send('prompt or images is required');
+
+    const content = [];
+    if (text) content.push({ type: 'input_text', text });
+    for (const url of imgUrls) content.push({ type: 'input_image', image_url: url });
+
     const body = {
       model: useModel,
-      input: text,
+      input: [{ role: 'user', content }],
       text: { verbosity: useVerbosity },
       stream: true,
     };
@@ -53,7 +59,7 @@ module.exports = async (req, res) => {
       return res.status(upstream.status).send(errText || 'OpenAI API error');
     }
 
-    // ここから：SSEを「回答テキストだけ」に変換してストリーミング返却
+    // SSEを解析して「回答テキストのdelta」だけを返す
     res.writeHead(200, {
       'Content-Type': 'text/plain; charset=utf-8',
       'Transfer-Encoding': 'chunked',
@@ -64,29 +70,19 @@ module.exports = async (req, res) => {
     const decoder = new TextDecoder('utf-8');
 
     let buffer = '';
-    let currentEvent = '';
     let currentData = '';
 
     const flushMessage = () => {
       const data = currentData.trim();
-      currentEvent = '';
       currentData = '';
       if (!data) return;
 
-      // OpenAIのstreamは JSON が data: に乗ってくる
       let obj;
-      try {
-        obj = JSON.parse(data);
-      } catch {
-        return; // JSON以外は無視
-      }
+      try { obj = JSON.parse(data); } catch { return; }
 
-      // 重要：deltaだけ出す
       if (obj.type === 'response.output_text.delta' && typeof obj.delta === 'string') {
         res.write(obj.delta);
       }
-
-      // done系が来てもここでは特に何もしない（最後は reader.done で終わる）
     };
 
     while (true) {
@@ -95,33 +91,22 @@ module.exports = async (req, res) => {
 
       buffer += decoder.decode(value, { stream: true });
 
-      // SSEは行単位。空行で1メッセージ終端
       let idx;
       while ((idx = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, idx).replace(/\r$/, '');
         buffer = buffer.slice(idx + 1);
 
         if (line === '') {
-          // メッセージ終端
           flushMessage();
           continue;
         }
-
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim();
-          continue;
-        }
-
         if (line.startsWith('data:')) {
-          // dataは複数行になることがあるので追記
           const chunk = line.slice(5).trimStart();
           currentData += (currentData ? '\n' : '') + chunk;
-          continue;
         }
       }
     }
 
-    // 残りがあれば最後に処理
     flushMessage();
     res.end();
   } catch (e) {
