@@ -1,133 +1,201 @@
 <!doctype html>
 <html lang="ja">
 <head>
-<meta charset="utf-8">
-<title>🧩 プロンプト実行ツール</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>🧩 プロンプト実行</title>
 
-<style>
-body{
-  background:#0b1020;color:#e9eefc;
-  font-family:system-ui;margin:0;padding:20px;
-}
-header{
-  background:#111a33;border:1px solid #22305f;
-  border-radius:14px;padding:12px 16px;margin-bottom:14px;
-}
-nav{display:flex;gap:8px;flex-wrap:wrap}
-nav a{
-  text-decoration:none;color:#e9eefc;
-  border:1px solid #22305f;border-radius:12px;
-  padding:6px 10px;background:#0b1020;
-}
-nav a.active{border-color:#7aa2ff}
-.group{color:#b7c2e6;border:1px dashed #334;padding:6px 10px;border-radius:12px}
+  <style>
+    :root { --bg:#0b1020; --card:#111a33; --line:#22305f; --text:#e9eefc; --muted:#b7c2e6; --accent:#7aa2ff; --danger:#ff7a7a; }
+    body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 18px; }
 
-main{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-.card{
-  background:#111a33;border:1px solid #22305f;
-  border-radius:14px;padding:14px;
-}
-textarea{
-  width:100%;height:220px;background:#0b1020;
-  border:1px solid #22305f;border-radius:12px;
-  color:#e9eefc;padding:10px;
-}
-select,button{
-  background:#0b1020;color:#e9eefc;
-  border:1px solid #22305f;border-radius:12px;
-  padding:8px 12px;
-}
-button:hover{border-color:#7aa2ff}
-.output{
-  white-space:pre-wrap;background:#0b1020;
-  border:1px solid #22305f;border-radius:12px;
-  padding:10px;height:220px;overflow:auto;
-}
-.small{font-size:12px;color:#b7c2e6;margin-top:6px}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-</style>
+    header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; background: rgba(255,255,255,0.03); border:1px solid var(--line); border-radius:14px; }
+    .brand { font-weight: 700; letter-spacing: .3px; }
+
+    .tool-nav { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .tool-nav a { color: var(--text); text-decoration:none; padding:8px 10px; border:1px solid var(--line); border-radius:12px; background: rgba(255,255,255,0.02); }
+    .tool-nav a:hover { border-color: var(--accent); }
+    .tool-nav a.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,162,255,.15) inset; }
+    .group-label { padding:8px 10px; border-radius:12px; color: var(--muted); border:1px dashed rgba(255,255,255,0.18); background: transparent; user-select:none; }
+
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+    .card { background: var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+    .card h2 { margin:0 0 10px; font-size: 16px; }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+    textarea { width:100%; min-height: 220px; resize: vertical; border-radius: 12px; border:1px solid var(--line); background: rgba(0,0,0,.2); color: var(--text); padding: 12px; box-sizing: border-box; }
+    button { border-radius: 12px; border:1px solid var(--line); background: rgba(255,255,255,0.02); color: var(--text); padding: 10px 12px; cursor:pointer; }
+    button:hover { border-color: var(--accent); }
+    button:disabled { opacity: .55; cursor:not-allowed; }
+
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .status { color: var(--muted); font-size: 12px; }
+    .out { white-space: pre-wrap; background: rgba(0,0,0,.22); border:1px solid var(--line); border-radius:12px; padding: 12px; min-height: 220px; overflow:auto; }
+
+    /* radio UI */
+    .opt-group { display:grid; gap:10px; margin-top:10px; }
+    .opt-block { border:1px solid var(--line); border-radius:14px; padding:12px; background: rgba(0,0,0,.12); }
+    .opt-title { display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:0 0 8px; }
+    .opt-title b { font-size: 13px; }
+    .opt-title span { color: var(--muted); font-size: 12px; }
+
+    .radio-row { display:flex; flex-wrap:wrap; gap:8px; }
+    .radio {
+      display:flex; align-items:center; gap:8px;
+      padding:8px 10px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      background: rgba(255,255,255,0.02);
+      user-select:none;
+      cursor:pointer;
+    }
+    .radio:hover { border-color: var(--accent); }
+    .dot {
+      width:16px; height:16px; border-radius:999px;
+      border:2px solid rgba(233,238,252,.65);
+      display:grid; place-items:center;
+      box-sizing:border-box;
+      flex:0 0 auto;
+    }
+    .dot::after{
+      content:"";
+      width:8px; height:8px; border-radius:999px;
+      background: transparent;
+    }
+    input[type="radio"] { display:none; }
+    input[type="radio"]:checked + label .dot { border-color: var(--accent); }
+    input[type="radio"]:checked + label .dot::after { background: var(--accent); }
+
+    .radio small { color: var(--muted); font-size: 12px; }
+
+    /* disabled reasoning block */
+    .disabled {
+      opacity:.55;
+      pointer-events:none;
+    }
+    .warn {
+      margin-top:8px;
+      font-size: 12px;
+      color: var(--danger);
+    }
+
+    @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
+  </style>
 </head>
 
 <body>
+  <div class="wrap">
+    <header>
+      <div class="brand">🧩 プロンプト実行</div>
 
-<header>
-  <nav>
-    <span class="group">翻訳</span>
-    <a href="/index.html">翻訳</a>
-    <a href="/verify.html">検証</a>
-    <a href="/column-translate.html">列</a>
-    <a href="/sheet-translate.html">シート</a>
-    <a href="/word-translate.html">Word</a>
+      <nav class="tool-nav">
+        <span class="group-label">翻訳</span>
+        <a href="/index.html">翻訳ツール</a>
+        <a href="/verify.html">検証結果翻訳</a>
+        <a href="/column-translate.html">列指定翻訳</a>
+        <a href="/sheet-translate.html">シート翻訳</a>
+        <a href="/word-translate.html">Word翻訳</a>
 
-    <span class="group">その他</span>
-    <a href="/report.html">修理</a>
-    <a href="/manual.html">マニュアル</a>
-    <a href="/prompt.html" class="active">プロンプト</a>
-  </nav>
-</header>
+        <span class="group-label">その他</span>
+        <a href="/report.html">修理レポート</a>
+        <a href="/manual.html">マニュアル</a>
+        <a class="active" href="/prompt.html">プロンプト実行</a>
+      </nav>
+    </header>
 
-<main>
-  <div class="card">
-    <h3>入力</h3>
+    <div class="grid">
+      <section class="card">
+        <h2>入力</h2>
+        <textarea id="prompt" placeholder="ここにプロンプトを入力してください。"></textarea>
 
-    <div class="row">
-      <button id="run">実行</button>
-      <button id="clear">クリア</button>
-      <span id="status" class="small"></span>
-    </div>
+        <div class="row" style="margin-top:10px;">
+          <button id="runBtn">実行</button>
+          <button id="clearBtn">クリア</button>
+          <span class="status" id="status"></span>
+        </div>
 
-    <h3 style="margin-top:14px;">設定</h3>
+        <div class="opt-group">
+          <div class="opt-block">
+            <div class="opt-title">
+              <b>モデル</b>
+              <span>5.1=安定 / 5.2=複雑な指示に強い</span>
+            </div>
+            <div class="radio-row" id="modelGroup">
+              <input id="m51" type="radio" name="model" value="gpt-5.1" checked>
+              <label class="radio" for="m51">
+                <span class="dot"></span>
+                <div>
+                  GPT-5.1 <small>（既定）</small>
+                </div>
+              </label>
 
-    <div class="row">
-      <label>モデル
-        <select id="model">
-          <option value="gpt-5.1" selected>GPT-5.1（既定・安定）</option>
-          <option value="gpt-5.2">GPT-5.2（高性能）</option>
-        </select>
-      </label>
+              <input id="m52" type="radio" name="model" value="gpt-5.2">
+              <label class="radio" for="m52">
+                <span class="dot"></span>
+                <div>
+                  GPT-5.2 <small>（高性能）</small>
+                </div>
+              </label>
+            </div>
+          </div>
 
-      <label>reasoning
-        <select id="reasoning">
-          <option value="minimal" selected>minimal（高速）</option>
-          <option value="low">low</option>
-          <option value="medium">medium</option>
-          <option value="high">high</option>
-        </select>
-      </label>
+          <div class="opt-block" id="reasoningBlock">
+            <div class="opt-title">
+              <b>reasoning（思考量）</b>
+              <span>高いほど精度↑ / 速度↓</span>
+            </div>
 
-      <label>verbosity
-        <select id="verbosity">
-          <option value="low">low</option>
-          <option value="medium" selected>medium（既定）</option>
-          <option value="high">high</option>
-        </select>
-      </label>
-    </div>
+            <div class="radio-row" id="reasoningGroup">
+              <input id="rmin" type="radio" name="reasoning" value="minimal" checked>
+              <label class="radio" for="rmin"><span class="dot"></span>minimal</label>
 
-    <div class="small">
-      <b>モデル</b><br>
-      GPT-5.1：高速・安定（通常業務向け）<br>
-      GPT-5.2：思考力が高く複雑な指示向け
-    </div>
+              <input id="rlow" type="radio" name="reasoning" value="low">
+              <label class="radio" for="rlow"><span class="dot"></span>low</label>
 
-    <div class="small">
-      <b>reasoning</b><br>
-      思考量。高いほど精度↑／速度↓<br>
-      ※GPT-5.1では内部的に無効
-    </div>
+              <input id="rmed" type="radio" name="reasoning" value="medium">
+              <label class="radio" for="rmed"><span class="dot"></span>medium</label>
 
-    <div class="small">
-      <b>verbosity</b><br>
-      出力量（low＝結論、high＝詳細）
+              <input id="rhigh" type="radio" name="reasoning" value="high">
+              <label class="radio" for="rhigh"><span class="dot"></span>high</label>
+            </div>
+
+            <div class="warn" id="reasoningWarn" style="display:none;">
+              GPT-5.1 選択中は reasoning は無効（選択できません）
+            </div>
+          </div>
+
+          <div class="opt-block">
+            <div class="opt-title">
+              <b>verbosity（出力量）</b>
+              <span>low=結論 / high=詳述</span>
+            </div>
+            <div class="radio-row" id="verbosityGroup">
+              <input id="vlow" type="radio" name="verbosity" value="low">
+              <label class="radio" for="vlow"><span class="dot"></span>low</label>
+
+              <input id="vmed" type="radio" name="verbosity" value="medium" checked>
+              <label class="radio" for="vmed"><span class="dot"></span>medium <small>（既定）</small></label>
+
+              <input id="vhigh" type="radio" name="verbosity" value="high">
+              <label class="radio" for="vhigh"><span class="dot"></span>high</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="hint" style="margin-top:10px;">
+          ※ GPT-5.1 は reasoning を送らない設計にしてあります（エラー回避）。<br>
+          ※ 出力はストリーミングで右側に流れます。
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>出力（ストリーミング）</h2>
+        <div id="output" class="out"></div>
+      </section>
     </div>
   </div>
 
-  <div class="card">
-    <h3>出力（ストリーミング）</h3>
-    <div id="output" class="output"></div>
-  </div>
-</main>
-
-<script src="/prompt.js"></script>
+  <script src="/prompt.js" defer></script>
 </body>
 </html>
