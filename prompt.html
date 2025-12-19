@@ -14,16 +14,75 @@
     body{ margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
 
     /* ===== index.html と同一デザインのナビ（センター・⭐スタンプ） ===== */
-    .tool-nav{
-      position: sticky; top:0; z-index:100;
-      background-color: var(--navbg);
-      padding: 10px 16px;
-      box-shadow: 0 2px 4px rgba(0,0,0,.12);
-      display:flex;
-      justify-content:center;   /* ★センター */
-      align-items:center;
-      gap:14px;
-    }
+/* ===== index.html 準拠：ナビは text-align:center 方式で中央寄せ ===== */
+.tool-nav{
+  position: sticky; top:0; z-index:100;
+  background-color: var(--navbg);
+  padding: 10px 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,.12);
+  text-align:center;              /* ★ここがindex寄せの肝 */
+  white-space: nowrap;
+}
+
+/* groupbox を inline-flex にして “全体を中央” に揃える */
+.tool-nav .nav-groupbox{
+  display:inline-flex;            /* ★inline にする */
+  flex-direction:column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 10px;
+  background: rgba(255,255,255,.04);
+  margin: 0 10px;                 /* ★左右の間隔（index相当） */
+  vertical-align: middle;
+}
+
+.tool-nav .nav-heading{
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: rgba(243,244,246,.75);
+  user-select:none;
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+
+/* 重要：見出しがリンクと同じ位置に見えないように（indexと同一） */
+.tool-nav .nav-heading::before{
+  content: "⭐";
+  opacity: .9;
+}
+
+.tool-nav .nav-links{
+  display:flex;
+  gap: 8px;
+  align-items:center;
+  justify-content:center;
+}
+
+.tool-nav a{
+  color:#f3f4f6;
+  text-decoration:none;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--navpill);
+  transition: background-color .15s, transform .05s;
+  display:inline-flex;
+  align-items:center;
+}
+
+.tool-nav a:hover{ background: var(--navpillHover); }
+.tool-nav a:active{ transform: translateY(1px); }
+
+.tool-nav a.active{
+  background-color: #172554;
+  color: white;
+  font-weight: 700;
+}
+
     .tool-nav .nav-groupbox{
       display:flex;
       flex-direction:column;
