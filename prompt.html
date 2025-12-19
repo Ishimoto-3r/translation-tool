@@ -43,10 +43,9 @@
       display:flex;
       align-items:center;
       gap:6px;
-      padding-left:4px; /* index側の見え方に寄せる */
+      padding-left:4px;
       line-height:1;
     }
-    /* 重要：見出しがリンクと同じ位置に見えないように */
     .tool-nav .nav-heading::before{
       content: "⭐";
       opacity: .9;
@@ -79,7 +78,7 @@
       font-weight: 700;
     }
 
-    /* ===== 以下、元の画面（触らない） ===== */
+    /* ===== 画面 ===== */
     .wrap{ max-width: 1100px; margin: 0 auto; padding: 18px; }
     .grid{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
     .card{ background: var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
@@ -110,6 +109,7 @@
       overflow:auto;
     }
 
+    /* ===== ラジオUI ===== */
     .opt-group{ display:grid; gap:10px; margin-top:10px; }
     .opt-block{ border:1px solid var(--line); border-radius:14px; padding:12px; background: rgba(0,0,0,.12); }
     .opt-title{ display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:0 0 8px; }
@@ -137,6 +137,7 @@
     .disabled{ opacity:.55; pointer-events:none; }
     .warn{ margin-top:8px; font-size: 12px; color: var(--danger); }
 
+    /* ===== 画像 ===== */
     .drop{
       border:1px dashed rgba(233,238,252,.35);
       border-radius:14px;
@@ -168,7 +169,6 @@
 </head>
 
 <body>
-  <!-- ★ index.html と同じ：tool-nav直下にgroupbox（tool-nav-innerは使わない） -->
   <nav class="tool-nav">
     <div class="nav-groupbox">
       <div class="nav-heading">翻訳</div>
@@ -207,8 +207,84 @@
           ※ Ctrl + Enter で実行 / 単発実行（前回の回答は保持しません）
         </div>
 
-        <!-- 以降（設定UI・画像UI・出力側）はあなたの現状どおりでOK -->
-        <!-- ※ここは既存のまま（省略せず、あなたの元ファイルをそのまま残してください） -->
+        <!-- ★ここが消えていたので復活 -->
+        <div class="opt-group">
+          <div class="opt-block">
+            <div class="opt-title">
+              <b>モデル</b>
+              <span>5.1=安定 / 5.2=複雑な指示に強い</span>
+            </div>
+            <div class="radio-row" id="modelGroup">
+              <input id="m51" type="radio" name="model" value="gpt-5.1" checked>
+              <label class="radio" for="m51"><span class="dot"></span><div>GPT-5.1 <small>（既定）</small></div></label>
+
+              <input id="m52" type="radio" name="model" value="gpt-5.2">
+              <label class="radio" for="m52"><span class="dot"></span><div>GPT-5.2 <small>（高性能）</small></div></label>
+            </div>
+
+            <div class="tiny" style="margin-top:8px;">
+              GPT-5.1：安定・高速。通常業務向き / GPT-5.2：推論力が高く複雑な指示向き（やや遅い）
+            </div>
+          </div>
+
+          <div class="opt-block" id="reasoningBlock">
+            <div class="opt-title">
+              <b>reasoning（思考量）</b>
+              <span>高いほど精度↑ / 速度↓</span>
+            </div>
+
+            <div class="radio-row" id="reasoningGroup">
+              <input id="rnone" type="radio" name="reasoning" value="none" checked>
+              <label class="radio" for="rnone"><span class="dot"></span>none <small>（最速）</small></label>
+
+              <input id="rlow" type="radio" name="reasoning" value="low">
+              <label class="radio" for="rlow"><span class="dot"></span>low</label>
+
+              <input id="rmed" type="radio" name="reasoning" value="medium">
+              <label class="radio" for="rmed"><span class="dot"></span>medium</label>
+
+              <input id="rhigh" type="radio" name="reasoning" value="high">
+              <label class="radio" for="rhigh"><span class="dot"></span>high</label>
+
+              <input id="rxhigh" type="radio" name="reasoning" value="xhigh">
+              <label class="radio" for="rxhigh"><span class="dot"></span>xhigh <small>（最重）</small></label>
+            </div>
+
+            <div class="warn" id="reasoningWarn" style="display:none;">
+              GPT-5.1 選択中は reasoning は無効（選択できません）
+            </div>
+          </div>
+
+          <div class="opt-block">
+            <div class="opt-title">
+              <b>verbosity（出力量）</b>
+              <span>low=結論 / high=詳述</span>
+            </div>
+            <div class="radio-row" id="verbosityGroup">
+              <input id="vlow" type="radio" name="verbosity" value="low" checked>
+              <label class="radio" for="vlow"><span class="dot"></span>low <small>（既定）</small></label>
+
+              <input id="vmed" type="radio" name="verbosity" value="medium">
+              <label class="radio" for="vmed"><span class="dot"></span>medium</label>
+
+              <input id="vhigh" type="radio" name="verbosity" value="high">
+              <label class="radio" for="vhigh"><span class="dot"></span>high</label>
+            </div>
+          </div>
+
+          <div class="opt-block">
+            <div class="opt-title">
+              <b>画像</b>
+              <span>ドラッグ&ドロップ / Ctrl+V</span>
+            </div>
+
+            <div id="dropZone" class="drop">
+              <div class="tiny" id="imgCount">画像：0枚</div>
+              <input id="imgPicker" type="file" accept="image/*" multiple style="display:none;">
+              <div id="thumbs" class="thumbs"></div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="card">
