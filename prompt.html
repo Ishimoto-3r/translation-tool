@@ -3,17 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>🧩 プロンプト実行</title>
+  <title>プロンプト実行</title>
 
   <style>
     :root { --bg:#0b1020; --card:#111a33; --line:#22305f; --text:#e9eefc; --muted:#b7c2e6; --accent:#7aa2ff; --danger:#ff7a7a; }
     body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
     .wrap { max-width: 1100px; margin: 0 auto; padding: 18px; }
 
-    header { padding:14px 16px; background: rgba(255,255,255,0.03); border:1px solid var(--line); border-radius:14px; }
-    .brand { font-weight: 700; letter-spacing: .3px; }
-
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     .card { background: var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
     .card h2 { margin:0 0 10px; font-size: 16px; }
     .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
@@ -60,21 +57,33 @@
     input[type="radio"] { display:none; }
     input[type="radio"]:checked + label .dot { border-color: var(--accent); }
     input[type="radio"]:checked + label .dot::after { background: var(--accent); }
-
     .radio small { color: var(--muted); font-size: 12px; }
+
     .disabled { opacity:.55; pointer-events:none; }
     .warn { margin-top:8px; font-size: 12px; color: var(--danger); }
 
+    /* image drop area */
+    .drop {
+      border:1px dashed rgba(233,238,252,.35);
+      border-radius:14px;
+      padding:12px;
+      background: rgba(0,0,0,.10);
+    }
+    .drop.dragover { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(122,162,255,.15) inset; }
+    .thumbs { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .thumb {
+      width:72px; height:72px; border-radius:12px;
+      border:1px solid var(--line);
+      object-fit: cover;
+      background: rgba(0,0,0,.2);
+    }
+    .tiny { font-size:12px; color: var(--muted); }
     @media (max-width: 980px){ .grid{ grid-template-columns: 1fr; } }
   </style>
 </head>
 
 <body>
   <div class="wrap">
-    <header>
-      <div class="brand">🧩 プロンプト実行</div>
-    </header>
-
     <div class="grid">
       <section class="card">
         <h2>入力</h2>
@@ -86,6 +95,8 @@
           <span class="status" id="status"></span>
         </div>
 
+        <div class="hint" style="margin-top:8px;">※ Ctrl + Enter で実行</div>
+
         <div class="opt-group">
           <div class="opt-block">
             <div class="opt-title">
@@ -94,16 +105,10 @@
             </div>
             <div class="radio-row" id="modelGroup">
               <input id="m51" type="radio" name="model" value="gpt-5.1" checked>
-              <label class="radio" for="m51">
-                <span class="dot"></span>
-                <div>GPT-5.1 <small>（既定）</small></div>
-              </label>
+              <label class="radio" for="m51"><span class="dot"></span><div>GPT-5.1 <small>（既定）</small></div></label>
 
               <input id="m52" type="radio" name="model" value="gpt-5.2">
-              <label class="radio" for="m52">
-                <span class="dot"></span>
-                <div>GPT-5.2 <small>（高性能）</small></div>
-              </label>
+              <label class="radio" for="m52"><span class="dot"></span><div>GPT-5.2 <small>（高性能）</small></div></label>
             </div>
           </div>
 
@@ -114,8 +119,8 @@
             </div>
 
             <div class="radio-row" id="reasoningGroup">
-              <input id="rmin" type="radio" name="reasoning" value="minimal" checked>
-              <label class="radio" for="rmin"><span class="dot"></span>minimal</label>
+              <input id="rnone" type="radio" name="reasoning" value="none" checked>
+              <label class="radio" for="rnone"><span class="dot"></span>none <small>（最速）</small></label>
 
               <input id="rlow" type="radio" name="reasoning" value="low">
               <label class="radio" for="rlow"><span class="dot"></span>low</label>
@@ -125,6 +130,9 @@
 
               <input id="rhigh" type="radio" name="reasoning" value="high">
               <label class="radio" for="rhigh"><span class="dot"></span>high</label>
+
+              <input id="rxhigh" type="radio" name="reasoning" value="xhigh">
+              <label class="radio" for="rxhigh"><span class="dot"></span>xhigh</label>
             </div>
 
             <div class="warn" id="reasoningWarn" style="display:none;">
@@ -148,11 +156,27 @@
               <label class="radio" for="vhigh"><span class="dot"></span>high</label>
             </div>
           </div>
+
+          <div class="opt-block">
+            <div class="opt-title">
+              <b>画像</b>
+              <span>ドラッグ&ドロップ / Ctrl+V で貼り付け</span>
+            </div>
+
+            <div id="dropZone" class="drop">
+              <div class="tiny">ここに画像をドロップ、またはこの枠をクリック→貼り付け（Ctrl+V）してください。</div>
+              <input id="imgPicker" type="file" accept="image/*" multiple style="display:none;">
+              <div id="thumbs" class="thumbs"></div>
+            </div>
+
+            <div class="tiny" style="margin-top:6px;">
+              ※ 画像はこのリクエスト内でのみ使用（会話履歴として保持しません）
+            </div>
+          </div>
         </div>
 
         <div class="hint" style="margin-top:10px;">
-          ※ GPT-5.1 は reasoning を送らない設計（エラー回避）<br>
-          ※ 出力はストリーミングで右側に流れます
+          ※ このツールは「毎回単発」です（前回の回答は引き継がない設計）
         </div>
       </section>
 
