@@ -33,12 +33,22 @@ module.exports = async (req, res) => {
     if (text) content.push({ type: 'input_text', text });
     for (const url of imgUrls) content.push({ type: 'input_image', image_url: url });
 
-    const body = {
-      model: useModel,
-      input: [{ role: 'user', content }],
-      text: { verbosity: useVerbosity },
-      stream: true,
-    };
+const body = {
+  model: useModel,
+  input: [
+    {
+      role: 'system',
+      content: '出力はMarkdown記号（#、*、-、** など）を使わず、プレーンテキストのみで記述してください。'
+    },
+    {
+      role: 'user',
+      content
+    }
+  ],
+  text: { verbosity: useVerbosity },
+  stream: true,
+};
+
 
     if (useModel === 'gpt-5.2') {
       body.reasoning = { effort };
