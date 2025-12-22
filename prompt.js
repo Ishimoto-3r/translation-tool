@@ -161,7 +161,18 @@ elRun.addEventListener('click', async () => {
     while(true){
       const {value, done} = await reader.read();
       if(done) break;
-      elOut.textContent += decoder.decode(value);
+const raw = decoder.decode(value);
+const cleaned = raw
+  // 行頭の見出し「### 」などを消す
+  .replace(/^(#{1,6})\s+/gm, '')
+  // 行頭の箇条書き「- 」「* 」を消す（※強調の*は残る）
+  .replace(/^[\-\*]\s+/gm, '')
+  // 強調 **text** / *text* を記号だけ外す（※単語内の*は触らない）
+  .replace(/\*\*(.+?)\*\*/g, '$1')
+  .replace(/\*(.+?)\*/g, '$1');
+
+elOut.textContent += cleaned;
+
       elOut.scrollTop = elOut.scrollHeight;
     }
     setStatus('完了');
