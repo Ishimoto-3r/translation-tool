@@ -253,7 +253,6 @@ function setupImageUploader() {
   }
 }
 
-
 function getSelectedLabels() {
   return Array.from(document.querySelectorAll('input[type="checkbox"][data-label="1"]:checked'))
     .map((c) => c.value)
