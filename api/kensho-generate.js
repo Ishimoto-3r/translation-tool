@@ -306,34 +306,99 @@ export default async function handler(req, res) {
       writeRowNo++;
     }
 
-    // 6) 最下段コメント（枠なし・結合なし・1行=1セル）
-    //    ★改善①：B列は折り返しOFF（wrapText:false）
-    //    ★(提案済)は、既に表（C列）に存在する同義内容なら付与
-    const aiCommentLines = (aiCommentLinesRaw || [])
-      .map((x) => stripVerifyEnding(x))
-      .filter((x) => x);
+// 6) 最下段コメント（枠なし・結合なし・1行=1セル）
+//  - 見出し/セクション/本文で文字サイズを変える
+//  - コメント部分のみ折り返しON（wrapText:true）で視認性UP
+//  - 長文は句読点などでセル内改行を入れる（1行=1セルは維持）
 
-    if (aiCommentLines.length > 0) {
-      writeRowNo += 1; // 空行
+function wrapForCell(text, max = 70) {
+  const s = String(text || "").trim();
+  if (!s) return "";
+  // 既に改行があるなら尊重
+  if (s.includes("\n")) return s;
 
-      // タイトル（B列）
-      const titleRow = wsTpl.getRow(writeRowNo);
-      titleRow.getCell(2).value = "AIコメント（検証ポイント・仕様観点）";
-      copyCellStyle(styleRow.getCell(2), titleRow.getCell(2));
-      titleRow.getCell(2).alignment = { vertical: "top", horizontal: "left", wrapText: false }; // ★折り返しOFF
-      titleRow.getCell(2).border = {}; // 枠なし
-      writeRowNo++;
+  // 句読点/区切りで改行を挿入して、1セル内で読みやすく
+  const breakChars = ["。", "、", "：", ":", "／", "/", "・", "）", ")"];
+  let out = "";
+  let count = 0;
 
-      for (const line of aiCommentLines) {
-        const suffix = isSameMeaning(line, existingSet) ? " (提案済)" : "";
-        const row = wsTpl.getRow(writeRowNo);
-        row.getCell(2).value = `・${line}${suffix}`;
-        copyCellStyle(styleRow.getCell(2), row.getCell(2));
-        row.getCell(2).alignment = { vertical: "top", horizontal: "left", wrapText: false }; // ★折り返しOFF
-        row.getCell(2).border = {}; // 枠なし
-        writeRowNo++;
-      }
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    out += ch;
+    count++;
+
+    if (count >= max && breakChars.includes(ch)) {
+      out += "\n";
+      count = 0;
     }
+  }
+  return out;
+}
+
+function isSectionHeader(line) {
+  const t = String(line || "").trim();
+  // 例： "1. 構造・安全性" / "重要スペック候補（…）" / "案件可否に影響する確認事項（…）"
+  if (/^\d+\.\s*/.test(t)) return true;
+  if (t.length <= 18 && /：|:/.test(t)) return true;
+  if (/^(製品の特徴|検証ポイント|具体例|重要スペック候補|案件可否)/.test(t)) return true;
+  return false;
+}
+
+const aiCommentLines = (aiCommentLinesRaw || [])
+  .map((x) => stripVerifyEnding(x))
+  .map((x) => String(x || "").trim())
+  .filter(Boolean);
+
+if (aiCommentLines.length > 0) {
+  writeRowNo += 1; // 空行（区切り）
+
+  // コメントはB列中心で見せるので、B列の幅を広げる（必要なら調整）
+  // ※列幅はテンプレ側で既に設定がある場合は上書きになります。問題あればコメントアウトOK。
+  wsTpl.getColumn(2).width = Math.max(wsTpl.getColumn(2).width || 0, 70);
+
+  // タイトル行（太字＋サイズUP）
+  const titleRow = wsTpl.getRow(writeRowNo);
+  const titleCell = titleRow.getCell(2);
+  titleCell.value = "AIコメント（検証ポイント・仕様観点）";
+  copyCellStyle(styleRow.getCell(2), titleCell);
+  titleCell.font = { ...(titleCell.font || {}), bold: true, size: 12 };
+  titleCell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+  titleCell.border = {}; // 枠なし
+  writeRowNo++;
+
+  // 1行ずつ：セクション見出しと本文で体裁を変える
+  for (const rawLine of aiCommentLines) {
+    const line = wrapForCell(rawLine, 70);
+    const suffix = isSameMeaning(rawLine, existingSet) ? " (提案済)" : "";
+
+    // セクション見出し
+    if (isSectionHeader(rawLine)) {
+      // 空行を1行入れて詰まり感を減らす（不要なら削除）
+      writeRowNo += 1;
+
+      const r = wsTpl.getRow(writeRowNo);
+      const c = r.getCell(2);
+      c.value = line; // 見出しは「・」を付けない
+      copyCellStyle(styleRow.getCell(2), c);
+      c.font = { ...(c.font || {}), bold: true, size: 11 };
+      c.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+      c.border = {}; // 枠なし
+      writeRowNo++;
+      continue;
+    }
+
+    // 本文（箇条書き）
+    const r = wsTpl.getRow(writeRowNo);
+    const c = r.getCell(2);
+    c.value = `・${line}${suffix}`;
+    copyCellStyle(styleRow.getCell(2), c);
+    c.font = { ...(c.font || {}), bold: false, size: 10 };
+    c.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+    c.border = {}; // 枠なし
+    writeRowNo++;
+  }
+}
+
 
     // 7) 出力は「初回検証」シートのみ、名称変更
     wsTpl.name = "初回検証";
