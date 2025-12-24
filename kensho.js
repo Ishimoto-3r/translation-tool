@@ -175,19 +175,20 @@ async function fetchDatabaseAndRender() {
 }
 
 function setupImageUploader() {
-  // ✅ HTMLのIDに合わせる（drop/img/thumbs）
-  const drop = $("drop");
-  const file = $("img");
-  const thumbs = $("thumbs");
-  if (!drop || !file || !thumbs) return;
+  // ✅ kensho.html のIDに合わせる
+  const drop = $("image-drop");
+  const file = $("image-file");
+  const preview = $("image-preview");
+  if (!drop || !file || !preview) return;
 
-  // dropクリックでファイル選択
+  // dropクリック → ファイル選択を開く
   drop.addEventListener("click", (e) => {
-    // ボタン押下で巻き込まれないように（保険）
+    // ボタンを巻き込まない保険
     if (e.target?.closest("#btn-generate") || e.target?.closest("#btn-mass")) return;
     file.click();
   });
 
+  // D&D見た目
   drop.addEventListener("dragover", (e) => {
     e.preventDefault();
     drop.classList.add("ring-2", "ring-slate-500");
@@ -204,10 +205,11 @@ function setupImageUploader() {
     addFiles(files);
   });
 
+  // ファイル選択
   file.addEventListener("change", (e) => {
     const files = Array.from(e.target?.files || []).filter((f) => f.type.startsWith("image/"));
     addFiles(files);
-    file.value = "";
+    file.value = ""; // 同じファイルを再選択できるように
   });
 
   function addFiles(files) {
@@ -216,14 +218,14 @@ function setupImageUploader() {
       reader.onload = () => {
         const id = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
         state.images.push({ id, dataUrl: reader.result });
-        renderThumbs();
+        renderPreviews();
       };
       reader.readAsDataURL(f);
     }
   }
 
-  function renderThumbs() {
-    thumbs.innerHTML = "";
+  function renderPreviews() {
+    preview.innerHTML = "";
     for (const img of state.images) {
       const wrap = document.createElement("div");
       wrap.className = "relative w-16 h-16";
@@ -241,15 +243,16 @@ function setupImageUploader() {
         e.preventDefault();
         e.stopPropagation();
         state.images = state.images.filter((x) => x.id !== img.id);
-        renderThumbs();
+        renderPreviews();
       });
 
       wrap.appendChild(im);
       wrap.appendChild(btn);
-      thumbs.appendChild(wrap);
+      preview.appendChild(wrap);
     }
   }
 }
+
 
 function getSelectedLabels() {
   return Array.from(document.querySelectorAll('input[type="checkbox"][data-label="1"]:checked'))
