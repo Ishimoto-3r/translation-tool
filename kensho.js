@@ -341,8 +341,17 @@ async function onDownloadMassTemplate() {
 
   const btnGen = $("btn-generate");
   const btnMass = $("btn-mass");
-  if (btnGen) btnGen.addEventListener("click", onGenerate);
-  if (btnMass) btnMass.addEventListener("click", onDownloadMassTemplate);
+$("btn-generate").addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation(); // ✅ これでdropのclickに伝播しない
+  onGenerate();
+});
+$("btn-mass").addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  onDownloadMassTemplate();
+});
+
 
   try {
     const data = await loadDb();
