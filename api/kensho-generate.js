@@ -94,13 +94,16 @@ async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }
   "3) 文末に「〜を検証する」「〜であることを検証する」「確認する」を付けない（冗長禁止）\n" +
   "4) 既に検証項目として書かれている内容と同義でも“コメントとして重要なら”書いてよい（あとでこちらで(提案済)を付ける）\n" +
   "5) 出力は必ずJSONのみ\n\n" +
-  "【出力形式】\n" +
-  "{\n" +
-  '  "items":[{"text":"...","note":"..."}],\n' +
-  '  "commentTitle":"検証ポイント（簡潔版）",\n' +
-  '  "commentSections":[{"title":"1. ...","bullets":["...","..."]}],\n' +
-  '  "commentNotes":["注意点（重要）","..."]\n' +
-  "}\n";
+"【出力形式】\n" +
+"{\n" +
+'  "items":[{"text":"...","note":"..."}],\n' +
+'  "commentLines":[\n' +
+'    "重要な検証ポイントを簡潔に記載",\n' +
+'    "必要に応じて具体例を1つ含める",\n' +
+'    "製品特性に依存しない汎用文は書かない"\n' +
+"  ]\n" +
+"}\n";
+
 
 
 
@@ -224,68 +227,51 @@ export default async function handler(req, res) {
       writeRowNo++;
     }
 
-    // 既存の確認内容（主にC列）を収集して重複排除に使う
-    const existingChecks = [];
-    wsTpl.eachRow((row) => {
-      const v = row.getCell(3).value; // C列
-      if (v !== null && v !== undefined && String(v).trim() !== "") {
-        existingChecks.push(String(v));
-      }
-    });
+   // ===== AIコメント（最下段・1行1セル・枠なし） =====
 
-    const normalize = (s) => {
-      return String(s || "")
+// 既存の確認内容（C列）を正規化して収集
+const existingSet = new Set();
+wsTpl.eachRow((row) => {
+  const v = row.getCell(3).value;
+  if (v) {
+    existingSet.add(
+      String(v)
         .replace(/\s+/g, "")
         .replace(/[、。．，\.\-ー—_]/g, "")
-        .replace(/(を)?(検証|確認|チェック)(する|します|した|してください)?$/g, "")
-        .trim()
-        .toLowerCase();
-    };
-    const existingSet = new Set(existingChecks.map(normalize));
+        .replace(/(を)?(検証|確認|チェック)(する|します)?$/g, "")
+        .toLowerCase()
+    );
+  }
+});
 
-    // 5) AI提案（同義・重複は出さない／「検証する」等禁止）
-    const aiResult = await aiSuggest({
-      productInfo: productInfo || {},
-      selectedLabels,
-      existingChecks,
-      images,
-    });
+function isDuplicate(line) {
+  const norm = String(line)
+    .replace(/\s+/g, "")
+    .replace(/[、。．，\.\-ー—_]/g, "")
+    .replace(/(を)?(検証|確認|チェック)(する|します)?$/g, "")
+    .toLowerCase();
 
- const aiItems = aiResult.items || [];
-const aiCommentLines = Array.isArray(aiResult.commentLines) ? aiResult.commentLines : [];
+  for (const e of existingSet) {
+    if (norm.includes(e) || e.includes(norm)) return true;
+  }
+  return false;
+}
 
+// 空行
+writeRowNo += 1;
 
-    for (const it of aiItems) {
-      let text = (it?.text || "").toString().trim();
-      let note = (it?.note || "").toString().trim();
-      if (!text) continue;
+// 見出し
+wsTpl.getRow(writeRowNo).getCell(2).value = "検証ポイント（簡潔版）";
+writeRowNo++;
 
-      // 末尾の「検証する/確認する」等を除去（念のため）
-      text = text.replace(/(を)?(検証|確認|チェック)(する|します|した|してください)?$/g, "").trim();
-      if (!text) continue;
+// 本文
+for (const line of aiCommentLines) {
+  if (!line) continue;
+  const suffix = isDuplicate(line) ? " (提案済)" : "";
+  wsTpl.getRow(writeRowNo).getCell(2).value = `・${line}${suffix}`;
+  writeRowNo++;
+}
 
-      // 同義・重複は除外（正規化して一致レベルで弾く）
-      const key = normalize(text);
-      if (!key) continue;
-      if (existingSet.has(key)) continue;
-      existingSet.add(key);
-
-      const newRow = wsTpl.getRow(writeRowNo);
-      newRow.getCell(1).value = "";
-      newRow.getCell(2).value = "AI提案";
-      newRow.getCell(3).value = text;
-      newRow.getCell(7).value = note;
-
-      for (let c = 1; c <= 8; c++) {
-        copyCellStyle(styleRow.getCell(c), newRow.getCell(c));
-      }
-      for (let c = 2; c <= 8; c++) {
-        newRow.getCell(c).border = thinBorder();
-      }
-
-      newRow.commit?.();
-      writeRowNo++;
-    }
 
    // 6) AIコメント（結合なし・枠なし・1行=1セル）
 // 既存の確認内容（C列）＋AI提案（C列）を既出判定に使う
