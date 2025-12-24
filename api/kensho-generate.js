@@ -1,4 +1,4 @@
-// api/kensho-generate.js（新規）
+// api/kensho-generate.js（全文置き換え）
 import OpenAI from "openai";
 import ExcelJS from "exceljs";
 
@@ -67,7 +67,6 @@ function thinBorder() {
 }
 
 function findLastUsedRowBH(ws) {
-  // B〜H（2〜8列）に値がある最終行
   let last = 1;
   ws.eachRow((row, rowNumber) => {
     for (let col = 2; col <= 8; col++) {
@@ -81,20 +80,31 @@ function findLastUsedRowBH(ws) {
 }
 
 function copyCellStyle(src, dst) {
-  // ExcelJSはstyleオブジェクトを丸ごとコピー可能
   dst.style = { ...src.style };
 }
 
-async function aiSuggest({ productInfo, selectedLabels, currentRows, images }) {
+async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }) {
   const sys =
-    "あなたは製品の検証項目を追加提案する担当者です。\n" +
-    "入力情報・画像・既存の検証項目を踏まえて、追加すべき検証項目だけを提案してください。\n" +
-    "出力は必ずJSON配列のみ。形式：[{\"text\":\"...\",\"note\":\"...\"}]\n" +
-    "noteは任意。textは1項目=1行の検証内容。";
+    "あなたは品質検証（検品・評価）のプロです。\n" +
+    "次の制約を厳守して、追加すべき検証項目だけを提案してください。\n\n" +
+    "【制約】\n" +
+    "1) 既存の確認内容（existingChecks）と同義・重複する提案は出さない\n" +
+    "2) 文末に「〜を検証する」「〜であることを検証する」「確認する」等を付けない（冗長禁止）\n" +
+    "3) 提案文は短く、チェック観点そのものを名詞句または簡潔な文で書く\n" +
+    "4) 出力は必ずJSONオブジェクトのみ\n\n" +
+    "【出力形式】\n" +
+    "{\n" +
+    '  "items":[{"text":"...","note":"..."}],\n' +
+    '  "comment":"（検証のプロとしての所感・注意点を1段落）"\n' +
+    "}\n";
 
-  const content = [
-    { type: "text", text: JSON.stringify({ productInfo, selectedLabels, currentRows }, null, 2) },
-  ];
+  const payload = {
+    productInfo,
+    selectedLabels,
+    existingChecks: (existingChecks || []).slice(0, 300),
+  };
+
+  const content = [{ type: "text", text: JSON.stringify(payload, null, 2) }];
 
   if (Array.isArray(images)) {
     for (const img of images) {
@@ -114,12 +124,16 @@ async function aiSuggest({ productInfo, selectedLabels, currentRows, images }) {
     verbosity: VERBOSITY,
   });
 
-  const text = completion.choices[0]?.message?.content ?? "[]";
-  // 配列部分だけ抽出（保険）
-  const m = text.match(/\[\s*\{[\s\S]*\}\s*\]/);
+  const text = completion.choices[0]?.message?.content ?? "{}";
+
+  const m = text.match(/\{[\s\S]*\}$/);
   const jsonText = m ? m[0] : text;
-  const parsed = JSON.parse(jsonText);
-  return Array.isArray(parsed) ? parsed : [];
+
+  const obj = JSON.parse(jsonText);
+  const items = Array.isArray(obj.items) ? obj.items : [];
+  const comment = (obj.comment || "").toString();
+
+  return { items, comment };
 }
 
 export default async function handler(req, res) {
@@ -145,11 +159,14 @@ export default async function handler(req, res) {
     if (!wsList) throw new Error("SheetError: 検証項目リスト が見つかりません");
     if (!wsTpl)  throw new Error("SheetError: 初回検証フォーマット が見つかりません");
 
+    // C1 に選択語句（カンマ区切り）
+    wsTpl.getCell("C1").value = `選択語句：${selectedLabels.join(",")}`;
+
     // 3) 検証項目リストから抽出（A=大分類、B〜Hを機械コピー）
     const chosen = new Set(selectedLabels);
     const extracted = [];
 
-    // ヘッダが2行目想定。データは3行目以降。
+    // 1行目空、2行目ヘッダ想定 → 3行目以降データ
     for (let r = 3; r <= wsList.rowCount; r++) {
       const row = wsList.getRow(r);
       const major = (row.getCell(1).value ?? "").toString().trim(); // A
@@ -200,22 +217,52 @@ export default async function handler(req, res) {
       writeRowNo++;
     }
 
-    // 5) AI提案を追記（無制限）
-    const ai = await aiSuggest({
+    // 既存の確認内容（主にC列）を収集して重複排除に使う
+    const existingChecks = [];
+    wsTpl.eachRow((row) => {
+      const v = row.getCell(3).value; // C列
+      if (v !== null && v !== undefined && String(v).trim() !== "") {
+        existingChecks.push(String(v));
+      }
+    });
+
+    const normalize = (s) => {
+      return String(s || "")
+        .replace(/\s+/g, "")
+        .replace(/[、。．，\.\-ー—_]/g, "")
+        .replace(/(を)?(検証|確認|チェック)(する|します|した|してください)?$/g, "")
+        .trim()
+        .toLowerCase();
+    };
+    const existingSet = new Set(existingChecks.map(normalize));
+
+    // 5) AI提案（同義・重複は出さない／「検証する」等禁止）
+    const aiResult = await aiSuggest({
       productInfo: productInfo || {},
       selectedLabels,
-      currentRows: { extractedCount: extracted.length },
+      existingChecks,
       images,
     });
 
-    for (const it of ai) {
-      const text = (it?.text || "").toString().trim();
-      const note = (it?.note || "").toString().trim();
+    const aiItems = aiResult.items || [];
+    const aiComment = (aiResult.comment || "").toString().trim();
+
+    for (const it of aiItems) {
+      let text = (it?.text || "").toString().trim();
+      let note = (it?.note || "").toString().trim();
       if (!text) continue;
 
-      const newRow = wsTpl.getRow(writeRowNo);
+      // 末尾の「検証する/確認する」等を除去（念のため）
+      text = text.replace(/(を)?(検証|確認|チェック)(する|します|した|してください)?$/g, "").trim();
+      if (!text) continue;
 
-      // A空 / B=AI提案 / C=提案内容 / G=補足
+      // 同義・重複は除外（正規化して一致レベルで弾く）
+      const key = normalize(text);
+      if (!key) continue;
+      if (existingSet.has(key)) continue;
+      existingSet.add(key);
+
+      const newRow = wsTpl.getRow(writeRowNo);
       newRow.getCell(1).value = "";
       newRow.getCell(2).value = "AI提案";
       newRow.getCell(3).value = text;
@@ -232,35 +279,44 @@ export default async function handler(req, res) {
       writeRowNo++;
     }
 
-    // 6) 出力ファイル名
+    // 6) プロコメント（格子外・最下段にテキストボックス風）
+    if (aiComment) {
+      writeRowNo += 1;
+
+      const r = writeRowNo;
+      wsTpl.mergeCells(r, 2, r, 8); // B:H 結合
+
+      const cell = wsTpl.getCell(r, 2);
+      cell.value = `【AIコメント（検証のプロ視点）】\n${aiComment}`;
+      cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
+      cell.border = {
+        top: { style: "medium" },
+        left: { style: "medium" },
+        bottom: { style: "medium" },
+        right: { style: "medium" },
+      };
+
+      wsTpl.getRow(r).height = 80;
+      writeRowNo++;
+    }
+
+    // 7) 出力は「初回検証」シートのみ、名称変更
+    wsTpl.name = "初回検証";
+    wb.worksheets
+      .filter((ws) => ws.name !== "初回検証")
+      .forEach((ws) => wb.removeWorksheet(ws.id));
+
+    // 8) 出力ファイル名
     const name = (productInfo?.name || "無題").toString();
     const filename = `検証_${name}.xlsx`;
 
-// === 出力は「初回検証」シートのみ ===
-const keepName = "初回検証フォーマット";
-const outName  = "初回検証";
-
-// ① テンプレシートを outName にリネーム
-wsTpl.name = outName;
-// C1 に選択語句（カンマ区切り）
-wsTpl.getCell("C1").value = `選択語句：${selectedLabels.join(",")}`;
-
-
-    
-// ② 他のシートを削除
-wb.worksheets
-  .filter(ws => ws.name !== outName)
-  .forEach(ws => wb.removeWorksheet(ws.id));
-
-
-    
-    // 7) 返却
     const out = await wb.xlsx.writeBuffer();
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
     return res.status(200).send(Buffer.from(out));
-
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: "GenerateError", detail: String(err) });
