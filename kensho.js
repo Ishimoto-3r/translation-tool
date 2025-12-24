@@ -61,7 +61,6 @@ async function loadDb() {
 
   DB = data;
 
-  // label/list 表示は無し（要望④）
   setStatus("読み込み完了");
   hideOverlay();
   return data;
@@ -95,14 +94,13 @@ function renderLabels(labelMaster) {
     head.appendChild(title);
     head.appendChild(clear);
 
-    // ✅ ①：ジャンル内は「1列＝各項目1行」
+    // ✅ ジャンル内：1列（各項目1行）＝見切れ防止（要望①）
     const list = document.createElement("div");
     list.className = "space-y-1";
 
     for (const it of items) {
       const row = document.createElement("label");
-
-      // ✅ ①：省略（…）しない。折返しOKで全文見えるように。
+      // ✅ 折返しOK（省略…なし）
       row.className =
         "flex items-start gap-2 text-sm cursor-pointer rounded-md px-2 py-2 " +
         "border border-slate-200 hover:bg-slate-50 select-none";
