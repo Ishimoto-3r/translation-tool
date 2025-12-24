@@ -1,8 +1,8 @@
 // kensho.js（全文置き換え）
 // 目的：
-// - /api/kensho-db の labelMaster を画面表示できるようにする（「何も出ない」を解消）
-// - 画像：D&D/選択で読み込み → 小プレビュー表示 → ×で削除
-// - ボタン押下でファイル選択が勝手に開く事故を防止
+// - /api/kensho-db の labelMaster を画面表示
+// - 画像：D&D/選択で読み込み → 小プレビュー表示 → ×で削除（複数）
+// - 「Body has already been consumed」対策（レスポンス本文の二重読み取りを禁止）
 // - 量産前テンプレDLのURLを /api/kensho-template?type=mass に統一
 
 const $ = (id) => document.getElementById(id);
@@ -46,13 +46,6 @@ function disableButtons(disabled) {
   if (m) m.disabled = !!disabled;
 }
 
-async function safeJson(res) {
-  const ct = (res.headers.get("content-type") || "").toLowerCase();
-  if (ct.includes("application/json")) return await res.json();
-  const txt = await res.text();
-  throw new Error(`JSON以外が返りました（${res.status}）:\n${txt.slice(0, 500)}`);
-}
-
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -65,21 +58,43 @@ function escapeAttr(s) {
   return escapeHtml(s).replaceAll("\n", " ");
 }
 
+// レスポンス本文は「1回だけ」読む（body consumed 対策）
+async function readBodyOnce(res) {
+  const text = await res.text(); // ここで確定的に1回読む
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  return { text, ct };
+}
+
+async function readErrorMessage(res) {
+  const { text, ct } = await readBodyOnce(res);
+  if (ct.includes("application/json")) {
+    try {
+      const obj = JSON.parse(text);
+      return obj?.detail
+        ? `${obj.error || "Error"}: ${obj.detail}`
+        : JSON.stringify(obj);
+    } catch {
+      return text;
+    }
+  }
+  return text || `HTTP ${res.status}`;
+}
+
 /** labelMaster を manual風に {genre, items[]} へ整形 */
 function buildGenreGroups(labelMaster) {
   const visible = (labelMaster || []).filter((x) => !x.uiHidden);
 
   // 並び順：ジャンル表示順 → ジャンル名 → ジャンル内表示順 → ラベル名
   visible.sort((a, b) => {
-    const ag = (a.uiGenreOrder ?? 999999);
-    const bg = (b.uiGenreOrder ?? 999999);
+    const ag = a.uiGenreOrder ?? 999999;
+    const bg = b.uiGenreOrder ?? 999999;
     if (ag !== bg) return ag - bg;
 
     const g1 = (a.uiGenre || "").localeCompare(b.uiGenre || "", "ja");
     if (g1 !== 0) return g1;
 
-    const ai = (a.uiItemOrder ?? 999999);
-    const bi = (b.uiItemOrder ?? 999999);
+    const ai = a.uiItemOrder ?? 999999;
+    const bi = b.uiItemOrder ?? 999999;
     if (ai !== bi) return ai - bi;
 
     return (a.label || "").localeCompare(b.label || "", "ja");
@@ -92,15 +107,14 @@ function buildGenreGroups(labelMaster) {
     map.get(genre).push({ label: row.label });
   }
 
-  const groups = Array.from(map.entries()).map(([genre, items]) => ({ genre, items }));
-  return groups;
+  return Array.from(map.entries()).map(([genre, items]) => ({ genre, items }));
 }
 
 function renderLabelsFromLabelMaster(labelMaster) {
-  const groups = buildGenreGroups(labelMaster);
-
   const root = $("labels");
   if (!root) return;
+
+  const groups = buildGenreGroups(labelMaster);
   root.innerHTML = "";
 
   for (const g of groups) {
@@ -112,7 +126,7 @@ function renderLabelsFromLabelMaster(labelMaster) {
     head.innerHTML = `<div class="font-semibold text-sm">${escapeHtml(g.genre || "")}</div>`;
 
     const list = document.createElement("div");
-    // ★ 各項目で1行（折り返し前提）＋ 行間詰め
+    // 各項目：1行（折り返し前提）＋ 行間を詰める
     list.className = "grid grid-cols-1 gap-1";
 
     for (const it of (g.items || [])) {
@@ -127,7 +141,6 @@ function renderLabelsFromLabelMaster(labelMaster) {
         <input type="checkbox" class="h-4 w-4" data-label="1" value="${escapeAttr(label)}" id="${escapeAttr(id)}">
         <span class="leading-5">${escapeHtml(label)}</span>
       `;
-
       list.appendChild(row);
     }
 
@@ -142,13 +155,14 @@ async function fetchDatabaseAndRender() {
   disableButtons(true);
 
   const res = await fetch("/api/kensho-db");
-  const data = await safeJson(res);
-
   if (!res.ok) {
-    throw new Error(data?.error ? JSON.stringify(data) : "DB読み込み失敗");
+    const msg = await readErrorMessage(res);
+    throw new Error(msg);
   }
 
-  // kensho-db.js は { labelMaster, itemList } を返す
+  // OK時はJSONを読む（ここは1回だけ）
+  const data = await res.json();
+
   state.labelMaster = Array.isArray(data.labelMaster) ? data.labelMaster : [];
   state.itemList = Array.isArray(data.itemList) ? data.itemList : [];
 
@@ -161,15 +175,16 @@ async function fetchDatabaseAndRender() {
 }
 
 function setupImageUploader() {
-  const drop = $("image-drop");
-  const file = $("image-file");
-  const preview = $("image-preview");
-  if (!drop || !file || !preview) return;
+  // ✅ HTMLのIDに合わせる（drop/img/thumbs）
+  const drop = $("drop");
+  const file = $("img");
+  const thumbs = $("thumbs");
+  if (!drop || !file || !thumbs) return;
 
   // dropクリックでファイル選択
   drop.addEventListener("click", (e) => {
-    // もし内部にボタン等があっても拾わない
-    if (e.target && (e.target.closest("#btn-generate") || e.target.closest("#btn-mass"))) return;
+    // ボタン押下で巻き込まれないように（保険）
+    if (e.target?.closest("#btn-generate") || e.target?.closest("#btn-mass")) return;
     file.click();
   });
 
@@ -177,18 +192,20 @@ function setupImageUploader() {
     e.preventDefault();
     drop.classList.add("ring-2", "ring-slate-500");
   });
+
   drop.addEventListener("dragleave", () => {
     drop.classList.remove("ring-2", "ring-slate-500");
   });
+
   drop.addEventListener("drop", (e) => {
     e.preventDefault();
     drop.classList.remove("ring-2", "ring-slate-500");
-    const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith("image/"));
+    const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.type.startsWith("image/"));
     addFiles(files);
   });
 
   file.addEventListener("change", (e) => {
-    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
+    const files = Array.from(e.target?.files || []).filter((f) => f.type.startsWith("image/"));
     addFiles(files);
     file.value = "";
   });
@@ -197,15 +214,16 @@ function setupImageUploader() {
     for (const f of files) {
       const reader = new FileReader();
       reader.onload = () => {
-        state.images.push({ id: crypto.randomUUID(), dataUrl: reader.result });
-        renderPreviews();
+        const id = (crypto?.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+        state.images.push({ id, dataUrl: reader.result });
+        renderThumbs();
       };
       reader.readAsDataURL(f);
     }
   }
 
-  function renderPreviews() {
-    preview.innerHTML = "";
+  function renderThumbs() {
+    thumbs.innerHTML = "";
     for (const img of state.images) {
       const wrap = document.createElement("div");
       wrap.className = "relative w-16 h-16";
@@ -223,12 +241,12 @@ function setupImageUploader() {
         e.preventDefault();
         e.stopPropagation();
         state.images = state.images.filter((x) => x.id !== img.id);
-        renderPreviews();
+        renderThumbs();
       });
 
       wrap.appendChild(im);
       wrap.appendChild(btn);
-      preview.appendChild(wrap);
+      thumbs.appendChild(wrap);
     }
   }
 }
@@ -273,14 +291,8 @@ async function onGenerate() {
     });
 
     if (!res.ok) {
-      // 失敗時はJSONかテキストを表示
-      try {
-        const data = await safeJson(res);
-        throw new Error(JSON.stringify(data));
-      } catch {
-        const txt = await res.text();
-        throw new Error(txt);
-      }
+      const msg = await readErrorMessage(res);
+      throw new Error(msg);
     }
 
     const blob = await res.blob();
@@ -308,23 +320,26 @@ async function onGenerate() {
 async function onDownloadMassTemplate() {
   showOverlay("取得中…", "量産前フォーマットをダウンロードします");
   disableButtons(true);
+
   try {
-    // kensho-template.js に合わせる
     const res = await fetch("/api/kensho-template?type=mass");
     if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(txt);
+      const msg = await readErrorMessage(res);
+      throw new Error(msg);
     }
+
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "量産前検証フォーマット.xlsx";
     a.click();
     URL.revokeObjectURL(a.href);
+
     setStatus("完了");
   } catch (e) {
     console.error(e);
     setStatus("エラー: " + e.toString());
+    alert("ダウンロードに失敗しました。\n" + e.toString());
   } finally {
     hideOverlay();
     disableButtons(false);
@@ -334,7 +349,6 @@ async function onDownloadMassTemplate() {
 window.addEventListener("DOMContentLoaded", async () => {
   setupImageUploader();
 
-  // ボタン：dropクリックに巻き込まれないように stopPropagation
   $("btn-generate")?.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -347,7 +361,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     onDownloadMassTemplate();
   });
 
-  // SharePoint読み込み
   try {
     await fetchDatabaseAndRender();
   } catch (e) {
