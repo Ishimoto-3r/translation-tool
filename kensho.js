@@ -46,7 +46,7 @@ async function fetchDatabaseAndRender() {
   showOverlay("SharePointを読み込み中…", "databaseの取得中です");
   disableButtons(true);
 
-  const res = await fetch("/api/kensho-test");
+  const res = await fetch("/api/kensho-db");
   const data = await safeJson(res);
 
   if (!res.ok) {
