@@ -129,23 +129,34 @@ function isSameMeaning(line, existingSet) {
 async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }) {
   const sys =
     "あなたは品質検証（検品・評価）のプロです。\n" +
-    "入力（選択ラベル・ユーザー入力・画像）と既存の検証項目を踏まえ、追加すべき内容だけを提案してください。\n" +
-    "入力に根拠がない観点は出さないでください（例：車輪/走行などは必要な場合のみ）。\n" +
-    "文末に「〜を検証する」「〜であることを検証する」「確認する」を付けない。\n" +
-    "出力は必ずJSONのみ。\n\n" +
+    "\n" +
+    "【やること】\n" +
+    "1) 既存の検証項目に追加すべき『検証項目（表の行として追記するもの）』を提案\n" +
+    "2) その商品の『検証ポイント（コメント欄として末尾に出すもの）』を、わかりやすく詳しく説明\n" +
+    "\n" +
+    "【重要ルール】\n" +
+    "・入力情報（一般名称/特徴/備考/選択ラベル/画像）に基づき、関連が薄い観点は出さない\n" +
+    "・文末に「〜を検証する」「〜であることを検証する」「確認する」を付けない（冗長禁止）\n" +
+    "・『一般名称』から、市場で一般的に求められる仕様/スペックや、メーカー回答次第で案件可否に影響する確認事項も含める\n" +
+    "  ※あなたはWeb閲覧できない前提なので、一般に想定される仕様項目を“候補”として挙げ、必要に応じて『要メーカー確認』を明記\n" +
+    "・出力は必ずJSONのみ（余計な文章禁止）\n" +
+    "\n" +
     "【出力形式】\n" +
     "{\n" +
-    '  "items":[{"text":"...","note":"..."}],\n' +
+    '  "items":[{"text":"(表に追記する検証項目)","note":"(任意の補足)"}],\n' +
     '  "commentLines":[\n' +
-    '    "重要な検証ポイントを簡潔に1行で",\n' +
-    '    "必要なら具体例（例：〜のときは〜）を含める"\n' +
+    '    "製品の特徴（何がポイントか）",\n' +
+    '    "検証ポイント（理由付き）",\n' +
+    '    "具体例（例：◯◯の場合は△△を見る）",\n' +
+    '    "重要スペック候補（要メーカー確認を含める）",\n' +
+    '    "案件可否に影響する確認事項（要メーカー確認）"\n' +
     "  ]\n" +
     "}\n";
 
   const payload = {
     productInfo,
     selectedLabels,
-    existingChecks: (existingChecks || []).slice(0, 400),
+    existingChecks: (existingChecks || []).slice(0, 600),
   };
 
   const content = [{ type: "text", text: JSON.stringify(payload, null, 2) }];
@@ -253,7 +264,7 @@ export default async function handler(req, res) {
       writeRowNo++;
     }
 
-    // 5) AI提案（重複排除 + 文末「検証する」禁止）
+    // 5) AI提案（※重複OKに変更：ここでは重複排除しない）
     const existingSet = buildExistingSet(wsTpl);
 
     // 既存検証項目（AIに渡す）
@@ -276,9 +287,6 @@ export default async function handler(req, res) {
       const text = stripVerifyEnding(it?.text || "");
       if (!text) continue;
 
-      // 同義なら追加しない
-      if (isSameMeaning(text, existingSet)) continue;
-
       const note = stripVerifyEnding(it?.note || "");
 
       const newRow = wsTpl.getRow(writeRowNo);
@@ -292,13 +300,15 @@ export default async function handler(req, res) {
       // 追記分だけ罫線（B〜H）
       for (let c = 2; c <= 8; c++) newRow.getCell(c).border = thinBorder();
 
-      // 既出セット更新（次の重複排除に効かせる）
+      // 既出セット更新（コメント側の(提案済)判定に使う）
       existingSet.add(normalizeLite(text));
 
       writeRowNo++;
     }
 
-    // 6) 最下段コメント（枠なし・結合なし・1行=1セル、提案済なら(提案済)）
+    // 6) 最下段コメント（枠なし・結合なし・1行=1セル）
+    //    ★改善①：B列は折り返しOFF（wrapText:false）
+    //    ★(提案済)は、既に表（C列）に存在する同義内容なら付与
     const aiCommentLines = (aiCommentLinesRaw || [])
       .map((x) => stripVerifyEnding(x))
       .filter((x) => x);
@@ -308,8 +318,9 @@ export default async function handler(req, res) {
 
       // タイトル（B列）
       const titleRow = wsTpl.getRow(writeRowNo);
-      titleRow.getCell(2).value = "検証ポイント（簡潔版）";
+      titleRow.getCell(2).value = "AIコメント（検証ポイント・仕様観点）";
       copyCellStyle(styleRow.getCell(2), titleRow.getCell(2));
+      titleRow.getCell(2).alignment = { vertical: "top", horizontal: "left", wrapText: false }; // ★折り返しOFF
       titleRow.getCell(2).border = {}; // 枠なし
       writeRowNo++;
 
@@ -318,7 +329,7 @@ export default async function handler(req, res) {
         const row = wsTpl.getRow(writeRowNo);
         row.getCell(2).value = `・${line}${suffix}`;
         copyCellStyle(styleRow.getCell(2), row.getCell(2));
-        row.getCell(2).alignment = { vertical: "top", horizontal: "left", wrapText: true };
+        row.getCell(2).alignment = { vertical: "top", horizontal: "left", wrapText: false }; // ★折り返しOFF
         row.getCell(2).border = {}; // 枠なし
         writeRowNo++;
       }
