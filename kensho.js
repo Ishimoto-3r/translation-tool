@@ -1,45 +1,116 @@
-// kensho.js（全体置き換え版）
-// 目的：aiCommentLines 未定義エラーを潰す / 生成フローを堅牢化 / ボタン押下で画像inputが開かないようにする
+// kensho.js（全文置き換え）
+// 改善：/api/kensho-test がHTMLを返しても落ちない / 画像アップロード復旧 / プレビュー＆×削除
+//      ボタン押下でfile pickerが開く事故を防止
 
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  rows: [],
-  templates: [],
-  termRules: [],
-  selectedLabels: new Set(),
-  images: [], // { id, dataUrl, file }
+  dbLoaded: false,
+  images: [], // { id, dataUrl }
 };
 
-function logMsg(msg) {
+function showOverlay(title, msg) {
+  const overlay = $("overlay");
+  const t = $("overlay-title");
+  const m = $("overlay-msg");
+  if (t) t.textContent = title || "処理中…";
+  if (m) m.textContent = msg || "しばらくお待ちください";
+  if (overlay) overlay.classList.remove("hidden"), overlay.classList.add("flex");
+}
+
+function hideOverlay() {
+  const overlay = $("overlay");
+  if (overlay) overlay.classList.add("hidden"), overlay.classList.remove("flex");
+}
+
+function setStatus(text) {
   const el = $("status-text");
-  if (el) el.textContent = msg;
+  if (el) el.textContent = text || "";
 }
 
-function setBusy(isBusy, msg = "") {
-  const spinner = $("spinner");
-  const status = $("status-text");
-  if (spinner) spinner.classList.toggle("hidden", !isBusy);
-  if (status && msg) status.textContent = msg;
-
-  const btnGen = $("btn-generate");
-  const btnMass = $("btn-mass");
-  if (btnGen) btnGen.disabled = isBusy;
-  if (btnMass) btnMass.disabled = isBusy;
+function disableButtons(disabled) {
+  const g = $("btn-generate");
+  const m = $("btn-mass");
+  if (g) g.disabled = !!disabled;
+  if (m) m.disabled = !!disabled;
 }
 
-async function fetchDatabase() {
-  setBusy(true, "SharePointを読み込み中…");
-  const res = await fetch("/api/kensho-test"); // ← あなたのAPI名に合わせて（manual-testではなくkensho用）
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || "DB読み込み失敗");
+async function safeJson(res) {
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  if (ct.includes("application/json")) return await res.json();
+  const txt = await res.text();
+  throw new Error(`JSON以外が返りました（${res.status}）:\n${txt.slice(0, 500)}`);
+}
 
-  state.rows = Array.isArray(data.rows) ? data.rows : [];
-  state.templates = Array.isArray(data.templates) ? data.templates : [];
-  state.termRules = Array.isArray(data.termRules) ? data.termRules : [];
+async function fetchDatabaseAndRender() {
+  showOverlay("SharePointを読み込み中…", "databaseの取得中です");
+  disableButtons(true);
 
-  setBusy(false, "準備完了");
-  return data;
+  const res = await fetch("/api/kensho-test");
+  const data = await safeJson(res);
+
+  if (!res.ok) {
+    throw new Error(data?.error ? JSON.stringify(data) : "DB読み込み失敗");
+  }
+
+  // ここでは data.labels を想定（後述の api/kensho-test.js を入れると動きます）
+  renderLabels(Array.isArray(data.labels) ? data.labels : []);
+
+  state.dbLoaded = true;
+  setStatus("準備完了");
+  hideOverlay();
+  disableButtons(false);
+}
+
+function renderLabels(labels) {
+  // labels: [{ genre:"重要項目", items:[{label:"PSE対象"} ...] }, ...]
+  const root = $("labels");
+  if (!root) return;
+  root.innerHTML = "";
+
+  for (const g of labels) {
+    const card = document.createElement("div");
+    card.className = "border rounded-xl p-3";
+
+    const head = document.createElement("div");
+    head.className = "flex items-center justify-between mb-2";
+    head.innerHTML = `<div class="font-semibold text-sm">${escapeHtml(g.genre || "")}</div>`;
+
+    const list = document.createElement("div");
+    // ★ “各項目で1行” ＋ 行間詰め（見やすさ優先）
+    list.className = "grid grid-cols-1 gap-1";
+
+    for (const it of (g.items || [])) {
+      const label = (it.label || "").toString();
+      const id = `lbl_${g.genre}_${label}`.replace(/\s+/g, "_");
+
+      const row = document.createElement("label");
+      row.className =
+        "flex items-center gap-2 border rounded-lg px-2 py-1 text-sm hover:bg-slate-50 cursor-pointer";
+
+      row.innerHTML = `
+        <input type="checkbox" class="h-4 w-4" data-label="1" value="${escapeAttr(label)}" id="${escapeAttr(id)}">
+        <span class="leading-5">${escapeHtml(label)}</span>
+      `;
+      list.appendChild(row);
+    }
+
+    card.appendChild(head);
+    card.appendChild(list);
+    root.appendChild(card);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+function escapeAttr(s) {
+  return escapeHtml(s).replaceAll("\n", " ");
 }
 
 // ===== 画像アップロード（ドラッグ&ドロップ + ファイル選択） =====
@@ -47,50 +118,31 @@ function setupImageUploader() {
   const drop = $("image-drop");
   const file = $("image-file");
   const preview = $("image-preview");
-
   if (!drop || !file || !preview) return;
 
-  // dropをクリックしたらファイル選択（ただしボタンのクリックは伝播させない）
+  // dropクリックでファイル選択
   drop.addEventListener("click", (e) => {
-    // drop自身クリックのみで開く
-    if (e.target === drop || drop.contains(e.target)) {
-      file.click();
-    }
-  });
-
-  // ボタンなどがdrop内にある場合の誤爆防止（念のため）
-  ["btn-generate", "btn-mass"].forEach((id) => {
-    const btn = $(id);
-    if (btn) {
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-    }
+    // ボタンからの伝播はここに来ないようにしているが念のため
+    if (e.target && (e.target.closest("#btn-generate") || e.target.closest("#btn-mass"))) return;
+    file.click();
   });
 
   drop.addEventListener("dragover", (e) => {
     e.preventDefault();
-    drop.classList.add("ring-2");
+    drop.classList.add("ring-2", "ring-slate-500");
   });
-
   drop.addEventListener("dragleave", () => {
-    drop.classList.remove("ring-2");
+    drop.classList.remove("ring-2", "ring-slate-500");
   });
-
   drop.addEventListener("drop", (e) => {
     e.preventDefault();
-    drop.classList.remove("ring-2");
-    const files = Array.from(e.dataTransfer.files || []).filter((f) =>
-      f.type.startsWith("image/")
-    );
+    drop.classList.remove("ring-2", "ring-slate-500");
+    const files = Array.from(e.dataTransfer.files || []).filter((f) => f.type.startsWith("image/"));
     addFiles(files);
   });
 
   file.addEventListener("change", (e) => {
-    const files = Array.from(e.target.files || []).filter((f) =>
-      f.type.startsWith("image/")
-    );
+    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith("image/"));
     addFiles(files);
     file.value = "";
   });
@@ -99,8 +151,7 @@ function setupImageUploader() {
     for (const f of files) {
       const reader = new FileReader();
       reader.onload = () => {
-        const id = crypto.randomUUID();
-        state.images.push({ id, dataUrl: reader.result, file: f });
+        state.images.push({ id: crypto.randomUUID(), dataUrl: reader.result });
         renderPreviews();
       };
       reader.readAsDataURL(f);
@@ -109,19 +160,19 @@ function setupImageUploader() {
 
   function renderPreviews() {
     preview.innerHTML = "";
-    state.images.forEach((img) => {
+    for (const img of state.images) {
       const wrap = document.createElement("div");
-      wrap.className = "relative inline-block mr-2 mb-2";
+      wrap.className = "relative w-16 h-16";
 
       const im = document.createElement("img");
       im.src = img.dataUrl;
-      im.className = "w-16 h-16 object-cover rounded border";
+      im.className = "w-16 h-16 object-cover rounded border bg-white";
 
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = "×";
       btn.className =
-        "absolute -top-2 -right-2 w-6 h-6 rounded-full bg-gray-800 text-white text-sm flex items-center justify-center";
+        "absolute -top-2 -right-2 w-6 h-6 rounded-full bg-slate-800 text-white text-sm flex items-center justify-center";
       btn.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -132,136 +183,135 @@ function setupImageUploader() {
       wrap.appendChild(im);
       wrap.appendChild(btn);
       preview.appendChild(wrap);
-    });
+    }
   }
 }
 
-// ===== ラベル選択の収集（チェックボックス） =====
 function getSelectedLabels() {
-  const checked = document.querySelectorAll('input[type="checkbox"][data-label="1"]:checked');
-  const arr = Array.from(checked).map((c) => c.value).filter(Boolean);
-  return arr;
+  return Array.from(document.querySelectorAll('input[type="checkbox"][data-label="1"]:checked'))
+    .map((c) => c.value)
+    .filter(Boolean);
 }
 
-// ===== 生成ボタン処理 =====
+// ===== 初回検証ファイル生成（Excelはblobで返す想定） =====
 async function onGenerate() {
+  if (!state.dbLoaded) {
+    alert("SharePointの読み込みが完了していません。");
+    return;
+  }
+
+  const generalName = ($("general-name")?.value || "").trim();
+  const feature = ($("feature")?.value || "").trim();
+  const note = ($("note")?.value || "").trim();
+  const selectedLabels = getSelectedLabels();
+
+  showOverlay("生成中…", "初回検証ファイルを作成しています");
+  disableButtons(true);
+
   try {
-    setBusy(true, "生成準備…");
-
-    // 入力
-    const generalName = ($("general-name")?.value || "").trim();
-    const feature = ($("feature")?.value || "").trim();
-    const note = ($("note")?.value || "").trim();
-
-    const selected = getSelectedLabels();
-
-    // ★ ここで落ちないように、常に配列で持つ
-    const images = state.images.map((x) => x.dataUrl).filter(Boolean);
-
-    // 生成API
-    setBusy(true, "初回検証ファイルを生成中…");
     const res = await fetch("/api/kensho-generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        generalName,
-        feature,
-        note,
-        selectedLabels: selected,
-        images,
+        productInfo: { name: generalName, feature, note },
+        selectedLabels,
+        images: state.images.map((x) => x.dataUrl),
       }),
     });
 
-    const data = await res.json();
-
     if (!res.ok) {
-      throw new Error(JSON.stringify(data));
+      // 失敗時はJSONかテキストを表示
+      try {
+        const data = await safeJson(res);
+        throw new Error(JSON.stringify(data));
+      } catch {
+        const txt = await res.text();
+        throw new Error(txt);
+      }
     }
 
-    // ★ここが今回のエラー原因：aiCommentLines未定義を回避する
-    // APIが commentLines を返さない場合でも落ちないようにする
-    const aiCommentLines = Array.isArray(data.commentLines)
-      ? data.commentLines
-      : [];
+    // 成功：Excelをそのままダウンロード
+    const blob = await res.blob();
+    const cd = res.headers.get("content-disposition") || "";
+    const fallback = generalName ? `検証_${generalName}.xlsx` : "検証_無題.xlsx";
+    const fileName = decodeFileNameFromContentDisposition(cd) || fallback;
 
-    // ダウンロード（APIがファイルを返す設計ならbase64などに合わせる）
-    // ここでは data.fileBase64 / data.fileName を想定（あなたの実装に合わせて要調整）
-    if (data.fileBase64) {
-      const bin = atob(data.fileBase64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-      const blob = new Blob([bytes], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = data.fileName || "検証_無題.xlsx";
-      a.click();
-      URL.revokeObjectURL(a.href);
-    }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(a.href);
 
-    // ステータス表示（必要なら）
-    setBusy(false, "完了");
-    const status = $("result");
-    if (status) {
-      status.textContent =
-        "完了\n" +
-        (aiCommentLines.length ? `AIコメント行数: ${aiCommentLines.length}` : "");
-    }
+    setStatus("完了");
   } catch (e) {
     console.error(e);
-    setBusy(false, "エラー");
-    const status = $("result");
-    if (status) status.textContent = "エラー: " + e.toString();
+    setStatus("エラー: " + e.toString());
+    alert("生成に失敗しました。\n" + e.toString());
+  } finally {
+    hideOverlay();
+    disableButtons(false);
   }
 }
 
+function decodeFileNameFromContentDisposition(cd) {
+  // filename*=UTF-8''xxx を優先
+  const m1 = cd.match(/filename\*\=UTF-8''([^;]+)/i);
+  if (m1) return decodeURIComponent(m1[1]);
+  const m2 = cd.match(/filename\=\"?([^\";]+)\"?/i);
+  if (m2) return m2[1];
+  return "";
+}
+
+// ===== 量産前テンプレDL（blob） =====
 async function onDownloadMassTemplate() {
+  showOverlay("取得中…", "量産前フォーマットをダウンロードします");
+  disableButtons(true);
   try {
-    setBusy(true, "量産前フォーマットを取得中…");
     const res = await fetch("/api/kensho-mass-template");
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(txt);
+    }
     const blob = await res.blob();
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = "量産前フォーマット.xlsx";
     a.click();
     URL.revokeObjectURL(a.href);
-    setBusy(false, "完了");
+    setStatus("完了");
   } catch (e) {
     console.error(e);
-    setBusy(false, "エラー");
+    setStatus("エラー: " + e.toString());
+  } finally {
+    hideOverlay();
+    disableButtons(false);
   }
 }
 
-// ===== 初期化 =====
 window.addEventListener("DOMContentLoaded", async () => {
+  // 画像UI
+  setupImageUploader();
+
+  // ボタン：dropクリックに巻き込まれないように stopPropagation
+  $("btn-generate")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onGenerate();
+  });
+  $("btn-mass")?.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onDownloadMassTemplate();
+  });
+
+  // SharePoint読み込み
   try {
-    setupImageUploader();
-
-    // DBロード（必要なら）
-    await fetchDatabase();
-
-    const btnGen = $("btn-generate");
-    const btnMass = $("btn-mass");
-
-    if (btnGen) {
-      btnGen.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation(); // 画像inputが勝手に開くのを防止
-        onGenerate();
-      });
-    }
-
-    if (btnMass) {
-      btnMass.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onDownloadMassTemplate();
-      });
-    }
+    await fetchDatabaseAndRender();
   } catch (e) {
     console.error(e);
-    const status = $("result");
-    if (status) status.textContent = "初期化エラー: " + e.toString();
+    hideOverlay();
+    disableButtons(false);
+    setStatus("SharePoint読み込みエラー: " + e.toString());
+    alert("SharePoint読み込みに失敗しました。\n" + e.toString());
   }
 });
