@@ -1,21 +1,30 @@
 // kensho.js（全文置き換え）
 let DB = null;
-let imagesDataUrl = [];
+let imagesDataUrl = []; // dataURLの配列
 const $ = (id) => document.getElementById(id);
 
 function setStatus(msg) {
-  $("status").textContent = msg;
+  const el = $("status");
+  if (el) el.textContent = msg;
 }
 
 function showOverlay(title, msg) {
-  $("overlay-title").textContent = title || "処理中…";
-  $("overlay-msg").textContent = msg || "";
-  $("overlay").classList.remove("hidden");
-  $("overlay").classList.add("flex");
+  const t = $("overlay-title");
+  const m = $("overlay-msg");
+  const o = $("overlay");
+  if (t) t.textContent = title || "処理中…";
+  if (m) m.textContent = msg || "";
+  if (o) {
+    o.classList.remove("hidden");
+    o.classList.add("flex");
+  }
 }
 function hideOverlay() {
-  $("overlay").classList.add("hidden");
-  $("overlay").classList.remove("flex");
+  const o = $("overlay");
+  if (o) {
+    o.classList.add("hidden");
+    o.classList.remove("flex");
+  }
 }
 
 // 進捗（分数表示）
@@ -60,14 +69,15 @@ async function loadDb() {
   if (!res.ok) throw new Error(data.error || res.status);
 
   DB = data;
-
   setStatus("読み込み完了");
   hideOverlay();
   return data;
 }
 
+/** ✅ ラベル表示（行間を詰める） */
 function renderLabels(labelMaster) {
   const root = $("labels");
+  if (!root) return;
   root.innerHTML = "";
 
   const visible = (labelMaster || []).filter((x) => !x.uiHidden);
@@ -75,10 +85,11 @@ function renderLabels(labelMaster) {
 
   for (const [genre, items] of byGenre.entries()) {
     const card = document.createElement("div");
-    card.className = "border rounded-xl p-3 bg-white";
+    // パディングも少し縮める
+    card.className = "border rounded-xl p-2 bg-white";
 
     const head = document.createElement("div");
-    head.className = "flex items-center justify-between mb-2";
+    head.className = "flex items-center justify-between mb-1";
 
     const title = document.createElement("div");
     title.className = "font-semibold text-sm";
@@ -94,15 +105,16 @@ function renderLabels(labelMaster) {
     head.appendChild(title);
     head.appendChild(clear);
 
-    // ✅ ジャンル内：1列（各項目1行）＝見切れ防止（要望①）
+    // ✅ 行間を詰める：space-y-0.5
     const list = document.createElement("div");
-    list.className = "space-y-1";
+    list.className = "space-y-0.5";
 
     for (const it of items) {
       const row = document.createElement("label");
-      // ✅ 折返しOK（省略…なし）
+
+      // ✅ 余白を詰める：px-2 py-1
       row.className =
-        "flex items-start gap-2 text-sm cursor-pointer rounded-md px-2 py-2 " +
+        "flex items-start gap-2 text-sm cursor-pointer rounded-md px-2 py-1 " +
         "border border-slate-200 hover:bg-slate-50 select-none";
 
       const cb = document.createElement("input");
@@ -130,63 +142,120 @@ function getSelectedLabels() {
   return cbs.filter((x) => x.checked).map((x) => x.dataset.label);
 }
 
-function readFilesAsDataURL(files) {
-  return Promise.all(
-    Array.from(files).map(
-      (f) =>
-        new Promise((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(String(r.result));
-          r.onerror = reject;
-          r.readAsDataURL(f);
-        })
-    )
-  );
+/** ===== 画像読み込み（安定版） ===== */
+function bytesToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error("FileReaderError"));
+    r.readAsDataURL(file);
+  });
+}
+
+async function addImages(files) {
+  if (!files || files.length === 0) return;
+
+  // 画像だけにフィルタ
+  const imgs = Array.from(files).filter((f) => f && typeof f.type === "string" && f.type.startsWith("image/"));
+  if (imgs.length === 0) {
+    setStatus("画像ファイルが見つかりませんでした");
+    return;
+  }
+
+  try {
+    const urls = [];
+    for (const f of imgs) {
+      const u = await bytesToDataUrl(f);
+      urls.push(u);
+    }
+    imagesDataUrl = imagesDataUrl.concat(urls);
+    renderThumbs();
+    setStatus(`画像を読み込みました（${imagesDataUrl.length}枚）`);
+  } catch (e) {
+    console.error(e);
+    setStatus("画像の読み込みに失敗しました");
+  }
+}
+
+function removeImageAt(idx) {
+  imagesDataUrl.splice(idx, 1);
+  renderThumbs();
+  setStatus(`画像を更新しました（${imagesDataUrl.length}枚）`);
+}
+
+function renderThumbs() {
+  const thumbs = $("thumbs");
+  if (!thumbs) return;
+
+  thumbs.innerHTML = "";
+
+  imagesDataUrl.forEach((u, idx) => {
+    const wrap = document.createElement("div");
+    wrap.className = "relative";
+
+    const img = document.createElement("img");
+    img.src = u;
+    img.className = "w-16 h-16 object-cover rounded-lg border border-slate-300";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = "×";
+    btn.className =
+      "absolute -top-2 -right-2 w-6 h-6 rounded-full bg-slate-800 text-white text-sm leading-6 " +
+      "shadow hover:bg-slate-700";
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      removeImageAt(idx);
+    });
+
+    wrap.appendChild(img);
+    wrap.appendChild(btn);
+    thumbs.appendChild(wrap);
+  });
 }
 
 function setupDrop() {
   const drop = $("drop");
-  const input = $("img");
+  const input = $("img"); // ✅ id="img"
+  if (!drop || !input) {
+    console.error("drop or img input not found");
+    setStatus("画像欄の初期化に失敗（drop/imgが見つかりません）");
+    return;
+  }
 
+  // クリックでファイル選択
   drop.addEventListener("click", () => input.click());
 
-  drop.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    drop.classList.add("bg-slate-50");
+  // D&Dでブラウザがファイルを開くのを防止
+  ["dragenter", "dragover"].forEach((ev) => {
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      drop.classList.add("bg-slate-50");
+    });
   });
 
-  drop.addEventListener("dragleave", () => {
-    drop.classList.remove("bg-slate-50");
+  ["dragleave", "drop"].forEach((ev) => {
+    drop.addEventListener(ev, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      drop.classList.remove("bg-slate-50");
+    });
   });
 
   drop.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    drop.classList.remove("bg-slate-50");
-    if (!e.dataTransfer?.files?.length) return;
-    await handleImages(e.dataTransfer.files);
+    const files = e.dataTransfer?.files;
+    await addImages(files);
   });
 
   input.addEventListener("change", async () => {
-    if (!input.files?.length) return;
-    await handleImages(input.files);
-    input.value = "";
+    await addImages(input.files);
+    input.value = ""; // 同じファイル再選択できるように
   });
 }
 
-async function handleImages(files) {
-  const urls = await readFilesAsDataURL(files);
-  imagesDataUrl = imagesDataUrl.concat(urls);
-
-  const thumbs = $("thumbs");
-  thumbs.innerHTML = "";
-  for (const u of imagesDataUrl) {
-    const img = document.createElement("img");
-    img.src = u;
-    img.className = "w-16 h-16 object-cover rounded-lg border";
-    thumbs.appendChild(img);
-  }
-}
-
+/** ===== 生成 ===== */
 async function onGenerate() {
   try {
     const selected = getSelectedLabels();
@@ -196,9 +265,9 @@ async function onGenerate() {
     }
 
     const productInfo = {
-      name: $("name").value.trim(),
-      feature: $("feature").value.trim(),
-      memo: $("memo").value.trim(),
+      name: $("name")?.value?.trim?.() || "",
+      feature: $("feature")?.value?.trim?.() || "",
+      memo: $("memo")?.value?.trim?.() || "",
     };
 
     setStep(1, "Excel生成中（書式維持）");
@@ -269,8 +338,11 @@ async function onDownloadMassTemplate() {
 
 (async function init() {
   setupDrop();
-  $("btn-generate").addEventListener("click", onGenerate);
-  $("btn-mass").addEventListener("click", onDownloadMassTemplate);
+
+  const btnGen = $("btn-generate");
+  const btnMass = $("btn-mass");
+  if (btnGen) btnGen.addEventListener("click", onGenerate);
+  if (btnMass) btnMass.addEventListener("click", onDownloadMassTemplate);
 
   try {
     const data = await loadDb();
