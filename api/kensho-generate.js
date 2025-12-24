@@ -92,11 +92,16 @@ async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }
     "2) 文末に「〜を検証する」「〜であることを検証する」「確認する」等を付けない（冗長禁止）\n" +
     "3) 提案文は短く、チェック観点そのものを名詞句または簡潔な文で書く\n" +
     "4) 出力は必ずJSONオブジェクトのみ\n\n" +
-    "【出力形式】\n" +
-    "{\n" +
-    '  "items":[{"text":"...","note":"..."}],\n' +
-    '  "comment":"（検証のプロとしての所感・注意点を1段落）"\n' +
-    "}\n";
+ "【出力形式】\n" +
+"{\n" +
+'  "items":[{"text":"...","note":"..."}],\n' +
+'  "commentLines":[\n' +
+'    "（1行目：この商品の検証ポイントの要点）",\n' +
+'    "（2行目：具体例：〜の場合は〜を確認）",\n' +
+'    "（3行目：具体例：〜は〜の条件で実施）"\n' +
+"  ]\n" +
+"}\n";
+
 
   const payload = {
     productInfo,
@@ -130,10 +135,11 @@ async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }
   const jsonText = m ? m[0] : text;
 
   const obj = JSON.parse(jsonText);
-  const items = Array.isArray(obj.items) ? obj.items : [];
-  const comment = (obj.comment || "").toString();
+const items = Array.isArray(obj.items) ? obj.items : [];
+const commentLines = Array.isArray(obj.commentLines) ? obj.commentLines : [];
 
-  return { items, comment };
+return { items, commentLines };
+
 }
 
 export default async function handler(req, res) {
@@ -244,8 +250,9 @@ export default async function handler(req, res) {
       images,
     });
 
-    const aiItems = aiResult.items || [];
-    const aiComment = (aiResult.comment || "").toString().trim();
+ const aiItems = aiResult.items || [];
+const aiCommentLines = Array.isArray(aiResult.commentLines) ? aiResult.commentLines : [];
+
 
     for (const it of aiItems) {
       let text = (it?.text || "").toString().trim();
@@ -279,28 +286,65 @@ export default async function handler(req, res) {
       writeRowNo++;
     }
 
-    // 6) プロコメント（格子外・最下段にテキストボックス風）
-    if (aiComment) {
-      writeRowNo += 1;
+   // 6) AIコメント（要点＋具体例）を最下段に「1行＝1セル」で追記
+if (aiCommentLines.length > 0) {
+  // 空行を1行あける
+  writeRowNo += 1;
 
-      const r = writeRowNo;
-      wsTpl.mergeCells(r, 2, r, 8); // B:H 結合
+  // 見出し行
+  {
+    const r = writeRowNo;
+    wsTpl.mergeCells(r, 2, r, 8); // B:H
+    const cell = wsTpl.getCell(r, 2);
+    cell.value = "【AIコメント（検証のプロ視点：要点＋具体例）】";
+    cell.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
 
-      const cell = wsTpl.getCell(r, 2);
-      cell.value = `【AIコメント（検証のプロ視点）】\n${aiComment}`;
-      cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
+    cell.border = {
+      top: { style: "medium" },
+      left: { style: "medium" },
+      bottom: { style: "thin" },
+      right: { style: "medium" },
+    };
+    wsTpl.getRow(r).height = 18;
+    writeRowNo++;
+  }
 
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
-      cell.border = {
-        top: { style: "medium" },
-        left: { style: "medium" },
-        bottom: { style: "medium" },
-        right: { style: "medium" },
-      };
+  // 本文：1行ずつ、1行＝1セル
+  for (const raw of aiCommentLines) {
+    const line = String(raw || "").trim();
+    if (!line) continue;
 
-      wsTpl.getRow(r).height = 80;
-      writeRowNo++;
-    }
+    const r = writeRowNo;
+    wsTpl.mergeCells(r, 2, r, 8); // B:H
+    const cell = wsTpl.getCell(r, 2);
+    cell.value = line;
+    cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
+    cell.border = {
+      top: { style: "thin" },
+      left: { style: "medium" },
+      bottom: { style: "thin" },
+      right: { style: "medium" },
+    };
+
+    // 行高さ：長い時だけ少し増える（固定でもOK）
+    wsTpl.getRow(r).height = 22;
+    writeRowNo++;
+  }
+
+  // 最終行の下だけ太枠にして締める
+  const lastR = writeRowNo - 1;
+  const lastCell = wsTpl.getCell(lastR, 2);
+  lastCell.border = {
+    top: { style: "thin" },
+    left: { style: "medium" },
+    bottom: { style: "medium" },
+    right: { style: "medium" },
+  };
+}
+
 
     // 7) 出力は「初回検証」シートのみ、名称変更
     wsTpl.name = "初回検証";
