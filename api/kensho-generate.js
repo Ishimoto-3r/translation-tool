@@ -84,23 +84,24 @@ function copyCellStyle(src, dst) {
 }
 
 async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }) {
-  const sys =
-    "あなたは品質検証（検品・評価）のプロです。\n" +
-    "次の制約を厳守して、追加すべき検証項目だけを提案してください。\n\n" +
-    "【制約】\n" +
-    "1) 既存の確認内容（existingChecks）と同義・重複する提案は出さない\n" +
-    "2) 文末に「〜を検証する」「〜であることを検証する」「確認する」等を付けない（冗長禁止）\n" +
-    "3) 提案文は短く、チェック観点そのものを名詞句または簡潔な文で書く\n" +
-    "4) 出力は必ずJSONオブジェクトのみ\n\n" +
- "【出力形式】\n" +
-"{\n" +
-'  "items":[{"text":"...","note":"..."}],\n' +
-'  "commentLines":[\n' +
-'    "（1行目：この商品の検証ポイントの要点）",\n' +
-'    "（2行目：具体例：〜の場合は〜を確認）",\n' +
-'    "（3行目：具体例：〜は〜の条件で実施）"\n' +
-"  ]\n" +
-"}\n";
+ const sys =
+  "あなたは品質検証（検品・評価）のプロです。\n" +
+  "入力（選択ラベル・ユーザー入力・画像）から、この製品に必要な検証ポイントを要点だけでまとめてください。\n" +
+  "汎用テンプレの丸写しは禁止。入力に根拠がない観点（例：車輪、走行など）は出さないでください。\n\n" +
+  "【コメント作成ルール】\n" +
+  "1) 章タイトルは製品に合わせて自由に作る（例：安全性、操作性、耐久、表示/法規、付属品、使用環境など）\n" +
+  "2) 各章の箇条書きは最大5行。各行は短く、可能なら具体例（例：〜のときは〜）を含める\n" +
+  "3) 文末に「〜を検証する」「〜であることを検証する」「確認する」を付けない（冗長禁止）\n" +
+  "4) 既に検証項目として書かれている内容と同義でも“コメントとして重要なら”書いてよい（あとでこちらで(提案済)を付ける）\n" +
+  "5) 出力は必ずJSONのみ\n\n" +
+  "【出力形式】\n" +
+  "{\n" +
+  '  "items":[{"text":"...","note":"..."}],\n' +
+  '  "commentTitle":"検証ポイント（簡潔版）",\n' +
+  '  "commentSections":[{"title":"1. ...","bullets":["...","..."]}],\n' +
+  '  "commentNotes":["注意点（重要）","..."]\n' +
+  "}\n";
+
 
 
   const payload = {
@@ -286,64 +287,99 @@ const aiCommentLines = Array.isArray(aiResult.commentLines) ? aiResult.commentLi
       writeRowNo++;
     }
 
-   // 6) AIコメント（要点＋具体例）を最下段に「1行＝1セル」で追記
-if (aiCommentLines.length > 0) {
-  // 空行を1行あける
+   // 6) AIコメント（結合なし・枠なし・1行=1セル）
+// 既存の確認内容（C列）＋AI提案（C列）を既出判定に使う
+function normalizeLite(s) {
+  return String(s || "")
+    .replace(/\s+/g, "")
+    .replace(/[、。．，\.\-ー—_]/g, "")
+    .replace(/(を)?(検証|確認|チェック)(する|します|した|してください)?$/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function buildExistingSet(ws) {
+  const set = new Set();
+  ws.eachRow((row) => {
+    const v = row.getCell(3).value; // C列：確認内容
+    if (v !== null && v !== undefined && String(v).trim() !== "") {
+      set.add(normalizeLite(v));
+    }
+  });
+  return set;
+}
+
+function isSameMeaning(line, existingSet) {
+  const p = normalizeLite(line);
+  if (!p) return false;
+  if (existingSet.has(p)) return true;
+
+  // 部分一致（誤爆抑制：4文字以上）
+  for (const k of existingSet) {
+    if (k.length < 4) continue;
+    if (p.includes(k) || k.includes(p)) return true;
+  }
+  return false;
+}
+
+function writeLine(ws, r, c, text, styleRefCell) {
+  const cell = ws.getCell(r, c);
+  cell.value = text;
+  cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+  // 書体などはテンプレを踏襲（枠は触らない）
+  if (styleRefCell) cell.style = { ...styleRefCell.style };
+  return cell;
+}
+
+const existingSetForComment = buildExistingSet(wsTpl);
+const styleRefCell = styleRow.getCell(2); // B列の既存書式を流用
+
+const hasComment =
+  (aiCommentSections && aiCommentSections.length > 0) ||
+  (aiCommentNotes && aiCommentNotes.length > 0);
+
+if (hasComment) {
+  // 空行を1行
   writeRowNo += 1;
 
-  // 見出し行
-  {
-    const r = writeRowNo;
-    wsTpl.mergeCells(r, 2, r, 8); // B:H
-    const cell = wsTpl.getCell(r, 2);
-    cell.value = "【AIコメント（検証のプロ視点：要点＋具体例）】";
-    cell.alignment = { vertical: "middle", horizontal: "left", wrapText: false };
+  // タイトル
+  writeLine(wsTpl, writeRowNo, 2, aiCommentTitle || "検証ポイント（簡潔版）", styleRefCell);
+  writeRowNo++;
 
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
-    cell.border = {
-      top: { style: "medium" },
-      left: { style: "medium" },
-      bottom: { style: "thin" },
-      right: { style: "medium" },
-    };
-    wsTpl.getRow(r).height = 18;
+  // セクション
+  for (const sec of aiCommentSections) {
+    const title = String(sec?.title || "").trim();
+    const bullets = Array.isArray(sec?.bullets) ? sec.bullets : [];
+
+    if (title) {
+      writeLine(wsTpl, writeRowNo, 2, title, styleRefCell);
+      writeRowNo++;
+    }
+
+    for (const b of bullets) {
+      const raw = String(b || "").trim();
+      if (!raw) continue;
+
+      const suffix = isSameMeaning(raw, existingSetForComment) ? " (提案済)" : "";
+      writeLine(wsTpl, writeRowNo, 2, `・${raw}${suffix}`, styleRefCell);
+      writeRowNo++;
+    }
+
+    // セクション区切り（不要ならこの1行を削除）
     writeRowNo++;
   }
 
-  // 本文：1行ずつ、1行＝1セル
-  for (const raw of aiCommentLines) {
-    const line = String(raw || "").trim();
-    if (!line) continue;
+  // 注意点（重要）など
+  for (const n of aiCommentNotes) {
+    const raw = String(n || "").trim();
+    if (!raw) continue;
 
-    const r = writeRowNo;
-    wsTpl.mergeCells(r, 2, r, 8); // B:H
-    const cell = wsTpl.getCell(r, 2);
-    cell.value = line;
-    cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
-
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF8FAFC" } };
-    cell.border = {
-      top: { style: "thin" },
-      left: { style: "medium" },
-      bottom: { style: "thin" },
-      right: { style: "medium" },
-    };
-
-    // 行高さ：長い時だけ少し増える（固定でもOK）
-    wsTpl.getRow(r).height = 22;
+    const suffix = isSameMeaning(raw, existingSetForComment) ? " (提案済)" : "";
+    writeLine(wsTpl, writeRowNo, 2, `${raw}${suffix}`, styleRefCell);
     writeRowNo++;
   }
-
-  // 最終行の下だけ太枠にして締める
-  const lastR = writeRowNo - 1;
-  const lastCell = wsTpl.getCell(lastR, 2);
-  lastCell.border = {
-    top: { style: "thin" },
-    left: { style: "medium" },
-    bottom: { style: "medium" },
-    right: { style: "medium" },
-  };
 }
+
 
 
     // 7) 出力は「初回検証」シートのみ、名称変更
