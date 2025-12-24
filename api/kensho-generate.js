@@ -8,6 +8,7 @@ const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// ===== SharePoint download =====
 async function getAccessToken() {
   const tenantId = process.env.MANUAL_TENANT_ID;
   const clientId = process.env.MANUAL_CLIENT_ID;
@@ -57,6 +58,7 @@ async function downloadExcelBuffer() {
   return Buffer.from(ab);
 }
 
+// ===== Excel helpers =====
 function thinBorder() {
   return {
     top: { style: "thin" },
@@ -83,198 +85,6 @@ function copyCellStyle(src, dst) {
   dst.style = { ...src.style };
 }
 
-async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }) {
- const sys =
-  "あなたは品質検証（検品・評価）のプロです。\n" +
-  "入力（選択ラベル・ユーザー入力・画像）から、この製品に必要な検証ポイントを要点だけでまとめてください。\n" +
-  "汎用テンプレの丸写しは禁止。入力に根拠がない観点（例：車輪、走行など）は出さないでください。\n\n" +
-  "【コメント作成ルール】\n" +
-  "1) 章タイトルは製品に合わせて自由に作る（例：安全性、操作性、耐久、表示/法規、付属品、使用環境など）\n" +
-  "2) 各章の箇条書きは最大5行。各行は短く、可能なら具体例（例：〜のときは〜）を含める\n" +
-  "3) 文末に「〜を検証する」「〜であることを検証する」「確認する」を付けない（冗長禁止）\n" +
-  "4) 既に検証項目として書かれている内容と同義でも“コメントとして重要なら”書いてよい（あとでこちらで(提案済)を付ける）\n" +
-  "5) 出力は必ずJSONのみ\n\n" +
-"【出力形式】\n" +
-"{\n" +
-'  "items":[{"text":"...","note":"..."}],\n' +
-'  "commentLines":[\n' +
-'    "重要な検証ポイントを簡潔に記載",\n' +
-'    "必要に応じて具体例を1つ含める",\n' +
-'    "製品特性に依存しない汎用文は書かない"\n' +
-"  ]\n" +
-"}\n";
-
-
-
-
-  const payload = {
-    productInfo,
-    selectedLabels,
-    existingChecks: (existingChecks || []).slice(0, 300),
-  };
-
-  const content = [{ type: "text", text: JSON.stringify(payload, null, 2) }];
-
-  if (Array.isArray(images)) {
-    for (const img of images) {
-      if (typeof img === "string" && (img.startsWith("data:image/") || img.startsWith("http"))) {
-        content.push({ type: "image_url", image_url: { url: img } });
-      }
-    }
-  }
-
-  const completion = await client.chat.completions.create({
-    model: MODEL,
-    messages: [
-      { role: "system", content: sys },
-      { role: "user", content },
-    ],
-    reasoning_effort: REASONING,
-    verbosity: VERBOSITY,
-  });
-
-  const text = completion.choices[0]?.message?.content ?? "{}";
-
-  const m = text.match(/\{[\s\S]*\}$/);
-  const jsonText = m ? m[0] : text;
-
-  const obj = JSON.parse(jsonText);
-const items = Array.isArray(obj.items) ? obj.items : [];
-const commentLines = Array.isArray(obj.commentLines) ? obj.commentLines : [];
-
-return { items, commentLines };
-
-}
-
-export default async function handler(req, res) {
-  if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
-
-  try {
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-    const { selectedLabels, productInfo, images } = body;
-
-    if (!Array.isArray(selectedLabels) || selectedLabels.length === 0) {
-      return res.status(400).json({ error: "SelectedLabelsRequired" });
-    }
-
-    // 1) SharePointのdatabase.xlsxを取得
-    const buf = await downloadExcelBuffer();
-
-    // 2) ExcelJSで読み込み（書式保持）
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(buf);
-
-    const wsList = wb.getWorksheet("検証項目リスト");
-    const wsTpl  = wb.getWorksheet("初回検証フォーマット");
-    if (!wsList) throw new Error("SheetError: 検証項目リスト が見つかりません");
-    if (!wsTpl)  throw new Error("SheetError: 初回検証フォーマット が見つかりません");
-
-    // C1 に選択語句（カンマ区切り）
-    wsTpl.getCell("C1").value = `選択語句：${selectedLabels.join(",")}`;
-
-    // 3) 検証項目リストから抽出（A=大分類、B〜Hを機械コピー）
-    const chosen = new Set(selectedLabels);
-    const extracted = [];
-
-    // 1行目空、2行目ヘッダ想定 → 3行目以降データ
-    for (let r = 3; r <= wsList.rowCount; r++) {
-      const row = wsList.getRow(r);
-      const major = (row.getCell(1).value ?? "").toString().trim(); // A
-      if (!major) continue;
-
-      if (chosen.has(major)) {
-        extracted.push({
-          B: row.getCell(2).value ?? "",
-          C: row.getCell(3).value ?? "",
-          D: row.getCell(4).value ?? "",
-          E: row.getCell(5).value ?? "",
-          F: row.getCell(6).value ?? "",
-          G: row.getCell(7).value ?? "",
-          H: row.getCell(8).value ?? "",
-        });
-      }
-    }
-
-    // 4) テンプレ末尾を探して追記
-    const last = findLastUsedRowBH(wsTpl);
-    const styleRowNo = last; // 既存最終行の書式をコピー元にする
-    const styleRow = wsTpl.getRow(styleRowNo);
-
-    let writeRowNo = last + 1;
-
-    for (const r of extracted) {
-      const newRow = wsTpl.getRow(writeRowNo);
-
-      // 値：A空、B〜H機械コピー
-      newRow.getCell(1).value = "";
-      newRow.getCell(2).value = r.B;
-      newRow.getCell(3).value = r.C;
-      newRow.getCell(4).value = r.D;
-      newRow.getCell(5).value = r.E;
-      newRow.getCell(6).value = r.F;
-      newRow.getCell(7).value = r.G;
-      newRow.getCell(8).value = r.H;
-
-      // 書式コピー＋追記分は格子（罫線）を付与（B〜H）
-      for (let c = 1; c <= 8; c++) {
-        copyCellStyle(styleRow.getCell(c), newRow.getCell(c));
-      }
-      for (let c = 2; c <= 8; c++) {
-        newRow.getCell(c).border = thinBorder();
-      }
-
-      newRow.commit?.();
-      writeRowNo++;
-    }
-
-   // ===== AIコメント（最下段・1行1セル・枠なし） =====
-
-// 既存の確認内容（C列）を正規化して収集
-const existingSet = new Set();
-wsTpl.eachRow((row) => {
-  const v = row.getCell(3).value;
-  if (v) {
-    existingSet.add(
-      String(v)
-        .replace(/\s+/g, "")
-        .replace(/[、。．，\.\-ー—_]/g, "")
-        .replace(/(を)?(検証|確認|チェック)(する|します)?$/g, "")
-        .toLowerCase()
-    );
-  }
-});
-
-function isDuplicate(line) {
-  const norm = String(line)
-    .replace(/\s+/g, "")
-    .replace(/[、。．，\.\-ー—_]/g, "")
-    .replace(/(を)?(検証|確認|チェック)(する|します)?$/g, "")
-    .toLowerCase();
-
-  for (const e of existingSet) {
-    if (norm.includes(e) || e.includes(norm)) return true;
-  }
-  return false;
-}
-
-// 空行
-writeRowNo += 1;
-
-// 見出し
-wsTpl.getRow(writeRowNo).getCell(2).value = "検証ポイント（簡潔版）";
-writeRowNo++;
-
-// 本文
-for (const line of aiCommentLines) {
-  if (!line) continue;
-  const suffix = isDuplicate(line) ? " (提案済)" : "";
-  wsTpl.getRow(writeRowNo).getCell(2).value = `・${line}${suffix}`;
-  writeRowNo++;
-}
-
-
-   // 6) AIコメント（結合なし・枠なし・1行=1セル）
-// 既存の確認内容（C列）＋AI提案（C列）を既出判定に使う
 function normalizeLite(s) {
   return String(s || "")
     .replace(/\s+/g, "")
@@ -282,6 +92,13 @@ function normalizeLite(s) {
     .replace(/(を)?(検証|確認|チェック)(する|します|した|してください)?$/g, "")
     .trim()
     .toLowerCase();
+}
+
+function stripVerifyEnding(s) {
+  // 「〜を検証する」「〜であることを検証する」等を除去（冗長禁止）
+  return String(s || "")
+    .replace(/(であること)?(を)?(検証|確認|チェック)(する|します|した|してください)?$/g, "")
+    .trim();
 }
 
 function buildExistingSet(ws) {
@@ -308,65 +125,204 @@ function isSameMeaning(line, existingSet) {
   return false;
 }
 
-function writeLine(ws, r, c, text, styleRefCell) {
-  const cell = ws.getCell(r, c);
-  cell.value = text;
-  cell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
-  // 書体などはテンプレを踏襲（枠は触らない）
-  if (styleRefCell) cell.style = { ...styleRefCell.style };
-  return cell;
+// ===== AI suggest =====
+async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }) {
+  const sys =
+    "あなたは品質検証（検品・評価）のプロです。\n" +
+    "入力（選択ラベル・ユーザー入力・画像）と既存の検証項目を踏まえ、追加すべき内容だけを提案してください。\n" +
+    "入力に根拠がない観点は出さないでください（例：車輪/走行などは必要な場合のみ）。\n" +
+    "文末に「〜を検証する」「〜であることを検証する」「確認する」を付けない。\n" +
+    "出力は必ずJSONのみ。\n\n" +
+    "【出力形式】\n" +
+    "{\n" +
+    '  "items":[{"text":"...","note":"..."}],\n' +
+    '  "commentLines":[\n' +
+    '    "重要な検証ポイントを簡潔に1行で",\n' +
+    '    "必要なら具体例（例：〜のときは〜）を含める"\n' +
+    "  ]\n" +
+    "}\n";
+
+  const payload = {
+    productInfo,
+    selectedLabels,
+    existingChecks: (existingChecks || []).slice(0, 400),
+  };
+
+  const content = [{ type: "text", text: JSON.stringify(payload, null, 2) }];
+
+  if (Array.isArray(images)) {
+    for (const img of images) {
+      if (typeof img === "string" && (img.startsWith("data:image/") || img.startsWith("http"))) {
+        content.push({ type: "image_url", image_url: { url: img } });
+      }
+    }
+  }
+
+  const completion = await client.chat.completions.create({
+    model: MODEL,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content },
+    ],
+    reasoning_effort: REASONING,
+    verbosity: VERBOSITY,
+  });
+
+  const raw = completion.choices[0]?.message?.content ?? "{}";
+  const m = raw.match(/\{[\s\S]*\}$/);
+  const jsonText = m ? m[0] : raw;
+
+  const obj = JSON.parse(jsonText);
+  const items = Array.isArray(obj.items) ? obj.items : [];
+  const commentLines = Array.isArray(obj.commentLines) ? obj.commentLines : [];
+  return { items, commentLines };
 }
 
-const existingSetForComment = buildExistingSet(wsTpl);
-const styleRefCell = styleRow.getCell(2); // B列の既存書式を流用
+// ===== handler =====
+export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
 
-const hasComment =
-  (aiCommentSections && aiCommentSections.length > 0) ||
-  (aiCommentNotes && aiCommentNotes.length > 0);
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const { selectedLabels, productInfo, images } = body;
 
-if (hasComment) {
-  // 空行を1行
-  writeRowNo += 1;
+    if (!Array.isArray(selectedLabels) || selectedLabels.length === 0) {
+      return res.status(400).json({ error: "SelectedLabelsRequired" });
+    }
 
-  // タイトル
-  writeLine(wsTpl, writeRowNo, 2, aiCommentTitle || "検証ポイント（簡潔版）", styleRefCell);
-  writeRowNo++;
+    // 1) SharePointのdatabase.xlsxを取得
+    const buf = await downloadExcelBuffer();
 
-  // セクション
-  for (const sec of aiCommentSections) {
-    const title = String(sec?.title || "").trim();
-    const bullets = Array.isArray(sec?.bullets) ? sec.bullets : [];
+    // 2) ExcelJSで読み込み（書式保持）
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf);
 
-    if (title) {
-      writeLine(wsTpl, writeRowNo, 2, title, styleRefCell);
+    const wsList = wb.getWorksheet("検証項目リスト");
+    const wsTpl = wb.getWorksheet("初回検証フォーマット");
+    if (!wsList) throw new Error("SheetError: 検証項目リスト が見つかりません");
+    if (!wsTpl) throw new Error("SheetError: 初回検証フォーマット が見つかりません");
+
+    // C1 に選択語句（カンマ区切り）
+    wsTpl.getCell("C1").value = `選択語句：${selectedLabels.join(",")}`;
+
+    // 3) 検証項目リストから抽出（A=大分類、B〜Hを機械コピー）
+    const chosen = new Set(selectedLabels);
+    const extracted = [];
+    for (let r = 3; r <= wsList.rowCount; r++) {
+      const row = wsList.getRow(r);
+      const major = (row.getCell(1).value ?? "").toString().trim(); // A
+      if (!major) continue;
+      if (!chosen.has(major)) continue;
+
+      extracted.push({
+        B: row.getCell(2).value ?? "",
+        C: row.getCell(3).value ?? "",
+        D: row.getCell(4).value ?? "",
+        E: row.getCell(5).value ?? "",
+        F: row.getCell(6).value ?? "",
+        G: row.getCell(7).value ?? "",
+        H: row.getCell(8).value ?? "",
+      });
+    }
+
+    // 4) テンプレ末尾を探して追記（書式保持 + 追記分だけ罫線）
+    const last = findLastUsedRowBH(wsTpl);
+    const styleRow = wsTpl.getRow(last);
+
+    let writeRowNo = last + 1;
+
+    for (const r of extracted) {
+      const newRow = wsTpl.getRow(writeRowNo);
+
+      newRow.getCell(1).value = "";
+      newRow.getCell(2).value = r.B;
+      newRow.getCell(3).value = r.C;
+      newRow.getCell(4).value = r.D;
+      newRow.getCell(5).value = r.E;
+      newRow.getCell(6).value = r.F;
+      newRow.getCell(7).value = r.G;
+      newRow.getCell(8).value = r.H;
+
+      for (let c = 1; c <= 8; c++) {
+        copyCellStyle(styleRow.getCell(c), newRow.getCell(c));
+      }
+      for (let c = 2; c <= 8; c++) {
+        newRow.getCell(c).border = thinBorder();
+      }
+
       writeRowNo++;
     }
 
-    for (const b of bullets) {
-      const raw = String(b || "").trim();
-      if (!raw) continue;
+    // 5) AI提案（重複排除 + 文末「検証する」禁止）
+    const existingSet = buildExistingSet(wsTpl);
 
-      const suffix = isSameMeaning(raw, existingSetForComment) ? " (提案済)" : "";
-      writeLine(wsTpl, writeRowNo, 2, `・${raw}${suffix}`, styleRefCell);
+    // 既存検証項目（AIに渡す）
+    const existingChecks = [];
+    wsTpl.eachRow((row) => {
+      const b = row.getCell(2).value;
+      const c = row.getCell(3).value;
+      if (b || c) existingChecks.push({ B: String(b || ""), C: String(c || "") });
+    });
+
+    const { items: aiItemsRaw, commentLines: aiCommentLinesRaw } = await aiSuggest({
+      productInfo,
+      selectedLabels,
+      existingChecks,
+      images,
+    });
+
+    // 追加行（AI提案）
+    for (const it of aiItemsRaw) {
+      const text = stripVerifyEnding(it?.text || "");
+      if (!text) continue;
+
+      // 同義なら追加しない
+      if (isSameMeaning(text, existingSet)) continue;
+
+      const note = stripVerifyEnding(it?.note || "");
+
+      const newRow = wsTpl.getRow(writeRowNo);
+      for (let c = 1; c <= 8; c++) copyCellStyle(styleRow.getCell(c), newRow.getCell(c));
+
+      newRow.getCell(1).value = "";
+      newRow.getCell(2).value = "AI提案";
+      newRow.getCell(3).value = text;
+      newRow.getCell(7).value = note;
+
+      // 追記分だけ罫線（B〜H）
+      for (let c = 2; c <= 8; c++) newRow.getCell(c).border = thinBorder();
+
+      // 既出セット更新（次の重複排除に効かせる）
+      existingSet.add(normalizeLite(text));
+
       writeRowNo++;
     }
 
-    // セクション区切り（不要ならこの1行を削除）
-    writeRowNo++;
-  }
+    // 6) 最下段コメント（枠なし・結合なし・1行=1セル、提案済なら(提案済)）
+    const aiCommentLines = (aiCommentLinesRaw || [])
+      .map((x) => stripVerifyEnding(x))
+      .filter((x) => x);
 
-  // 注意点（重要）など
-  for (const n of aiCommentNotes) {
-    const raw = String(n || "").trim();
-    if (!raw) continue;
+    if (aiCommentLines.length > 0) {
+      writeRowNo += 1; // 空行
 
-    const suffix = isSameMeaning(raw, existingSetForComment) ? " (提案済)" : "";
-    writeLine(wsTpl, writeRowNo, 2, `${raw}${suffix}`, styleRefCell);
-    writeRowNo++;
-  }
-}
+      // タイトル（B列）
+      const titleRow = wsTpl.getRow(writeRowNo);
+      titleRow.getCell(2).value = "検証ポイント（簡潔版）";
+      copyCellStyle(styleRow.getCell(2), titleRow.getCell(2));
+      titleRow.getCell(2).border = {}; // 枠なし
+      writeRowNo++;
 
-
+      for (const line of aiCommentLines) {
+        const suffix = isSameMeaning(line, existingSet) ? " (提案済)" : "";
+        const row = wsTpl.getRow(writeRowNo);
+        row.getCell(2).value = `・${line}${suffix}`;
+        copyCellStyle(styleRow.getCell(2), row.getCell(2));
+        row.getCell(2).alignment = { vertical: "top", horizontal: "left", wrapText: true };
+        row.getCell(2).border = {}; // 枠なし
+        writeRowNo++;
+      }
+    }
 
     // 7) 出力は「初回検証」シートのみ、名称変更
     wsTpl.name = "初回検証";
@@ -374,8 +330,8 @@ if (hasComment) {
       .filter((ws) => ws.name !== "初回検証")
       .forEach((ws) => wb.removeWorksheet(ws.id));
 
-    // 8) 出力ファイル名
-    const name = (productInfo?.name || "無題").toString();
+    // 8) ファイル名
+    const name = (productInfo?.name || "無題").toString().trim() || "無題";
     const filename = `検証_${name}.xlsx`;
 
     const out = await wb.xlsx.writeBuffer();
