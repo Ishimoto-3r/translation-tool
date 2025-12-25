@@ -307,41 +307,68 @@ export default async function handler(req, res) {
     }
 
 // 6) 最下段コメント（枠なし・結合なし・1行=1セル）
-//  - 見出し/セクション/本文で文字サイズを変える
-//  - コメント部分のみ折り返しON（wrapText:true）で視認性UP
-//  - 長文は句読点などでセル内改行を入れる（1行=1セルは維持）
-
-function wrapForCell(text, max = 70) {
-  const s = String(text || "").trim();
-  if (!s) return "";
-  // 既に改行があるなら尊重
-  if (s.includes("\n")) return s;
-
-  // 句読点/区切りで改行を挿入して、1セル内で読みやすく
-  const breakChars = ["。", "、", "：", ":", "／", "/", "・", "）", ")"];
-  let out = "";
-  let count = 0;
-
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    out += ch;
-    count++;
-
-    if (count >= max && breakChars.includes(ch)) {
-      out += "\n";
-      count = 0;
-    }
-  }
-  return out;
-}
+// 要望反映：
+// ① 折り返しOFF（wrapText:false）
+// ② B列固定
+// ③ 途中挿入なし（末尾に追記のみ）
+// ④ 最大行数制限なし
+// ⑤ 文字サイズ 16
+// 追加：B列の幅は変更しない。見切れる長文は「下のセルに分割」して出力する。
 
 function isSectionHeader(line) {
   const t = String(line || "").trim();
   // 例： "1. 構造・安全性" / "重要スペック候補（…）" / "案件可否に影響する確認事項（…）"
   if (/^\d+\.\s*/.test(t)) return true;
-  if (t.length <= 18 && /：|:/.test(t)) return true;
   if (/^(製品の特徴|検証ポイント|具体例|重要スペック候補|案件可否)/.test(t)) return true;
+  // 短めで区切りっぽいものを見出し扱い
+  if (t.length <= 22 && /（.*）/.test(t)) return true;
   return false;
+}
+
+// 折り返しOFF前提なので、1セルに収めず「複数行（複数セル）」へ分割する。
+// なるべく区切り文字で切る。ダメなら文字数で切る。
+function splitIntoCells(text, maxChars = 42) {
+  const s = String(text || "").trim();
+  if (!s) return [];
+
+  // まずは「。」「;」「／」等で粗く分割
+  const parts = s
+    .replace(/[\r\n]+/g, " ")
+    .split(/(?<=[。．\.！!？\?；;])\s*/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const out = [];
+  for (const p of parts.length ? parts : [s]) {
+    if (p.length <= maxChars) {
+      out.push(p);
+      continue;
+    }
+    // 長すぎる場合：maxCharsで分割（できるだけ「、」「・」「：」付近で切る）
+    let buf = p;
+    while (buf.length > maxChars) {
+      let cut = maxChars;
+      // 直前付近に区切りがあればそこまで戻す
+      const window = buf.slice(0, maxChars + 1);
+      const idx = Math.max(
+        window.lastIndexOf("、"),
+        window.lastIndexOf("・"),
+        window.lastIndexOf("："),
+        window.lastIndexOf(":"),
+        window.lastIndexOf("／"),
+        window.lastIndexOf("/"),
+        window.lastIndexOf("）"),
+        window.lastIndexOf(")")
+      );
+      if (idx >= Math.floor(maxChars * 0.6)) cut = idx + 1;
+
+      out.push(buf.slice(0, cut).trim());
+      buf = buf.slice(cut).trim();
+    }
+    if (buf) out.push(buf);
+  }
+
+  return out.filter(Boolean);
 }
 
 const aiCommentLines = (aiCommentLinesRaw || [])
@@ -352,52 +379,62 @@ const aiCommentLines = (aiCommentLinesRaw || [])
 if (aiCommentLines.length > 0) {
   writeRowNo += 1; // 空行（区切り）
 
-  // コメントはB列中心で見せるので、B列の幅を広げる（必要なら調整）
-  // ※列幅はテンプレ側で既に設定がある場合は上書きになります。問題あればコメントアウトOK。
-  wsTpl.getColumn(2).width = Math.max(wsTpl.getColumn(2).width || 0, 70);
+  // ★B列の幅は変更しない（要望）
+  // wsTpl.getColumn(2).width = ... ← ここは絶対に入れない
 
-  // タイトル行（太字＋サイズUP）
+  // タイトル行（サイズ16・太字）
   const titleRow = wsTpl.getRow(writeRowNo);
   const titleCell = titleRow.getCell(2);
   titleCell.value = "AIコメント（検証ポイント・仕様観点）";
   copyCellStyle(styleRow.getCell(2), titleCell);
-  titleCell.font = { ...(titleCell.font || {}), bold: true, size: 12 };
-  titleCell.alignment = { vertical: "top", horizontal: "left", wrapText: true };
+  titleCell.font = { ...(titleCell.font || {}), bold: true, size: 16 };
+  titleCell.alignment = { vertical: "top", horizontal: "left", wrapText: false };
   titleCell.border = {}; // 枠なし
   writeRowNo++;
 
-  // 1行ずつ：セクション見出しと本文で体裁を変える
+  // 本文：1行ずつ（見切れる可能性がある長文は splitIntoCells で「下のセルへ」分割
   for (const rawLine of aiCommentLines) {
-    const line = wrapForCell(rawLine, 70);
     const suffix = isSameMeaning(rawLine, existingSet) ? " (提案済)" : "";
 
-    // セクション見出し
+    // 見出し行：そのまま（分割は必要ならする）
     if (isSectionHeader(rawLine)) {
-      // 空行を1行入れて詰まり感を減らす（不要なら削除）
-      writeRowNo += 1;
-
-      const r = wsTpl.getRow(writeRowNo);
-      const c = r.getCell(2);
-      c.value = line; // 見出しは「・」を付けない
-      copyCellStyle(styleRow.getCell(2), c);
-      c.font = { ...(c.font || {}), bold: true, size: 11 };
-      c.alignment = { vertical: "top", horizontal: "left", wrapText: true };
-      c.border = {}; // 枠なし
-      writeRowNo++;
+      writeRowNo += 1; // セクション前に1行空ける（詰めたいなら 0 に）
+      const chunks = splitIntoCells(rawLine, 42);
+      for (const ch of chunks) {
+        const r = wsTpl.getRow(writeRowNo);
+        const c = r.getCell(2);
+        c.value = ch;
+        copyCellStyle(styleRow.getCell(2), c);
+        c.font = { ...(c.font || {}), bold: true, size: 16 };
+        c.alignment = { vertical: "top", horizontal: "left", wrapText: false };
+        c.border = {};
+        writeRowNo++;
+      }
       continue;
     }
 
-    // 本文（箇条書き）
-    const r = wsTpl.getRow(writeRowNo);
-    const c = r.getCell(2);
-    c.value = `・${line}${suffix}`;
-    copyCellStyle(styleRow.getCell(2), c);
-    c.font = { ...(c.font || {}), bold: false, size: 10 };
-    c.alignment = { vertical: "top", horizontal: "left", wrapText: true };
-    c.border = {}; // 枠なし
-    writeRowNo++;
+    // 本文（箇条書き）：分割しても「・」は先頭だけに付ける
+    const base = String(rawLine || "").trim();
+    const chunks = splitIntoCells(base, 42);
+    if (chunks.length === 0) continue;
+
+    chunks.forEach((ch, i) => {
+      const r = wsTpl.getRow(writeRowNo);
+      const c = r.getCell(2);
+
+      const head = i === 0 ? "・" : "  "; // 続き行はインデントだけ
+      const tail = i === chunks.length - 1 ? suffix : "";
+      c.value = `${head}${ch}${tail}`;
+
+      copyCellStyle(styleRow.getCell(2), c);
+      c.font = { ...(c.font || {}), bold: false, size: 16 };
+      c.alignment = { vertical: "top", horizontal: "left", wrapText: false };
+      c.border = {};
+      writeRowNo++;
+    });
   }
 }
+
 
 
     // 7) 出力は「初回検証」シートのみ、名称変更
