@@ -143,9 +143,13 @@ async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }
     "\n" +
     "【制約】\n" +
     "・各配列要素は1文（日本語）で、80文字以内。超える場合は自然な位置で分割して別要素にする。\n" +
-  "・commentPoints：その商品に固有の検証観点。特徴→リスク→見るべき箇所→具体例の順で。背景情報（なぜそれが重要か）も必ず含める。\n" +
-"・specCandidates：一般名称から、他社類似品で一般的に提示される重要スペック（候補）を列挙。背景説明は禁止。\n" +
-"・gatingQuestions：メーカー回答次第で案件可否に影響しうる確認事項（安全/法規/保証/交換部品/試験条件など）を列挙。背景説明は禁止。\n" +
+"・commentPoints：その製品の用途を一言で言い切り→品質のポイント→最大負荷/片荷重→具体例 の順。\n" +
+"  - 1行目：用途 + 品質の山場（例：走行安定性/破れ/発熱/誤動作など）を断定調で。\n" +
+"  - 2〜4行目：最大負荷/片荷重/長時間使用など、悪条件で起きやすい不具合と理由。\n" +
+"  - 5行目：例：◯◯を△△して使用→見るポイント（直進性/転倒/緩み/摩耗など）。\n" +
+"  ※commentPointsだけは背景（なぜそのスペック確認が必要か）も書く。\n" +
+"・specCandidates：一般名称から『他社類似品で一般的に並ぶスペック項目名』だけを列挙（背景禁止）。\n" +
+"・gatingQuestions：メーカー回答次第で案件可否が変わる確認事項だけを列挙（背景禁止）。\n" +
 
     "・既存の検証項目と重複してもOK。\n" +
     "・語尾に「検証する」「…であることを検証する」「確認する」は付けない（体言止め/観点の形）。\n";
@@ -310,117 +314,109 @@ export default async function handler(req, res) {
       writeRowNo++;
     }
 
-    // 6) 最下段コメント（枠なし・結合なし・B列固定・wrap OFF・size 16・「・」付与）
-    const MAX_SENTENCE_LEN = 80;
+// 6) 最下段コメント（枠なし・結合なし・B列固定・wrap OFF・size 16）
+// ルール：
+// - タイトルは「AIコメント（検証ポイント・仕様観点）」「重要スペック候補」「案件可否に影響」
+// - 各タイトルの「直前」に必ず空行を1行入れる（最初のAIコメントも含む）
+// - 本文は必ず「・」付き
+// - 1セル=1文、1文は80文字まで（超えたら自然に分割して別行）
 
-    function enforceMaxLen(sentence, maxLen = MAX_SENTENCE_LEN) {
-      const s = String(sentence || "").trim();
-      if (!s) return [];
-      if (s.length <= maxLen) return [s];
+const MAX_SENTENCE_LEN = 80;
 
-      const chunks = [];
-      let rest = s;
+function enforceMaxLen(sentence, maxLen = MAX_SENTENCE_LEN) {
+  const s = String(sentence || "").trim();
+  if (!s) return [];
+  if (s.length <= maxLen) return [s];
 
-      while (rest.length > maxLen) {
-        const window = rest.slice(0, maxLen + 1);
-        let cut = Math.max(
-          window.lastIndexOf("、"),
-          window.lastIndexOf("・"),
-          window.lastIndexOf("："),
-          window.lastIndexOf(":"),
-          window.lastIndexOf("／"),
-          window.lastIndexOf("/"),
-          window.lastIndexOf(" "),
-          window.lastIndexOf("）"),
-          window.lastIndexOf(")")
-        );
+  const chunks = [];
+  let rest = s;
 
-        if (cut < Math.floor(maxLen * 0.6)) cut = maxLen;
+  while (rest.length > maxLen) {
+    const window = rest.slice(0, maxLen + 1);
+    let cut = Math.max(
+      window.lastIndexOf("、"),
+      window.lastIndexOf("・"),
+      window.lastIndexOf("："),
+      window.lastIndexOf(":"),
+      window.lastIndexOf("／"),
+      window.lastIndexOf("/"),
+      window.lastIndexOf(" "),
+      window.lastIndexOf("）"),
+      window.lastIndexOf(")")
+    );
+    if (cut < Math.floor(maxLen * 0.6)) cut = maxLen;
 
-        chunks.push(rest.slice(0, cut).trim());
-        rest = rest.slice(cut).trim();
-      }
-      if (rest) chunks.push(rest);
-      return chunks.filter(Boolean);
+    chunks.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) chunks.push(rest);
+  return chunks.filter(Boolean);
+}
+
+function asBullet(s) {
+  const t = String(s || "").trim();
+  if (!t) return "";
+  return t.startsWith("・") ? t : `・${t}`;
+}
+
+function writeB(text) {
+  const r = wsTpl.getRow(writeRowNo);
+  const c = r.getCell(2);
+
+  c.value = text;
+
+  copyCellStyle(styleRow.getCell(2), c);
+  c.font = { ...(c.font || {}), size: 16 };
+  c.alignment = { vertical: "top", horizontal: "left", wrapText: false };
+  c.border = {}; // 枠なし
+  writeRowNo++;
+}
+
+function writeBlankLine() {
+  // 見た目の「空行」を確実に作る：値を空にして1行進める
+  writeB("");
+}
+
+function writeTitle(titleText) {
+  // タイトルの直前に必ず空行
+  writeBlankLine();
+  writeB(titleText);
+}
+
+function writeBullets(lines) {
+  for (const line of lines) {
+    const parts = enforceMaxLen(line, MAX_SENTENCE_LEN);
+    for (const p of parts) {
+      const suffix = isSameMeaning(p, existingSet) ? " (提案済)" : "";
+      writeB(asBullet(`${p}${suffix}`));
     }
+  }
+}
 
-    function asBullet(s) {
-      const t = String(s || "").trim();
-      if (!t) return "";
-      return t.startsWith("・") ? t : `・${t}`;
-    }
+// ここから実出力（aiSuggestの新形式を想定）
+const commentPoints = (aiCommentPointsRaw || []).map(x => String(x || "").trim()).filter(Boolean);
+const specCandidates = (aiSpecCandidatesRaw || []).map(x => String(x || "").trim()).filter(Boolean);
+const gatingQuestions = (aiGatingQuestionsRaw || []).map(x => String(x || "").trim()).filter(Boolean);
 
-    // 配列は「1要素=1文」前提（ユーザー要望①を採用）
-    const commentPoints = (aiCommentPointsRaw || [])
-      .map((x) => stripVerifyEnding(x))
-      .map((x) => String(x || "").trim())
-      .filter(Boolean);
+const hasAny = commentPoints.length || specCandidates.length || gatingQuestions.length;
 
-    const specCandidates = (aiSpecCandidatesRaw || [])
-      .map((x) => stripVerifyEnding(x))
-      .map((x) => String(x || "").trim())
-      .filter(Boolean);
+if (hasAny) {
+  // ★B列幅は変更しない
 
-    const gatingQuestions = (aiGatingQuestionsRaw || [])
-      .map((x) => stripVerifyEnding(x))
-      .map((x) => String(x || "").trim())
-      .filter(Boolean);
+  writeTitle("AIコメント（検証ポイント・仕様観点）");
+  writeBullets(commentPoints);
 
-    const hasAny =
-      commentPoints.length > 0 || specCandidates.length > 0 || gatingQuestions.length > 0;
+  if (specCandidates.length) {
+    writeTitle("重要スペック候補");
+    writeBullets(specCandidates);
+  }
 
-    if (hasAny) {
-      writeRowNo += 1; // 空行（区切り）
+  if (gatingQuestions.length) {
+    writeTitle("案件可否に影響");
+    writeBullets(gatingQuestions);
+  }
+}
 
-      const writeB = (text) => {
-        const r = wsTpl.getRow(writeRowNo);
-        const c = r.getCell(2);
-
-        c.value = text;
-
-        copyCellStyle(styleRow.getCell(2), c);
-        c.font = { ...(c.font || {}), size: 16 }; // 太字不要
-        c.alignment = { vertical: "top", horizontal: "left", wrapText: false }; // ★折り返しOFF
-        c.border = {}; // 枠不要
-        writeRowNo++;
-      };
-
-      // タイトル（1行のみ・「・」なし）
-      writeB("AIコメント（検証ポイント・仕様観点）");
-
-      // commentPoints（必ず「・」付き）
-      for (const line of commentPoints) {
-        const parts = enforceMaxLen(line, MAX_SENTENCE_LEN);
-        for (const p of parts) {
-          const suffix = isSameMeaning(p, existingSet) ? " (提案済)" : "";
-          writeB(asBullet(`${p}${suffix}`));
-        }
-      }
-
-      // 「重要スペック候補」タイトル（1行のみ・「・」なし）
-      if (specCandidates.length > 0) {
-        writeB("重要スペック候補");
-        for (const line of specCandidates) {
-          const parts = enforceMaxLen(line, MAX_SENTENCE_LEN);
-          for (const p of parts) {
-            const suffix = isSameMeaning(p, existingSet) ? " (提案済)" : "";
-            writeB(asBullet(`${p}${suffix}`));
-          }
-        }
-      }
-
-      // 「案件可否に影響」タイトル（1行のみ・「・」なし）
-      if (gatingQuestions.length > 0) {
-        writeB("案件可否に影響");
-        for (const line of gatingQuestions) {
-          const parts = enforceMaxLen(line, MAX_SENTENCE_LEN);
-          for (const p of parts) {
-            const suffix = isSameMeaning(p, existingSet) ? " (提案済)" : "";
-            writeB(asBullet(`${p}${suffix}`));
-          }
-        }
-      }
-    }
 
 
     // 7) 出力は「初回検証」シートのみ、名称変更
