@@ -7,22 +7,23 @@
   const outputEl = document.getElementById("output");
   const copyBtn = document.getElementById("copyBtn");
   const categoryEl = document.getElementById("category");
-  const userTypeEl = document.("userType");0
+  const userTypeEl = document.getElementById("userType");
   const notesEl = document.getElementById("notes");
-  const VIDEO_SCAN_FPS = 3;            // 動画を何fpsで“判定用”に走査するか（軽量化）
-const VIDEO_MAX_FRAMES = 20;         // ★最大20枚（確定）
-const VIDEO_MIN_GAP_SEC = 0.8;       // 連写防止（最低間隔）
-const DIFF_DOWNSCALE_W = 64;         // 差分判定用の縮小サイズ
-const DIFF_DOWNSCALE_H = 36;
-const DIFF_THRESHOLD = 18;           // 差分しきい値（大きいほど採用が減る）
+  const dropZone = document.getElementById("dropZone");
 
+  // 送信上限（コスト/速度）
+  const MAX_IMAGES_TOTAL = 20; // ★最大20枚（方針確定）
 
-  // コスト/速度対策
-  const MAX_IMAGES_TOTAL = 10;
-  const VIDEO_FRAME_STEP_SEC = 2;
-  const VIDEO_MAX_FRAMES = 8;
+  // 画質・サイズ
   const JPEG_QUALITY = 0.82;
   const MAX_SIDE = 1280;
+
+  // 差分抽出（方針確定：補間なし）
+  const VIDEO_SCAN_FPS = 3;       // 判定用の走査fps（軽量化）
+  const VIDEO_MIN_GAP_SEC = 0.8;  // 連写防止
+  const DIFF_DOWNSCALE_W = 64;
+  const DIFF_DOWNSCALE_H = 36;
+  const DIFF_THRESHOLD = 18;      // 多すぎる→上げる / 少なすぎる→下げる
 
   let preparedImages = []; // { dataUrl, name }
 
@@ -51,6 +52,12 @@ const DIFF_THRESHOLD = 18;           // 差分しきい値（大きいほど採�
       d.appendChild(s);
     }
     previewEl.appendChild(d);
+  }
+
+  function setDropActive(on) {
+    if (!dropZone) return;
+    dropZone.style.background = on ? "#f2f4f7" : "#fafbfc";
+    dropZone.style.borderColor = on ? "#111" : "#cfd4dc";
   }
 
   async function readFileAsDataURL(file) {
@@ -86,123 +93,117 @@ const DIFF_THRESHOLD = 18;           // 差分しきい値（大きいほど採�
     return canvas.toDataURL("image/jpeg", JPEG_QUALITY);
   }
 
-async function extractVideoFrames(file) {
-  // 差分ベースで「変化の大きい瞬間だけ」抽出
-  // - 最初と最後は必ず採用
-  // - 最大VIDEO_MAX_FRAMES
-  // - 補間なし（足りなくても増やさない）
+  async function extractVideoFrames(file) {
+    // 差分ベース抽出：変化の大きい瞬間だけ採用
+    // - 最初と最後は必ず採用
+    // - 最大MAX_IMAGES_TOTAL（補間なし）
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.src = url;
+    video.muted = true;
+    video.playsInline = true;
 
-  const url = URL.createObjectURL(file);
-  const video = document.createElement("video");
-  video.src = url;
-  video.muted = true;
-  video.playsInline = true;
-
-  await new Promise((resolve, reject) => {
-    video.onloadedmetadata = resolve;
-    video.onerror = reject;
-  });
-
-  const duration = Number.isFinite(video.duration) ? video.duration : 0;
-  if (!duration) {
-    URL.revokeObjectURL(url);
-    return [];
-  }
-
-  // 送信用（保存用）キャンバス
-  const saveCanvas = document.createElement("canvas");
-  const vw = video.videoWidth || 640;
-  const vh = video.videoHeight || 360;
-  const saveScale = Math.min(1, MAX_SIDE / Math.max(vw, vh));
-  saveCanvas.width = Math.round(vw * saveScale);
-  saveCanvas.height = Math.round(vh * saveScale);
-  const saveCtx = saveCanvas.getContext("2d");
-
-  // 差分判定用キャンバス（超小さく）
-  const diffCanvas = document.createElement("canvas");
-  diffCanvas.width = DIFF_DOWNSCALE_W;
-  diffCanvas.height = DIFF_DOWNSCALE_H;
-  const diffCtx = diffCanvas.getContext("2d", { willReadFrequently: true });
-
-  const frames = [];
-  let prev = null;              // Uint8ClampedArray
-  let lastAcceptedT = -999;
-
-  async function seekTo(t) {
-    t = Math.max(0, Math.min(duration - 0.05, t));
-    await new Promise((resolve) => {
-      const onSeeked = () => {
-        video.removeEventListener("seeked", onSeeked);
-        resolve();
-      };
-      video.addEventListener("seeked", onSeeked);
-      video.currentTime = t;
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = reject;
     });
-    return t;
-  }
 
-  function captureJpeg() {
-    saveCtx.drawImage(video, 0, 0, saveCanvas.width, saveCanvas.height);
-    return saveCanvas.toDataURL("image/jpeg", JPEG_QUALITY);
-  }
-
-  function diffScore() {
-    // 判定用に縮小描画 → ピクセル差の平均値をスコアにする
-    diffCtx.drawImage(video, 0, 0, diffCanvas.width, diffCanvas.height);
-    const { data } = diffCtx.getImageData(0, 0, diffCanvas.width, diffCanvas.height);
-
-    if (!prev) {
-      prev = data.slice(); // 初回
-      return 0;
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (!duration) {
+      URL.revokeObjectURL(url);
+      return [];
     }
 
-    let sum = 0;
-    // RGBAのうちRGBのみで差分（粗くてOK）
-    for (let i = 0; i < data.length; i += 4) {
-      sum += Math.abs(data[i] - prev[i]);       // R
-      sum += Math.abs(data[i + 1] - prev[i + 1]); // G
-      sum += Math.abs(data[i + 2] - prev[i + 2]); // B
+    const vw = video.videoWidth || 640;
+    const vh = video.videoHeight || 360;
+
+    // 保存用（送信用）canvas
+    const saveCanvas = document.createElement("canvas");
+    const saveScale = Math.min(1, MAX_SIDE / Math.max(vw, vh));
+    saveCanvas.width = Math.round(vw * saveScale);
+    saveCanvas.height = Math.round(vh * saveScale);
+    const saveCtx = saveCanvas.getContext("2d");
+
+    // 判定用canvas（小さく）
+    const diffCanvas = document.createElement("canvas");
+    diffCanvas.width = DIFF_DOWNSCALE_W;
+    diffCanvas.height = DIFF_DOWNSCALE_H;
+    const diffCtx = diffCanvas.getContext("2d", { willReadFrequently: true });
+
+    const frames = [];
+    let prev = null;
+    let lastAcceptedT = -999;
+
+    function captureJpeg() {
+      saveCtx.drawImage(video, 0, 0, saveCanvas.width, saveCanvas.height);
+      return saveCanvas.toDataURL("image/jpeg", JPEG_QUALITY);
     }
-    prev = data.slice();
-    // 画素数で正規化（0〜255目安）
-    const denom = (diffCanvas.width * diffCanvas.height) * 3;
-    return sum / denom;
-  }
 
-  // 1) 最初は必ず採用
-  await seekTo(0);
-  frames.push(captureJpeg());
-  lastAcceptedT = 0;
+    async function seekTo(t) {
+      t = Math.max(0, Math.min(duration - 0.05, t));
+      await new Promise((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+        video.currentTime = t;
+      });
+      return t;
+    }
 
-  // 2) 差分走査：判定用fpsで進める（軽量化）
-  const step = 1 / Math.max(1, VIDEO_SCAN_FPS);
-  for (let t = step; t < duration; t += step) {
-    if (frames.length >= VIDEO_MAX_FRAMES - 1) break; // 最後枠を残す
-    const tt = await seekTo(t);
+    function diffScore() {
+      diffCtx.drawImage(video, 0, 0, diffCanvas.width, diffCanvas.height);
+      const img = diffCtx.getImageData(0, 0, diffCanvas.width, diffCanvas.height);
+      const data = img.data;
 
-    const score = diffScore();
-    const gapOk = (tt - lastAcceptedT) >= VIDEO_MIN_GAP_SEC;
+      if (!prev) {
+        prev = data.slice();
+        return 0;
+      }
 
-    if (gapOk && score >= DIFF_THRESHOLD) {
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sum += Math.abs(data[i] - prev[i]);
+        sum += Math.abs(data[i + 1] - prev[i + 1]);
+        sum += Math.abs(data[i + 2] - prev[i + 2]);
+      }
+      prev = data.slice();
+
+      const denom = (diffCanvas.width * diffCanvas.height) * 3;
+      return sum / denom; // 0〜255目安
+    }
+
+    // 最初は必ず採用
+    await seekTo(0);
+    frames.push(captureJpeg());
+    lastAcceptedT = 0;
+
+    // 走査
+    const step = 1 / Math.max(1, VIDEO_SCAN_FPS);
+    for (let t = step; t < duration; t += step) {
+      if (frames.length >= MAX_IMAGES_TOTAL - 1) break; // 最後枠確保
+      const tt = await seekTo(t);
+
+      const score = diffScore();
+      const gapOk = (tt - lastAcceptedT) >= VIDEO_MIN_GAP_SEC;
+
+      if (gapOk && score >= DIFF_THRESHOLD) {
+        frames.push(captureJpeg());
+        lastAcceptedT = tt;
+      }
+    }
+
+    // 最後は必ず採用（枠が残っている場合のみ）
+    if (frames.length < MAX_IMAGES_TOTAL) {
+      const endT = Math.max(0, duration - 0.2);
+      await seekTo(endT);
       frames.push(captureJpeg());
-      lastAcceptedT = tt;
     }
+
+    URL.revokeObjectURL(url);
+    return frames;
   }
-
-  // 3) 最後は必ず採用（重複なら入れない）
-  const endT = Math.max(0, duration - 0.2);
-  await seekTo(endT);
-  const endJpeg = captureJpeg();
-
-  // 末尾がほぼ同じ時刻の可能性があるので軽く回避
-  if (frames.length < VIDEO_MAX_FRAMES) {
-    frames.push(endJpeg);
-  }
-
-  URL.revokeObjectURL(url);
-  return frames;
-}
-
 
   async function prepareFromFiles(files) {
     preparedImages = [];
@@ -216,15 +217,18 @@ async function extractVideoFrames(file) {
 
     setStatus("ファイルを準備中…");
 
-    for (const f of list) {
+    for (let idx = 0; idx < list.length; idx++) {
       if (preparedImages.length >= MAX_IMAGES_TOTAL) break;
 
-      if (f.type.startsWith("image/")) {
+      const f = list[idx];
+
+      if (f.type && f.type.startsWith("image/")) {
         const dataUrl = await readFileAsDataURL(f);
         const img = await loadImage(dataUrl);
         const jpeg = resizeToJpegDataUrl(img);
         preparedImages.push({ dataUrl: jpeg, name: f.name });
-      } else if (f.type.startsWith("video/")) {
+      } else if (f.type && f.type.startsWith("video/")) {
+        // 動画は差分抽出でフレーム化
         const frames = await extractVideoFrames(f);
         for (let i = 0; i < frames.length; i++) {
           if (preparedImages.length >= MAX_IMAGES_TOTAL) break;
@@ -234,7 +238,9 @@ async function extractVideoFrames(file) {
     }
 
     previewEl.innerHTML = "";
-    for (const it of preparedImages) addThumb(it.dataUrl, it.name);
+    for (let i = 0; i < preparedImages.length; i++) {
+      addThumb(preparedImages[i].dataUrl, preparedImages[i].name);
+    }
 
     setStatus(`準備完了：${preparedImages.length}枚 送信`);
   }
@@ -254,7 +260,6 @@ async function extractVideoFrames(file) {
     try {
       setStatus("AI解析中…");
 
-      // ★ 統合先の /api/manual-ai を叩く（Vercel Hobby の関数数制限回避）
       const payload = {
         mode: "media-manual",
         category: categoryEl.value || "",
@@ -275,12 +280,11 @@ async function extractVideoFrames(file) {
       }
 
       const data = await res.json();
-      // manual-ai 既存は {text} を返すのでそれに合わせる
-      outputEl.value = data?.text || "";
+      outputEl.value = data && data.text ? data.text : "";
       setStatus("完了");
     } catch (e) {
       console.error(e);
-      setStatus(`失敗：${e?.message || e}`);
+      setStatus(`失敗：${e && e.message ? e.message : e}`);
     } finally {
       runBtn.disabled = false;
       clearBtn.disabled = false;
@@ -288,41 +292,13 @@ async function extractVideoFrames(file) {
     }
   }
 
+  // イベント
   fileInput.addEventListener("change", (ev) => {
     prepareFromFiles(ev.target.files).catch((err) => {
       console.error(err);
       setStatus("ファイルの準備に失敗しました");
     });
   });
-const dropZone = document.getElementById("dropZone");
-
-function setDropActive(on) {
-  if (!dropZone) return;
-  dropZone.style.background = on ? "#f2f4f7" : "#fafbfc";
-  dropZone.style.borderColor = on ? "#111" : "#cfd4dc";
-}
-
-["dragenter", "dragover"].forEach((evName) => {
-  dropZone?.addEventListener(evName, (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDropActive(true);
-  });
-});
-
-["dragleave", "drop"].forEach((evName) => {
-  dropZone?.addEventListener(evName, (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDropActive(false);
-  });
-});
-
-dropZone?.addEventListener("drop", async (e) => {
-  const files = e.dataTransfer?.files;
-  if (!files || !files.length) return;
-  await prepareFromFiles(files);
-});
 
   clearBtn.addEventListener("click", resetAll);
   runBtn.addEventListener("click", run);
@@ -336,4 +312,30 @@ dropZone?.addEventListener("drop", async (e) => {
       setStatus("コピーに失敗しました");
     }
   });
+
+  // D&D
+  if (dropZone) {
+    ["dragenter", "dragover"].forEach((evName) => {
+      dropZone.addEventListener(evName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDropActive(true);
+      });
+    });
+
+    ["dragleave", "drop"].forEach((evName) => {
+      dropZone.addEventListener(evName, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setDropActive(false);
+      });
+    });
+
+    dropZone.addEventListener("drop", async (e) => {
+      const dt = e.dataTransfer;
+      const files = dt ? dt.files : null;
+      if (!files || !files.length) return;
+      await prepareFromFiles(files);
+    });
+  }
 })();
