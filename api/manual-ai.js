@@ -31,7 +31,8 @@ export default async function handler(req, res) {
   try {
     const body =
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-const { prompt, image, mode } = body;
+const { prompt, images, mode } = body;
+
 
 
     if (!prompt) {
@@ -45,18 +46,23 @@ const { prompt, image, mode } = body;
       },
     ];
 
-    const userContent = [{ type: "text", text: prompt }];
+ const userContent = [{ type: "text", text: prompt }];
 
-    if (typeof image === "string") {
-      if (image.startsWith("data:image/") || image.startsWith("http")) {
-        userContent.push({
-          type: "image_url",
-          image_url: { url: image },
-        });
-      }
-    }
+// ✅ images（複数）対応
+if (Array.isArray(images)) {
+  images
+    .filter((u) => typeof u === "string")
+    .filter((u) => u.startsWith("data:image/") || u.startsWith("http"))
+    .forEach((u) => {
+      userContent.push({
+        type: "image_url",
+        image_url: { url: u },
+      });
+    });
+}
 
-    messages.push({ role: "user", content: userContent });
+messages.push({ role: "user", content: userContent });
+
 
 const isCheck = (mode || "check") === "check";
 
