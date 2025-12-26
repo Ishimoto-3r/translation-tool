@@ -18,6 +18,48 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 
     <style>
+
+        <!-- 各部名称 -->
+<div
+  id="paste-parts"
+  class="paste-box"
+  tabindex="0"
+>
+  各部名称：ここをクリックしてフォーカス → Ctrl＋Vで画像貼り付け
+</div>
+<div id="paste-parts-note" class="paste-note"></div>
+<img id="paste-parts-preview" style="display:none; max-width:100%;">
+
+<!-- 参考資料 -->
+<div
+  id="paste-ref"
+  class="paste-box"
+  tabindex="0"
+>
+  参考資料：ここをクリックしてフォーカス → Ctrl＋Vで画像貼り付け
+</div>
+<div id="paste-ref-note" class="paste-note"></div>
+<img id="paste-ref-preview" style="display:none; max-width:100%;">
+
+        .paste-box{
+  border: 2px dashed #bbb;
+  padding: 12px;
+  border-radius: 10px;
+  min-height: 70px;
+  outline: none;
+}
+
+.paste-box.is-focused{
+  border-color: #2563eb; /* フォーカス時だけ色変更 */
+}
+
+.paste-note{
+  font-size: 12px;
+  opacity: 0.8;
+  margin: 6px 0 14px;
+}
+
+
         body {
             font-family: "Meiryo UI", "Helvetica Neue", Arial, sans-serif;
         }
