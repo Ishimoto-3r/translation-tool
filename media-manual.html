@@ -64,6 +64,17 @@
           <label style="flex:1;min-width:260px">
             <div class="hint" style="margin-bottom:6px">画像（複数可） / 動画（1本推奨）</div>
             <input id="fileInput" type="file" accept="image/*,video/*" multiple />
+            <div id="dropZone" style="
+  margin-top:10px;
+  border:2px dashed #cfd4dc;
+  border-radius:14px;
+  padding:14px;
+  background:#fafbfc;
+">
+  <div style="font-weight:600;font-size:14px;">ここに画像/動画をドラッグ＆ドロップ</div>
+  <div class="hint" style="margin-top:6px;">または上の「ファイル選択」から追加</div>
+</div>
+
           </label>
           <button id="clearBtn" class="btn secondary" type="button">クリア</button>
           <button id="runBtn" class="btn" type="button">原稿案を生成</button>
