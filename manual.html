@@ -18,48 +18,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
 
     <style>
-
-        <!-- 各部名称 -->
-<div
-  id="paste-parts"
-  class="paste-box"
-  tabindex="0"
->
-  各部名称：ここをクリックしてフォーカス → Ctrl＋Vで画像貼り付け
-</div>
-<div id="paste-parts-note" class="paste-note"></div>
-<img id="paste-parts-preview" style="display:none; max-width:100%;">
-
-<!-- 参考資料 -->
-<div
-  id="paste-ref"
-  class="paste-box"
-  tabindex="0"
->
-  参考資料：ここをクリックしてフォーカス → Ctrl＋Vで画像貼り付け
-</div>
-<div id="paste-ref-note" class="paste-note"></div>
-<img id="paste-ref-preview" style="display:none; max-width:100%;">
-
-        .paste-box{
-  border: 2px dashed #bbb;
-  padding: 12px;
-  border-radius: 10px;
-  min-height: 70px;
-  outline: none;
-}
-
-.paste-box.is-focused{
-  border-color: #2563eb; /* フォーカス時だけ色変更 */
-}
-
-.paste-note{
-  font-size: 12px;
-  opacity: 0.8;
-  margin: 6px 0 14px;
-}
-
-
         body {
             font-family: "Meiryo UI", "Helvetica Neue", Arial, sans-serif;
         }
@@ -539,35 +497,6 @@ body {
   background: #172554;
   color: #ffffff;
 }
-.paste-area{
-  border: 2px dashed #bbb;
-  border-radius: 10px;
-  padding: 10px;
-  min-height: 120px;
-  outline: none;
-  background: #fff;
-}
-.paste-area.is-focused{
-  border-color: #2563eb; /* フォーカス時だけ枠色変更 */
-}
-.paste-note{
-  font-size: 12px;
-  color: #666;
-  margin-bottom: 8px;
-}
-.paste-preview{
-  max-width: 100%;
-  height: auto;
-  border-radius: 8px;
-}
-.paste-label{
-  display:block;
-  margin: 8px 0 6px;
-  font-weight: 600;
-}
-.paste-area-wrap{
-  margin-bottom: 14px;
-}
 
 
     </style>
@@ -807,23 +736,6 @@ body {
    <input type="file" id="aiCheckFile" accept=".docx" class="file-overlay">
 </div>
 
-<!-- 各部名称：貼り付け枠 -->
-<div class="paste-area-wrap">
-  <label class="paste-label">各部名称（画像）</label>
-  <div id="paste-parts" class="paste-area" tabindex="0">
-    <div id="paste-parts-note" class="paste-note">枠内にCtrl＋Vでも貼り付け可能</div>
-    <img id="paste-parts-preview" class="paste-preview" style="display:none;" />
-  </div>
-</div>
-
-<!-- 参考資料：貼り付け枠 -->
-<div class="paste-area-wrap">
-  <label class="paste-label">参考資料（画像）</label>
-  <div id="paste-ref" class="paste-area" tabindex="0">
-    <div id="paste-ref-note" class="paste-note">枠内にCtrl＋Vでも貼り付け可能</div>
-    <img id="paste-ref-preview" class="paste-preview" style="display:none;" />
-  </div>
-</div>
 
                 <!-- ステータス表示 -->
                 <div id="aiCheckStatus" class="text-[10px] text-amber-800 mb-2 h-10 overflow-hidden">
