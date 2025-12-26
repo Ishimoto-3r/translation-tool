@@ -1,0 +1,96 @@
+<!-- 新規ツール: media-manual.html / media-manual.js / api/media-manual.js
+目的: 画像/動画を貼り付け → AIが解析 → 取扱説明書の原稿案を文章化 → HTMLフォームに表示
+注意: APIキーはフロントに置かない。/api/ 経由でOpenAIを呼ぶ。
+-->
+
+
+<!-- =========================
+media-manual.html
+========================= -->
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>画像/動画 → 取説原稿案</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;margin:0;background:#f6f7f9;color:#111}
+header{position:sticky;top:0;background:#fff;border-bottom:1px solid #e6e8ee;z-index:10}
+.wrap{max-width:1100px;margin:0 auto;padding:16px}
+.tool-nav{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.tool-nav a{padding:8px 10px;border-radius:10px;text-decoration:none;color:#111;background:#f2f3f6;border:1px solid #e6e8ee;font-size:14px}
+.tool-nav a.active{background:#111;color:#fff;border-color:#111}
+.tool-nav .label{font-size:12px;color:#667085;margin:0 2px 0 0}
+
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
+@media (max-width: 980px){.grid{grid-template-columns:1fr}}
+
+
+.card{background:#fff;border:1px solid #e6e8ee;border-radius:16px;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+.card h2{margin:0;font-size:16px;padding:14px 14px 0}
+.card .body{padding:14px}
+
+
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{appearance:none;border:1px solid #e6e8ee;background:#111;color:#fff;border-radius:12px;padding:10px 12px;font-weight:600;cursor:pointer}
+.btn.secondary{background:#fff;color:#111}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+
+.hint{font-size:12px;color:#667085;line-height:1.5}
+.status{font-size:12px;color:#475467;margin-top:8px}
+
+
+textarea,input,select{width:100%;box-sizing:border-box;border:1px solid #e6e8ee;border-radius:12px;padding:10px 12px;font-size:14px;background:#fff}
+textarea{min-height:260px;resize:vertical}
+
+
+.preview{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.thumb{border:1px solid #e6e8ee;border-radius:12px;overflow:hidden;background:#f2f3f6;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb span{font-size:12px;color:#667085;padding:8px;text-align:center}
+</style>
+</head>
+<body>
+<header>
+<div class="wrap">
+<nav class="tool-nav">
+<span class="label">翻訳</span>
+<a href="/index.html">翻訳ツール</a>
+<a href="/verify.html">検証結果翻訳</a>
+<a href="/column-translate.html">列指定翻訳</a>
+<a href="/sheet-translate.html">シート翻訳</a>
+<a href="/word-translate.html">Word翻訳</a>
+<span class="label">その他</span>
+<a href="/report.html">修理レポート</a>
+<a href="/manual.html">マニュアルツール</a>
+<a href="/media-manual.html" class="active">画像/動画→取説原稿案</a>
+</nav>
+</div>
+</header>
+
+
+<main class="wrap">
+<div class="grid">
+<section class="card">
+<h2>入力</h2>
+<div class="body">
+<div class="row">
+<label style="flex:1;min-width:260px">
+<div class="hint" style="margin-bottom:6px">画像（複数可） / 動画（1本推奨）</div>
+<input id="fileInput" type="file" accept="image/*,video/*" multiple />
+</label>
+<button id="clearBtn" class="btn secondary" type="button">クリア</button>
+<button id="runBtn" class="btn" type="button">原稿案を生成</button>
+</div>
+
+
+<div class="hint" style="margin-top:10px">
+・動画はブラウザ側で代表フレームを抽出して送信します（秒間隔で最大枚数まで）。<br>
+・まずは「文章化してフォームに出す」最小構成です（環境変数によるモデル切替は後工程）。
+</div>
+
+
+<div class="row" style="margin-top:12px">
+</html>
