@@ -1,5 +1,6 @@
 // api/manual-ai.js
 import OpenAI from "openai";
+
 const MODEL_MANUAL_CHECK =
   process.env.MODEL_MANUAL_CHECK ||
   process.env.MODEL_MANUAL || // 互換用（今は残す）
@@ -18,10 +19,7 @@ const MANUAL_IMAGE_REASONING =
 const MANUAL_IMAGE_VERBOSITY =
   process.env.MANUAL_IMAGE_VERBOSITY || "low";
 
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -31,9 +29,7 @@ export default async function handler(req, res) {
   try {
     const body =
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-const { prompt, images, mode } = body;
-
-
+    const { prompt, images, mode } = body;
 
     if (!prompt) {
       return res.status(400).json({ error: "PromptRequired" });
@@ -42,47 +38,48 @@ const { prompt, images, mode } = body;
     const messages = [
       {
         role: "system",
-        content: "あなたは日本語マニュアル作成のアシスタントです。必ず日本語のみで回答してください。",
+        content:
+          "あなたは日本語マニュアル作成のアシスタントです。必ず日本語のみで回答してください。",
       },
     ];
 
- const userContent = [{ type: "text", text: prompt }];
+    const userContent = [{ type: "text", text: prompt }];
 
-// ✅ images（複数）対応
-if (Array.isArray(images)) {
-  images
-    .filter((u) => typeof u === "string")
-    .filter((u) => u.startsWith("data:image/") || u.startsWith("http"))
-    .forEach((u) => {
-      userContent.push({
-        type: "image_url",
-        image_url: { url: u },
-      });
+    // ✅ images（複数）対応
+    if (Array.isArray(images)) {
+      images
+        .filter((u) => typeof u === "string")
+        .filter((u) => u.startsWith("data:image/") || u.startsWith("http"))
+        .forEach((u) => {
+          userContent.push({ type: "image_url", image_url: { url: u } });
+        });
+    }
+
+    messages.push({ role: "user", content: userContent });
+
+    const isCheck = (mode || "check") === "check";
+
+    const completion = await client.chat.completions.create({
+      model: isCheck ? MODEL_MANUAL_CHECK : MODEL_MANUAL_IMAGE,
+      messages,
+      reasoning_effort: isCheck ? MANUAL_CHECK_REASONING : MANUAL_IMAGE_REASONING,
+      verbosity: isCheck ? MANUAL_CHECK_VERBOSITY : MANUAL_IMAGE_VERBOSITY,
     });
-}
-
-messages.push({ role: "user", content: userContent });
-
-
-const isCheck = (mode || "check") === "check";
-
-const completion = await client.chat.completions.create({
-  model: isCheck ? MODEL_MANUAL_CHECK : MODEL_MANUAL_IMAGE,
-  messages,
-  reasoning_effort: isCheck ? MANUAL_CHECK_REASONING : MANUAL_IMAGE_REASONING,
-  verbosity: isCheck ? MANUAL_CHECK_VERBOSITY : MANUAL_IMAGE_VERBOSITY,
-});
-
-
 
     const text = completion.choices[0]?.message?.content ?? "";
 
-    res.status(200).json({ text });
+    // ✅ 動作確認用に最低限のデバッグ情報を返す（まずここが重要）
+    return res.status(200).json({
+      text,
+      debug: {
+        model: isCheck ? MODEL_MANUAL_CHECK : MODEL_MANUAL_IMAGE,
+        reasoning_effort: isCheck ? MANUAL_CHECK_REASONING : MANUAL_IMAGE_REASONING,
+        verbosity: isCheck ? MANUAL_CHECK_VERBOSITY : MANUAL_IMAGE_VERBOSITY,
+        imagesCount: Array.isArray(images) ? images.length : 0,
+      },
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({
-      error: "OpenAIError",
-      detail: String(err),
-    });
+    return res.status(500).json({ error: "OpenAIError", detail: String(err) });
   }
 }
