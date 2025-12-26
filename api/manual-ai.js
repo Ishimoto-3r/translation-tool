@@ -28,6 +28,76 @@ export default async function handler(req, res) {
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const { prompt, image, mode } = body;
 
+    // =========================================================
+    // media-manual：画像/動画フレーム → 取説「動作説明のみ」
+    // =========================================================
+    // フロント想定:
+    // {
+    //   mode: "media-manual",
+    //   category, userType, notes,
+    //   images: [{ name, dataUrl }, ...]
+    // }
+    // 返却は { text } に統一（フロント互換）
+    if ((mode || "") === "media-manual") {
+      const category = String(body.category || "");
+      const userType = String(body.userType || "");
+      const notes = String(body.notes || "");
+      const images = Array.isArray(body.images) ? body.images : [];
+
+      if (!images.length) {
+        return res.status(400).json({ error: "NoImages" });
+      }
+
+      const sys =
+        "あなたは取扱説明書の「操作説明」原稿の作成者です。\n" +
+        "入力の画像（動画から抽出したフレーム）を観察し、動作説明（手順）の文章だけを日本語（です・ます）で作成してください。\n\n" +
+        "【絶対条件】\n" +
+        "- 注意事項、警告、禁止事項、免責、買い替え提案、危険表現は出力しない\n" +
+        "- 仕様や数値など、画像から断定できない内容は推測で書かない（不明として扱う）\n" +
+        "- 出力は「操作手順」に集中し、冗長な前置きは不要\n\n" +
+        "【出力形式】\n" +
+        "見出し：操作手順\n" +
+        "1. 〜 2. 〜 のように番号付きで手順を列挙\n" +
+        "最後に必要なら「確認事項：〜」を1〜3点だけ\n";
+
+      const userText =
+        `カテゴリ: ${category || "(未指定)"}\n` +
+        `想定ユーザー: ${userType || "(未指定)"}\n` +
+        (notes ? `補足: ${notes}\n` : "") +
+        `画像枚数: ${images.length}\n`;
+
+      const userContent = [{ type: "text", text: userText }];
+
+      for (const im of images) {
+        const dataUrl = im && im.dataUrl ? String(im.dataUrl) : "";
+        if (!dataUrl) continue;
+        if (!dataUrl.startsWith("data:image/") && !dataUrl.startsWith("http")) continue;
+
+        userContent.push({
+          type: "image_url",
+          image_url: { url: dataUrl },
+        });
+      }
+
+      const messages = [
+        { role: "system", content: sys },
+        { role: "user", content: userContent },
+      ];
+
+      const completion = await client.chat.completions.create({
+        model: MODEL_MANUAL_IMAGE,
+        messages,
+        reasoning_effort: MANUAL_IMAGE_REASONING,
+        verbosity: MANUAL_IMAGE_VERBOSITY,
+      });
+
+      const text = completion.choices[0]?.message?.content ?? "";
+      return res.status(200).json({ text });
+    }
+
+    // =========================================================
+    // 既存：manual-ai（check/image）
+    // =========================================================
     if (!prompt) {
       return res.status(400).json({ error: "PromptRequired" });
     }
@@ -35,8 +105,7 @@ export default async function handler(req, res) {
     const messages = [
       {
         role: "system",
-        content:
-          "あなたは日本語マニュアル作成のアシスタントです。必ず日本語のみで回答してください。",
+        content: "あなたは日本語マニュアル作成のアシスタントです。必ず日本語のみで回答してください。",
       },
     ];
 
