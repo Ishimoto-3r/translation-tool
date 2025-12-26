@@ -9,13 +9,15 @@ function setupPasteBox({ boxId, imgId, noteId, onSet }) {
   const note = document.getElementById(noteId);
   if (!box) return;
 
+  // フォーカス時だけ枠色を変える（class付与）
   box.addEventListener("focus", () => box.classList.add("is-focused"));
   box.addEventListener("blur", () => box.classList.remove("is-focused"));
 
+  // Ctrl+V の貼り付け
   box.addEventListener("paste", (e) => {
     const items = e.clipboardData?.items || [];
     for (const item of items) {
-      if (item.type && item.type.startsWith("image/")) {
+      if (item.type?.startsWith("image/")) {
         const file = item.getAsFile();
         if (!file) continue;
 
@@ -38,9 +40,8 @@ function setupPasteBox({ boxId, imgId, noteId, onSet }) {
     }
   });
 
-  if (note && !note.textContent) {
-    note.textContent = "枠内にCtrl＋Vでも貼り付け可能";
-  }
+  // 初期表示文言
+  if (note) note.textContent = "枠内にCtrl＋Vでも貼り付け可能";
 }
 
 // ====== 追加：ページ読み込み後に貼り付け枠を有効化 ======
@@ -76,16 +77,16 @@ document.getElementById("run").addEventListener("click", async () => {
 
     const rows = data.rows;
 
-    // ✅ 修正：/api/manual-test の rows は label/category/content を想定
+    // ✅ ここはあなたの rows のキーに合わせる（今まで通りなら下のままでOK）
     let manualText = "";
     let currentLabel = "";
 
     rows.forEach((r) => {
-      if (r.label && r.label !== currentLabel) {
-        currentLabel = r.label;
+      if (r["ラベル"] && r["ラベル"] !== currentLabel) {
+        currentLabel = r["ラベル"];
         manualText += `\n\n【${currentLabel}】\n`;
       }
-      manualText += `■ ${r.category || ""}\n${r.content || ""}\n`;
+      manualText += `■ ${r["項目名"]}\n${r["内容"]}\n`;
     });
 
     resultBox.textContent = "AIチェック中…";
@@ -96,11 +97,7 @@ document.getElementById("run").addEventListener("click", async () => {
     const aiRes = await fetch("/api/manual-ai", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt: manualText,
-        mode: "check",
-        images,
-      }),
+      body: JSON.stringify({ prompt: manualText, mode: "check", images }),
     });
 
     const aiData = await aiRes.json();
@@ -110,7 +107,12 @@ document.getElementById("run").addEventListener("click", async () => {
       return;
     }
 
-    resultBox.textContent = aiData.text || "";
+    // ✅ debug を表示して「何が送れてるか」まず確認できるようにする
+    resultBox.textContent =
+      (aiData.text || "") +
+      "\n\n---\n" +
+      `debug: model=${aiData.debug?.model}, imagesCount=${aiData.debug?.imagesCount}`;
+
   } catch (err) {
     console.error(err);
     resultBox.textContent = "エラー: " + err.toString();
