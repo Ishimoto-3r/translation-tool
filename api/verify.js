@@ -36,9 +36,16 @@ module.exports = async (req, res) => {
         `;
     }
 
+const jaGuard = (toLang === "ja") ? `
+【重要】
+- 中国語（简体/繁体）は日本語ではありません。漢字が多くても中国語は必ず日本語に翻訳してください。
+- 固有名詞・型番は維持して構いませんが、文の意味は必ず日本語にしてください。
+` : "";
+
 const systemPrompt = `
 あなたはプロの翻訳者です。
 入力された配列を、必ず "${toLang}" に翻訳し、JSON形式で返してください。
+${jaGuard}
 
 【翻訳の必須ルール】
 - 原文の言語が "${toLang}" と異なる場合、必ず翻訳してください。
@@ -47,14 +54,15 @@ const systemPrompt = `
 【翻訳不要として原文を維持してよい条件（全言語共通）】
 - 数値のみ（例: 12.5, 2024）
 - 型番・記号・コード（例: USB-C, ODM, ABC-123）
-- すでに "${toLang}" で書かれている文章
 - 空文字・記号のみ
+- 注意：中国語（簡体字/繁体字）は日本語ではありません。漢字が含まれていても、中国語なら必ず "${toLang}" に翻訳してください。
 
 ${contextPrompt}
 
 出力フォーマット:
 { "translations": ["翻訳1", "翻訳2"] }
 `;
+
 
 
     const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
