@@ -128,21 +128,7 @@ function parseKenshoDbFromBuffer(buf) {
   return { sheetNames: wb.SheetNames, labelMaster, itemList };
 }
 
-// ===== Template (xlsx) =====
-function extractTemplateXlsxFromBuffer(buf, type) {
-  const targetSheet = type === "mass" ? "量産前検証フォーマット" : "初回検証フォーマット";
-  const wb = xlsx.read(buf, { type: "buffer" });
 
-  const sheet = wb.Sheets[targetSheet];
-  if (!sheet) throw new Error(`SheetNotFound: ${targetSheet}`);
-
-  const newWb = xlsx.utils.book_new();
-  xlsx.utils.book_append_sheet(newWb, sheet, targetSheet);
-
-  const out = xlsx.write(newWb, { type: "buffer", bookType: "xlsx" });
-  const filename = type === "mass" ? "量産前検証フォーマット.xlsx" : "初回検証フォーマット.xlsx";
-  return { out, filename };
-}
 
 // ===== Generate helpers (ExcelJS) =====
 function thinBorder() {
@@ -300,13 +286,39 @@ async function handleTemplate(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "MethodNotAllowed" });
 
   const type = (req.query?.type || "first").toString();
-  const buf = await downloadExcelBufferFromSharePoint();
-  const { out, filename } = extractTemplateXlsxFromBuffer(buf, type);
+  const targetSheet = type === "mass" ? "量産前検証フォーマット" : "初回検証フォーマット";
+  const filename = type === "mass" ? "量産前検証フォーマット.xlsx" : "初回検証フォーマット.xlsx";
 
-  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`);
-  return res.status(200).send(out);
+  // 1) SharePointのdatabase.xlsxを取得
+  const buf = await downloadExcelBufferFromSharePoint();
+
+  // 2) ExcelJSで読み込み（書式をできるだけ保持）
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+
+  const ws = wb.getWorksheet(targetSheet);
+  if (!ws) throw new Error(`SheetNotFound: ${targetSheet}`);
+
+  // 3) 対象シート以外を削除（後ろから消す）
+  for (let i = wb.worksheets.length - 1; i >= 0; i--) {
+    const w = wb.worksheets[i];
+    if (w.name !== targetSheet) wb.removeWorksheet(w.id);
+  }
+
+  // 4) 出力（書式付き）
+  const out = await wb.xlsx.writeBuffer();
+
+  res.setHeader(
+    "Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  );
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`
+  );
+  return res.status(200).send(Buffer.from(out));
 }
+
 
 async function handleAi(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
