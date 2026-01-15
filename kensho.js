@@ -274,7 +274,6 @@ async function onGenerate() {
   }
 
   const generalName = ($("general-name")?.value || "").trim();
-  const feature = ($("feature")?.value || "").trim();
   const note = ($("note")?.value || "").trim();
   const selectedLabels = getSelectedLabels();
 
@@ -287,7 +286,8 @@ const res = await fetch("/api/kensho?op=generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        productInfo: { name: generalName, feature, note },
+        // feature欄は廃止（備考へ統合）
+        productInfo: { name: generalName, note },
         selectedLabels,
         images: state.images.map((x) => x.dataUrl),
       }),
