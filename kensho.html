@@ -7,15 +7,97 @@
   <title>検証項目作成ツール</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/kensho.js" defer></script>
+
+  <!-- 他ツールと同じナビ（配置・文字・外観の統一） -->
+  <style>
+    body{
+      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
+      margin:0;
+      padding:0;
+    }
+
+    /* ===== Top Nav (Group + One-click) ===== */
+    .tool-nav{
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background:#374151;
+      padding: 10px 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,.12);
+
+      display:flex;
+      justify-content:center;
+      gap: 14px;
+      align-items:center;
+      flex-wrap: wrap;
+    }
+    .tool-nav .nav-groupbox{
+      display:flex;
+      flex-direction:column;
+      gap: 6px;
+      padding: 8px 10px;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 10px;
+      background: rgba(255,255,255,.04);
+    }
+    .tool-nav .nav-heading{
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      color: rgba(243,244,246,.75);
+      line-height: 1;
+      padding-left: 4px;
+      user-select: none;
+    }
+    .tool-nav .nav-links{
+      display:flex;
+      gap: 8px;
+      align-items:center;
+      flex-wrap: wrap;
+    }
+    .tool-nav a{
+      color:#f3f4f6;
+      text-decoration:none;
+      font-weight: 600;
+      font-size: 14px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      transition: background-color .15s, transform .05s;
+      display:inline-flex;
+      align-items:center;
+      gap: 6px;
+    }
+    .tool-nav a:hover{ background: rgba(255,255,255,.12); }
+    .tool-nav a:active{ transform: translateY(1px); }
+    .tool-nav a.active{ background:#172554; color:#fff; }
+    .tool-nav .nav-heading::before{ content: "⭐"; opacity: .9; }
+  </style>
 </head>
 
 <body class="bg-slate-100">
-  <header class="bg-slate-700 text-white">
-    <div class="max-w-[1400px] mx-auto px-4 py-3 flex items-center justify-between">
-      <div class="font-semibold">検証項目作成ツール</div>
-      <div class="text-sm opacity-90">ChatGPT API</div>
+  <nav class="tool-nav">
+    <div class="nav-groupbox">
+      <div class="nav-heading">翻訳</div>
+      <div class="nav-links">
+        <a href="/index.html">翻訳ツール</a>
+        <a href="/verify.html">検証結果翻訳</a>
+        <a href="/column-translate.html">列指定翻訳</a>
+        <a href="/sheet-translate.html">シート翻訳</a>
+        <a href="/word-translate.html">Word翻訳</a>
+      </div>
     </div>
-  </header>
+
+    <div class="nav-groupbox">
+      <div class="nav-heading">その他</div>
+      <div class="nav-links">
+        <a href="/report.html">修理レポート</a>
+        <a href="/manual.html">マニュアル</a>
+        <a href="/prompt.html">単発プロンプト</a>
+        <a href="/kensho.html" class="active">検証項目作成</a>
+      </div>
+    </div>
+  </nav>
 
   <!-- オーバーレイ（SharePoint/実行中） -->
   <div id="overlay" class="fixed inset-0 hidden items-center justify-center bg-black/40 z-50">
@@ -36,13 +118,22 @@
       <div class="font-bold mb-3">製品情報</div>
 
       <label class="block text-sm mb-1">一般名称</label>
-      <input id="general-name" class="w-full border rounded-lg p-2 mb-3" />
-
-      <label class="block text-sm mb-1">特筆すべき特徴</label>
-      <textarea id="feature" class="w-full border rounded-lg p-2 mb-3" rows="4"></textarea>
+      <input
+        id="general-name"
+        class="w-full border rounded-lg p-2 mb-3"
+        placeholder="例：アウトドアワゴン / 布団乾燥機 / モバイルバッテリー"
+      />
 
       <label class="block text-sm mb-1">備考</label>
-      <textarea id="note" class="w-full border rounded-lg p-2 mb-3" rows="3"></textarea>
+      <textarea
+        id="note"
+        class="w-full border rounded-lg p-2 mb-3"
+        rows="5"
+        placeholder="例：
+・用途：アウトドアで荷物を運ぶ折りたたみワゴン
+・重要：最大積載時の安定性（転倒/脱輪）、フレームたわみ、布底の擦れ/縫製ほつれ
+・仕様：耐荷重、サイズ、タイヤ径、素材（布/フレーム）"
+      ></textarea>
 
       <!-- 画像（複数） -->
       <div class="mt-2">
@@ -85,12 +176,13 @@
     </section>
 
     <!-- 右：検証ラベル -->
-    <section class="col-span-12 lg:col-span-9 bg-white rounded-xl p-4 shadow">
+    <section class="col-span-12 lg:col-span-9 bg-white rounded-xl p-4 shadow lg:h-[calc(100vh-96px)] flex flex-col">
       <div class="flex items-center justify-between mb-3">
         <div class="font-bold">検証ラベル（ジャンル別）</div>
       </div>
 
-      <div id="labels" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3"></div>
+      <!-- 検証ラベル領域のみスクロールさせる -->
+      <div id="labels" class="flex-1 overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3"></div>
     </section>
   </main>
 </body>
