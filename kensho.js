@@ -153,8 +153,8 @@ function renderLabelsFromLabelMaster(labelMaster) {
 async function fetchDatabaseAndRender() {
   showOverlay("SharePointを読み込み中…", "databaseの取得中です");
   disableButtons(true);
+const res = await fetch("/api/kensho?op=db");
 
-  const res = await fetch("/api/kensho-db");
   if (!res.ok) {
     const msg = await readErrorMessage(res);
     throw new Error(msg);
