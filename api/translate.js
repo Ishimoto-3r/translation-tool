@@ -1,191 +1,292 @@
 // api/translate.js
+
 export default async function handler(req, res) {
+  // 1) CORS/OPTIONS（既存sheet/word/verifyと同等にする）
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
+  );
+
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
+  }
+
+  // 2) op判定（無指定は従来どおり text として扱う）
+  const op = (req.query?.op ? String(req.query.op) : "").trim() || "text";
+
+  try {
+    if (op === "text") {
+      return await handleTextTranslate(req, res); // 旧 /api/translate 互換
+    }
+
+    if (op === "sheet") {
+      return await handleRowsTranslate(req, res, "sheet"); // 旧 /api/sheet 互換
+    }
+
+    if (op === "word") {
+      return await handleRowsTranslate(req, res, "word"); // 旧 /api/word 互換
+    }
+
+    if (op === "verify") {
+      return await handleRowsTranslate(req, res, "verify"); // 旧 /api/verify 互換
+    }
+
+    return res.status(400).json({
+      error: "UnknownOp",
+      detail: `Unknown op: ${op}`,
+    });
+  } catch (e) {
+    console.error("[translate] unexpected error:", e);
+    return res.status(500).json({
+      error: "Internal Server Error",
+      detail: String(e?.message || e),
+    });
+  }
+}
+
+// ------------------------------------------------------------
+// 旧 api/translate.js の挙動（text翻訳）をそのまま維持
+// ------------------------------------------------------------
+async function handleTextTranslate(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  try {
-    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-    const { systemPrompt, userPrompt, sourceLang, targetLang } = body;
+  const body =
+    typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+  const { systemPrompt, userPrompt, sourceLang, targetLang } = body;
 
-    if (!userPrompt) {
-      return res.status(400).json({ error: "userPrompt is required" });
-    }
-
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "OPENAI_API_KEY is not set" });
-    }
-
-    // --- targetLang を確定（フロントから渡されるのが理想。無い場合は systemPrompt から推定） ---
-    const guessedTarget =
-      targetLang ||
-      (() => {
-        const sp = String(systemPrompt || "");
-        // 例: "日本語を中国語に翻訳してください" / "任意の言語を日本語に翻訳してください"
-        const m = sp.match(/を\s*([^に]+)\s*に\s*翻訳/);
-        return m ? m[1].trim() : "日本語"; // 最悪のフォールバック
-      })();
-
-    const isJapaneseTarget = guessedTarget === "日本語";
-
-    // --- 翻訳の自然さ（意訳寄り）を強制 ---
-    const styleRules = `
-- 直訳ではなく、${guessedTarget}として自然な文章に意訳してください（ビジネス文脈は丁寧に）。
-- 不自然な逐語訳は禁止です。
-- 型番・数値・記号（USB-C, ODM, 3.7V 等）は可能な限り保持してください。
-- 余計な解説は禁止。翻訳文のみ返してください。
-`.trim();
-
-    // --- 日本語ターゲット時のみ：挨拶の正規化ルール ---
-    const jpGreetingRules = isJapaneseTarget
-      ? `
-- 挨拶・定型表現は日本語の自然な定型に正規化してください。
-  例：下午好=こんにちは / 早上好=おはようございます / 晚上好=こんばんは
-- 「午後好」のような不自然な直訳は禁止です。
-- 中国語の業務・物流用語は、日本語で一般的に使われる表現に置き換えてください。
-  例：
-  实货 → 実際の製品 / 納品された製品 / 実機（文脈に応じて）
-  出货 → 出荷
-  批次 → ロット
-
-`.trim()
-      : "";
-
-    const baseSystem = `
-あなたはプロの翻訳者です。
-${styleRules}
-${jpGreetingRules}
-`.trim();
-
-    const model = process.env.MODEL_TRANSLATE || "gpt-5.1";
-    const reasoning_effort = process.env.TRANSLATE_REASONING || "low";
-    const verbosity = process.env.TRANSLATE_VERBOSITY || "low";
-
-
-function normalizeForCompare(s) {
-  return String(s || "")
-    .trim()
-    .replace(/\s+/g, "")
-    .replace(/[、。．，,.!！?？：:；;（）()\[\]「」『』"“”'’`]/g, "")
-    .toLowerCase();
-}
-
-function looksJapanese(s) {
-  // かな（ひらがな/カタカナ）が入ってたら日本語っぽい
-  return /[\u3040-\u309F\u30A0-\u30FF]/.test(String(s || ""));
-}
-
-
-    
-    // JSON固定（フロント側は data.translatedText を受けるだけにする）
-    async function callOnce(extraHint = "") {
-      const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-      messages: [
-  {
-    role: "system",
-    content:
-      baseSystem +
-      `
-
-重要：出力は必ずJSON（json_object）のみで返してください。
-フォーマットは次の通りです：
-{"translatedText":"..."}
-`,
-  },
-  {
-    role: "user",
-    content:
-      `Return ONLY JSON. Example: {"translatedText":"..."}\n\n` + // ← "json" を確実に含める
-      `【翻訳方向】${sourceLang || "任意"} → ${guessedTarget}\n` +
-      `【原文】\n${userPrompt}\n\n` +
-      (systemPrompt ? `【追加条件】\n${systemPrompt}\n\n` : "") +
-      (extraHint ? `【追加指示】\n${extraHint}\n` : "")
-  },
-],
-response_format: { type: "json_object" },
-
-          reasoning_effort,
-          verbosity,
-        }),
-      });
-
-      const data = await apiResponse.json();
-      if (!apiResponse.ok) {
-        const msg = data?.error?.message || `OpenAI API error: ${apiResponse.status}`;
-        throw new Error(msg);
-      }
-
-      // { translatedText: "..." } を期待（無ければ拾える形も救済）
-      let obj;
-      try {
-        obj = JSON.parse(data.choices?.[0]?.message?.content || "{}");
-      } catch {
-        obj = {};
-      }
-      const out =
-        (typeof obj.translatedText === "string" && obj.translatedText.trim()) ? obj.translatedText.trim() :
-        (typeof obj.text === "string" && obj.text.trim()) ? obj.text.trim() :
-        (typeof obj.ja === "string" && obj.ja.trim()) ? obj.ja.trim() :
-        "";
-
-      return out;
-    }
-
-    // 1回目
-    let translatedText = await callOnce("");
-
-    // --- 全方向の根本治療：同文返し（未翻訳）を検知して1回だけ再試行 ---
-    // ※「こんにちは」→「你好」などの短文で起きやすい事故を潰す
-const inText = String(userPrompt || "");
-const outText = String(translatedText || "");
-
-// 1) 記号差分だけなら未翻訳扱い（こんにちは → こんにちは。を潰す）
-const sameAfterNormalize =
-  normalizeForCompare(inText) &&
-  normalizeForCompare(inText) === normalizeForCompare(outText);
-
-// 2) ターゲットが中国語なのに、かなが入ってたら未翻訳扱い
-const targetLooksChinese = (guessedTarget === "中国語");
-const jpKanaInChinese = targetLooksChinese && looksJapanese(outText);
-
-const shouldRetry = sameAfterNormalize || jpKanaInChinese;
-
-
-    if (shouldRetry) {
-      translatedText = await callOnce(
-        `原文のコピーは禁止です。必ず${guessedTarget}に翻訳してください。短文でも翻訳してください。`
-      );
-    }
-
-    // --- 日本語ターゲット時のみ：最低限の日本語らしさチェック（かな無し＝未翻訳疑い） ---
-    if (isJapaneseTarget) {
-      const hasKana = /[\u3040-\u309F\u30A0-\u30FF]/.test(translatedText || "");
-      if (!hasKana) {
-        // もう1回だけ強制（最大2回目）
-        translatedText = await callOnce(
-          `出力は必ず自然な日本語。ひらがな/カタカナを含めてください。挨拶は定型に正規化してください。`
-        );
-      }
-    }
-
-    if (!translatedText) {
-      return res.status(502).json({ error: "TranslationFailed", detail: "翻訳結果が空でした" });
-    }
-
-    return res.status(200).json({ translatedText });
-
-  } catch (e) {
-    return res.status(500).json({ error: "Internal Server Error", detail: String(e) });
+  if (!userPrompt) {
+    return res.status(400).json({ error: "userPrompt is required" });
   }
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: "OPENAI_API_KEY is not set" });
+  }
+
+  // --- targetLang を確定（フロントから渡されるのが理想。無い場合は systemPrompt から推定） ---
+  const guessedTarget =
+    targetLang ||
+    (() => {
+      const sp = String(systemPrompt || "");
+      if (sp.includes("中国語")) return "zh";
+      if (sp.includes("英語")) return "en";
+      if (sp.includes("韓国語")) return "ko";
+      if (sp.includes("日本語")) return "ja";
+      return "";
+    })();
+
+  const model = process.env.MODEL_TRANSLATE || "gpt-5.1";
+
+  // systemPrompt は既存ツール側のものを尊重しつつ、JSON返却を強制
+  const baseSystem = String(systemPrompt || "").trim() || "あなたはプロの翻訳者です。";
+  const jsonGuard = `
+重要：出力は必ずJSON（json_object）のみで返してください。
+出力例：
+{ "translatedText": "..." }
+`;
+
+  const messages = [
+    { role: "system", content: baseSystem + "\n" + jsonGuard },
+    {
+      role: "user",
+      content: JSON.stringify({
+        sourceLang: sourceLang || "",
+        targetLang: guessedTarget || "",
+        text: String(userPrompt || ""),
+      }),
+    },
+  ];
+
+  const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      response_format: { type: "json_object" },
+      reasoning_effort: "none",
+      verbosity: "low",
+    }),
+  });
+
+  const data = await apiResponse.json();
+
+  // contentがJSONで来る前提
+  let obj = {};
+  try {
+    obj = JSON.parse(data.choices?.[0]?.message?.content || "{}");
+  } catch {
+    obj = {};
+  }
+
+  const translatedText = (obj.translatedText || obj.text || obj.ja || "").toString().trim();
+
+  if (!translatedText) {
+    return res.status(502).json({
+      error: "TranslationFailed",
+      detail: "翻訳結果が空でした",
+    });
+  }
+
+  return res.status(200).json({ translatedText });
 }
 
+// ------------------------------------------------------------
+// 旧 api/sheet.js / api/word.js / api/verify.js の挙動（rows翻訳）
+// 返却：{ "translations": ["...", "..."] }
+// ------------------------------------------------------------
+async function handleRowsTranslate(req, res, kind) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method Not Allowed" });
+  }
 
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: "OPENAI_API_KEY is not set" });
+  }
+
+  const MODEL_TRANSLATE = process.env.MODEL_TRANSLATE || "gpt-5.1";
+
+  const body =
+    typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+  const { rows, toLang, context } = body;
+
+  if (!rows || !Array.isArray(rows) || rows.length === 0) {
+    return res.status(400).json({ error: "rows is required" });
+  }
+  if (!toLang) {
+    return res.status(400).json({ error: "toLang is required" });
+  }
+
+  // 追加指示（コンテキスト）
+  let contextPrompt = "";
+  if (context && String(context).trim() !== "") {
+    contextPrompt = `
+【追加指示（コンテキスト）】
+ユーザーからの指示: "${String(context)}"
+この指示に従って翻訳のトーンや用語選択を行ってください。
+`;
+  }
+
+  // kind別のプロンプト（既存の意図を崩さない）
+  let systemPrompt = "";
+
+  if (kind === "word") {
+    systemPrompt = `
+あなたはプロの翻訳者です。
+入力された配列を "${toLang}" に翻訳し、JSON形式で返してください。
+
+${contextPrompt}
+
+【重要ルール】
+- 数値のみ、または製品型番のようなアルファベット記号（例: ODM, USB-C, V1.0）は翻訳せず、そのまま出力してください。
+- 翻訳不要と判断した場合は、原文をそのまま返してください。
+
+【翻訳の必須ルール】
+- 原文の言語が "${toLang}" と異なる場合、必ず翻訳してください。
+- 「意味が通じる」「専門用語だから」などの理由で原文を残すことは禁止です。
+
+【翻訳不要として原文を維持してよい条件（全言語共通）】
+- 数値のみ
+- 型番・記号・コード
+- すでに翻訳先言語で書かれている文章
+- 空文字
+
+【その他のルール】
+- これはWordファイル内のテキストです。文脈を維持してください。
+- 数値、型番、固有の記号などはそのまま維持してください。
+
+出力フォーマット:
+{ "translations": ["翻訳1", "翻訳2", ...] }
+`;
+  } else {
+    // sheet / verify
+    systemPrompt = `
+あなたはプロの翻訳者です。
+入力された配列を "${toLang}" に翻訳し、JSON形式で返してください。
+
+${contextPrompt}
+
+【重要ルール】
+- 数値のみ、または製品型番のようなアルファベット記号（例: ODM, USB-C, V1.0）は翻訳せず、そのまま出力してください。
+- 翻訳不要と判断した場合は、原文をそのまま返してください。
+
+【翻訳の必須ルール】
+- 原文の言語が "${toLang}" と異なる場合、必ず翻訳してください。
+- 「意味が通じる」「専門用語だから」などの理由で原文を残すことは禁止です。
+
+【翻訳不要として原文を維持してよい条件（全言語共通）】
+- 数値のみ（例: 12.5, 2024）
+- 型番・記号・コード（例: USB-C, ODM, ABC-123）
+- 空文字・記号のみ
+- 注意：中国語（簡体字/繁体字）は日本語ではありません。漢字が含まれていても、中国語なら必ず "${toLang}" に翻訳してください。
+
+出力フォーマット:
+{ "translations": ["翻訳1", "翻訳2"] }
+`;
+  }
+
+  // OpenAIへ（既存sheet/word/verifyと同等の形式）
+  const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: MODEL_TRANSLATE,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: JSON.stringify({ rows }) },
+      ],
+      response_format: { type: "json_object" },
+      reasoning_effort: "none",
+      verbosity: "low",
+    }),
+  });
+
+  const data = await apiResponse.json();
+  const content = data?.choices?.[0]?.message?.content || "{}";
+
+  let parsed = {};
+  try {
+    parsed = JSON.parse(content);
+  } catch (e) {
+    return res.status(502).json({
+      error: "ParseError",
+      detail: "AIのJSONがパースできませんでした",
+    });
+  }
+
+  // --- 行数保証（UIの整合性エラー対策）---
+  const translations = Array.isArray(parsed.translations) ? parsed.translations : [];
+
+  // rows と translations を index対応で揃える（不足は原文で埋める）
+  const fixed = rows.map((src, i) => {
+    const t = translations[i];
+    return (t === undefined || t === null) ? src : String(t);
+  });
+
+  const padded = Math.max(0, rows.length - translations.length);
+
+  // meta は互換を壊さない（UIが無視してもOK）
+  parsed.translations = fixed;
+  parsed.meta = { ...(parsed.meta || {}), padded };
+
+  if (padded > 0) {
+    console.warn(`[translate:${kind}] padded ${padded} item(s) to match rows length.`);
+  }
+
+  return res.status(200).json(parsed);
+
+}
 

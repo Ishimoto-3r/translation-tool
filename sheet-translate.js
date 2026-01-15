@@ -179,7 +179,7 @@ async function callSheetTranslateAPI(rows, toLang, context, onProgress) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     
     // api/sheet を呼び出し
-    const res = await fetch("/api/sheet", {
+    const res = await fetch("/api/translate?op=sheet", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
