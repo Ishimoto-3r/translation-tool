@@ -282,7 +282,8 @@ async function onGenerate() {
   disableButtons(true);
 
   try {
-    const res = await fetch("/api/kensho-generate", {
+const res = await fetch("/api/kensho?op=generate", {
+
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
