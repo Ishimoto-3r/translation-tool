@@ -44,6 +44,15 @@ async function getAccessToken() {
 }
 
 async function downloadExcelBufferFromSharePoint() {
+    // DEBUG: Mainで何が入っているか確認（秘密情報は表示しない）
+  const has = (v) => (v ? "OK" : "MISSING");
+  console.log("[kensho] env check", {
+    MANUAL_SHAREPOINT_FILE_URL: has(process.env.MANUAL_SHAREPOINT_FILE_URL),
+    MANUAL_TENANT_ID: has(process.env.MANUAL_TENANT_ID),
+    MANUAL_CLIENT_ID: has(process.env.MANUAL_CLIENT_ID),
+    MANUAL_CLIENT_SECRET: has(process.env.MANUAL_CLIENT_SECRET),
+  });
+
   const fileUrl = process.env.MANUAL_SHAREPOINT_FILE_URL;
   if (!fileUrl) throw new Error("ConfigError: MANUAL_SHAREPOINT_FILE_URL が不足");
 
