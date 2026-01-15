@@ -161,7 +161,8 @@ async function callWordTranslateAPI(rows, toLang, context, onProgress) {
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     
-    const res = await fetch("/api/word", {
+    const res = await fetch("/api/translate?op=word", {
+
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ 
