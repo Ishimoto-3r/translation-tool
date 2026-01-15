@@ -214,9 +214,9 @@ async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }
     "\n" +
     "【制約】\n" +
     "・各配列要素は1文（日本語）で、80文字以内。超える場合は自然な位置で分割して別要素にする。\n" +
-    "・commentPoints：用途を一言→品質の山場→最大負荷/片荷重→具体例の順。\n" +
+    "・commentPoints：用途を一言→品質の最重要事項→最大負荷→具体事例の順。\n" +
     "・specCandidates：一般名称から他社類似品で一般的に並ぶスペック項目名だけ。\n" +
-    "・gatingQuestions：メーカー回答次第で案件可否が変わる確認事項だけ。\n" +
+    "・gatingQuestions：メーカー回答次第で案件進行可否が変わる確認事項だけ。\n" +
     "・既存の検証項目と重複してもOK。\n" +
     "・語尾に「検証する」「確認する」は付けない（体言止め/観点の形）。\n";
 
