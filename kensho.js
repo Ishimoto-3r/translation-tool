@@ -325,7 +325,8 @@ async function onDownloadMassTemplate() {
   disableButtons(true);
 
   try {
-    const res = await fetch("/api/kensho-template?type=mass");
+const res = await fetch("/api/kensho?op=template&type=mass");
+
     if (!res.ok) {
       const msg = await readErrorMessage(res);
       throw new Error(msg);
