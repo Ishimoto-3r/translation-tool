@@ -267,5 +267,26 @@ ${contextPrompt}
     });
   }
 
+  // --- 行数保証（UIの整合性エラー対策）---
+  const translations = Array.isArray(parsed.translations) ? parsed.translations : [];
+
+  // rows と translations を index対応で揃える（不足は原文で埋める）
+  const fixed = rows.map((src, i) => {
+    const t = translations[i];
+    return (t === undefined || t === null) ? src : String(t);
+  });
+
+  const padded = Math.max(0, rows.length - translations.length);
+
+  // meta は互換を壊さない（UIが無視してもOK）
+  parsed.translations = fixed;
+  parsed.meta = { ...(parsed.meta || {}), padded };
+
+  if (padded > 0) {
+    console.warn(`[translate:${kind}] padded ${padded} item(s) to match rows length.`);
+  }
+
   return res.status(200).json(parsed);
+
 }
+
