@@ -183,7 +183,8 @@ async function callVerifyTranslateAPI(rows, toLang, context, onProgress) {
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
     
-    const res = await fetch("/api/verify", {
+    const res = await fetch("/api/translate?op=verify", {
+
       method: "POST",
       headers: { "Content-Type": "application/json" },
       // ★変更点: context を送信
