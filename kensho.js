@@ -13,18 +13,32 @@ const state = {
   labelMaster: [],
   itemList: [],
 };
+let overlayTick = null;
+let overlayStartedAt = null;
 
 function showOverlay(title, msg) {
   const overlay = $("overlay");
   const t = $("overlay-title");
   const m = $("overlay-msg");
   if (t) t.textContent = title || "処理中…";
-  if (m) m.textContent = msg || "しばらくお待ちください";
+
+  const baseMsg = msg || "しばらくお待ちください";
+  overlayStartedAt = Date.now();
+
+  if (overlayTick) clearInterval(overlayTick);
+  overlayTick = setInterval(() => {
+    const sec = Math.floor((Date.now() - overlayStartedAt) / 1000);
+    if (m) m.textContent = `${baseMsg}（${sec}s）`;
+  }, 500);
+
+  if (m) m.textContent = `${baseMsg}（0s）`;
+
   if (overlay) {
     overlay.classList.remove("hidden");
     overlay.classList.add("flex");
   }
 }
+
 
 function hideOverlay() {
   const overlay = $("overlay");
@@ -32,7 +46,13 @@ function hideOverlay() {
     overlay.classList.add("hidden");
     overlay.classList.remove("flex");
   }
+  if (overlayTick) {
+    clearInterval(overlayTick);
+    overlayTick = null;
+  }
+  overlayStartedAt = null;
 }
+
 
 function setStatus(text) {
   const el = $("status-text");
@@ -276,8 +296,8 @@ async function onGenerate() {
   const generalName = ($("general-name")?.value || "").trim();
   const note = ($("note")?.value || "").trim();
   const selectedLabels = getSelectedLabels();
+showOverlay("生成中…", "DB取得・テンプレ生成中");
 
-  showOverlay("生成中…", "初回検証ファイルを作成しています");
   disableButtons(true);
 
   try {
