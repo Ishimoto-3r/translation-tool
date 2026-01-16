@@ -89,8 +89,17 @@ function setStatus(text) {
 function disableButtons(disabled) {
   const g = $("btn-generate");
   const m = $("btn-mass");
+  const c = $("btn-clear-labels");
+  const s = $("label-search");
   if (g) g.disabled = !!disabled;
   if (m) m.disabled = !!disabled;
+  if (c) c.disabled = !!disabled;
+  if (s) s.disabled = !!disabled;
+
+  // ラベルチェックも操作不可にする（生成中の事故防止）
+  document
+    .querySelectorAll('input[type="checkbox"][data-label="1"]')
+    .forEach((x) => (x.disabled = !!disabled));
 }
 
 function escapeHtml(s) {
@@ -188,7 +197,7 @@ function renderLabelsFromLabelMaster(labelMaster) {
 
       row.innerHTML = `
         <input type="checkbox" class="h-4 w-4" data-label="1" value="${escapeAttr(label)}" id="${escapeAttr(id)}">
-        <span class="leading-5">${escapeHtml(label)}</span>
+        <span class="leading-5" data-label-text="1" data-text="${escapeAttr(label)}">${escapeHtml(label)}</span>
       `;
       list.appendChild(row);
     }
@@ -207,7 +216,37 @@ function renderLabelsFromLabelMaster(labelMaster) {
 function updateSelectedCount() {
   const n = document.querySelectorAll('input[type="checkbox"][data-label="1"]:checked').length;
   const el = $("label-count");
-  if (el) el.textContent = String(n);
+  if (el) el.textContent = `選択：${n}`;
+
+  renderSelectedChips();
+}
+
+function renderSelectedChips() {
+  const box = $("selected-chips");
+  if (!box) return;
+
+  const selected = Array.from(
+    document.querySelectorAll('input[type="checkbox"][data-label="1"]:checked')
+  )
+    .map((c) => (c.value || "").toString())
+    .filter(Boolean);
+
+  if (!selected.length) {
+    box.innerHTML = "";
+    return;
+  }
+
+  box.innerHTML = selected
+    .slice(0, 200)
+    .map(
+      (label) => `
+      <button type="button" class="text-xs font-semibold text-slate-700 bg-slate-100 border border-slate-200 rounded-full px-3 py-1 hover:bg-slate-200" data-chip="1" data-label="${escapeAttr(
+        label
+      )}">
+        ${escapeHtml(label)} <span class="ml-1 text-slate-500">×</span>
+      </button>`
+    )
+    .join(" ");
 }
 
 function clearAllLabels() {
@@ -221,10 +260,21 @@ function applyLabelFilter(q) {
   const query = (q || "").toString().trim().toLowerCase();
   const rows = Array.from(document.querySelectorAll('[data-label-row="1"]'));
   const cards = Array.from(document.querySelectorAll('[data-genre-card="1"]'));
+  const no = $("label-no-results");
+  const listRoot = $("labels");
 
   if (!query) {
     rows.forEach((r) => (r.style.display = ""));
     cards.forEach((c) => (c.style.display = ""));
+
+    // ハイライト解除
+    document.querySelectorAll('[data-label-text="1"]').forEach((sp) => {
+      const raw = sp.dataset.text || "";
+      sp.innerHTML = escapeHtml(raw);
+    });
+
+    if (no) no.classList.add("hidden");
+    if (listRoot) listRoot.style.display = "";
     return;
   }
 
@@ -243,6 +293,34 @@ function applyLabelFilter(q) {
     );
     c.style.display = anyVisible ? "" : "none";
   });
+
+  // 一致文字ハイライト（ラベル名のみ）
+  document.querySelectorAll('[data-label-text="1"]').forEach((sp) => {
+    const raw = (sp.dataset.text || "").toString();
+    if (!raw) return;
+
+    const lower = raw.toLowerCase();
+    const idx = lower.indexOf(query);
+    if (idx < 0) {
+      sp.innerHTML = escapeHtml(raw);
+      return;
+    }
+
+    const before = raw.slice(0, idx);
+    const hit = raw.slice(idx, idx + query.length);
+    const after = raw.slice(idx + query.length);
+    sp.innerHTML = `${escapeHtml(before)}<mark class="bg-yellow-200/70 rounded px-0.5">${escapeHtml(
+      hit
+    )}</mark>${escapeHtml(after)}`;
+  });
+
+  // 該当なし表示
+  const anyRowVisible = rows.some((r) => window.getComputedStyle(r).display !== "none");
+  if (no) {
+    if (anyRowVisible) no.classList.add("hidden");
+    else no.classList.remove("hidden");
+  }
+  if (listRoot) listRoot.style.display = anyRowVisible ? "" : "none";
 }
 
 function initLabelUX() {
@@ -275,6 +353,44 @@ function initLabelUX() {
     });
     btn.dataset.bound = "1";
   }
+
+  // チップ解除
+  const chips = $("selected-chips");
+  if (chips && !chips.dataset.bound) {
+    chips.addEventListener("click", (e) => {
+      // 生成中は操作させない（事故防止）
+      if ($("btn-generate")?.disabled) return;
+      const t = e.target?.closest?.('[data-chip="1"]');
+      if (!t) return;
+      e.preventDefault();
+      const label = (t.dataset.label || "").toString();
+      if (!label) return;
+
+      const cb = Array.from(
+        document.querySelectorAll('input[type="checkbox"][data-label="1"]')
+      ).find((x) => (x.value || "").toString() === label);
+
+      if (cb) cb.checked = false;
+      updateSelectedCount();
+    });
+    chips.dataset.bound = "1";
+  }
+}
+
+function toUserErrorMessage(err) {
+  const msg = (err?.message || err?.toString?.() || "").toString();
+  const lower = msg.toLowerCase();
+
+  // 代表的なエラーを人間向けに
+  if (lower.includes("selectedlabelsrequired")) return "検証ラベルが未選択です。";
+  if (lower.includes("methodnotallowed")) return "不正な呼び出しです（MethodNotAllowed）。";
+  if (lower.includes("unauthorized") || lower.includes("forbidden")) return "権限エラーです。";
+  if (lower.includes("timeout")) return "処理がタイムアウトしました。";
+
+  // JSON文字列がそのまま来るケース
+  if (msg.startsWith("{") && msg.includes("error")) return "エラーが発生しました。";
+
+  return "エラーが発生しました。";
 }
 
 // ===== DB fetch =====
@@ -447,8 +563,9 @@ async function onGenerate() {
     setStatus("完了しました");
   } catch (e) {
     console.error(e);
-    setStatus("エラー: " + e.toString());
-    alert("生成に失敗しました。\n" + e.toString());
+    const msg = toUserErrorMessage(e);
+    setStatus("エラーが発生しました");
+    alert("生成に失敗しました。\n" + msg);
   } finally {
     hideOverlay();
     disableButtons(false);
@@ -481,8 +598,9 @@ async function onDownloadMassTemplate() {
     setStatus("完了しました");
   } catch (e) {
     console.error(e);
-    setStatus("エラー: " + e.toString());
-    alert("ダウンロードに失敗しました。\n" + e.toString());
+    const msg = toUserErrorMessage(e);
+    setStatus("エラーが発生しました");
+    alert("ダウンロードに失敗しました。\n" + msg);
   } finally {
     hideOverlay();
     disableButtons(false);
@@ -513,7 +631,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     console.error(e);
     hideOverlay();
     disableButtons(false);
-    setStatus("SharePoint読み込みエラー: " + e.toString());
-    alert("SharePoint読み込みに失敗しました。\n" + e.toString());
+    const msg = toUserErrorMessage(e);
+    setStatus("SharePoint読み込みに失敗しました");
+    alert("SharePoint読み込みに失敗しました。\n" + msg);
   }
 });
