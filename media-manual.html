@@ -13,6 +13,7 @@
     .nav-heading{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;font-weight:700;letter-spacing:.08em;color:rgba(243,244,246,.85)}
     .nav-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
     .tool-nav a{color:#f3f4f6;text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06)}
+    .tool-nav a:hover{background:rgba(255,255,255,.12)}
     .tool-nav a.active{background:#172554;color:#fff}
   </style>
 </head>
@@ -45,7 +46,21 @@
     </div>
   </nav>
 
-  <main class="max-w-[1200px] mx-auto p-4 grid grid-cols-12 gap-4">
+  <!-- オーバーレイ（進行） -->
+  <div id="overlay" class="fixed inset-0 hidden items-center justify-center bg-black/40 z-50">
+    <div class="bg-white rounded-xl shadow-lg w-[420px] p-5">
+      <div class="flex items-start gap-3">
+        <div class="h-6 w-6 rounded-full border-4 border-slate-300 border-t-slate-700 animate-spin mt-1"></div>
+        <div class="flex-1">
+          <div id="overlay-title" class="font-semibold">処理中…</div>
+          <div id="overlay-msg" class="text-sm text-slate-600 mt-1">しばらくお待ちください</div>
+          <div id="overlay-log" class="text-xs text-slate-500 mt-3 whitespace-pre-line"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="w-full max-w-[1400px] mx-auto px-6 py-4 grid grid-cols-12 gap-5">
     <section class="col-span-12 lg:col-span-4 bg-white rounded-xl p-4 shadow">
       <div class="font-bold mb-3">入力</div>
 
@@ -60,12 +75,23 @@
         <option value="detailed">詳細</option>
       </select>
 
-      <div id="video-drop" class="border-2 border-slate-400 bg-slate-50 rounded-xl p-4 text-sm text-slate-700">
-        動画を1本アップロード（30秒以内）
-        <input id="video-file" type="file" accept="video/*" class="hidden">
+      <div class="text-xs text-slate-600 mb-2">
+        動画は <span class="font-semibold">1本のみ</span> / <span class="font-semibold">30秒以内</span> / 画像は不可
       </div>
 
-      <button id="btn-generate" class="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl p-2 font-semibold">
+      <!-- D&D 受付枠 -->
+      <div id="video-drop"
+        class="border-2 border-slate-400 bg-slate-50/60 rounded-xl p-6 text-sm text-slate-700 cursor-pointer
+               hover:bg-slate-50 min-h-[160px] flex flex-col justify-center gap-2 shadow-sm">
+        <div class="font-medium text-slate-800">ここに動画をドラッグ＆ドロップ（またはクリックして選択）</div>
+        <div class="text-xs text-slate-600">対応：mp4 / mov / webm 等（30秒以内）</div>
+        <input id="video-file" type="file" accept="video/*" class="hidden" />
+      </div>
+
+      <div id="video-info" class="mt-2 text-sm text-slate-700"></div>
+
+      <button id="btn-generate" type="button"
+        class="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl p-2 font-semibold">
         原稿案を生成
       </button>
 
