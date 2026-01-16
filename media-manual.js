@@ -1,244 +1,399 @@
-const $ = (id) => document.getElementById(id);
+(() => {
+  const fileInput = document.getElementById("fileInput");
+  const clearBtn = document.getElementById("clearBtn");
+  const runBtn = document.getElementById("runBtn");
+  const statusEl = document.getElementById("status");
+  const previewEl = document.getElementById("preview");
+  const outputEl = document.getElementById("output");
+  const copyBtn = document.getElementById("copyBtn");
+  const notesEl = document.getElementById("notes");
+  const granularityEl = document.getElementById("granularity");
+  const dropZone = document.getElementById("dropZone");
+  const selectedInfo = document.getElementById("selectedInfo");
 
-const drop = $("video-drop");
-const fileInput = $("video-file");
-const info = $("video-info");
-const btn = $("btn-generate");
-const status = $("status-text");
-const out = $("output");
+  // ===== 制約 =====
+  const MAX_VIDEO_MB = 200;
+  const MAX_VIDEO_SECONDS = 30;
 
-let selectedFile = null;
+  // 送信上限（コスト/速度）
+  const MAX_IMAGES_TOTAL = 20; // 最大20枚
 
-// ===== Overlay with elapsed seconds + step log =====
-let overlayTick = null;
-let overlayStartedAt = null;
-const stepLines = [];
+  // 画質・サイズ
+  const JPEG_QUALITY = 0.82;
+  const MAX_SIDE = 1280;
 
-function showOverlay(title, msg) {
-  const overlay = $("overlay");
-  const t = $("overlay-title");
-  const m = $("overlay-msg");
-  const log = $("overlay-log");
+  // 差分抽出（補間なし）
+  const VIDEO_SCAN_FPS = 3;
+  const VIDEO_MIN_GAP_SEC = 0.8;
+  const DIFF_DOWNSCALE_W = 64;
+  const DIFF_DOWNSCALE_H = 36;
+  const DIFF_THRESHOLD = 18;
 
-  if (t) t.textContent = title || "処理中…";
-  const baseMsg = msg || "しばらくお待ちください";
-  overlayStartedAt = Date.now();
-  stepLines.length = 0;
-  if (log) log.textContent = "";
+  let preparedImages = []; // { dataUrl, name }
+  let selectedVideo = null;
 
-  if (overlayTick) clearInterval(overlayTick);
-  overlayTick = setInterval(() => {
-    const sec = Math.floor((Date.now() - overlayStartedAt) / 1000);
-    if (m) m.textContent = `${baseMsg}（${sec}s）`;
-  }, 500);
-  if (m) m.textContent = `${baseMsg}（0s）`;
+  // ===== Overlay（経過秒 + 工程ログ） =====
+  let overlayTick = null;
+  let overlayStartedAt = null;
+  const stepLines = [];
+  function showOverlay(title, msg) {
+    const overlay = document.getElementById("overlay");
+    const t = document.getElementById("overlay-title");
+    const m = document.getElementById("overlay-msg");
+    const log = document.getElementById("overlay-log");
 
-  if (overlay) {
-    overlay.classList.remove("hidden");
-    overlay.classList.add("flex");
+    if (t) t.textContent = title || "処理中…";
+    const baseMsg = msg || "しばらくお待ちください";
+    overlayStartedAt = Date.now();
+    stepLines.length = 0;
+    if (log) log.textContent = "";
+
+    if (overlayTick) clearInterval(overlayTick);
+    overlayTick = setInterval(() => {
+      const sec = Math.floor((Date.now() - overlayStartedAt) / 1000);
+      if (m) m.textContent = `${baseMsg}（${sec}s）`;
+    }, 500);
+    if (m) m.textContent = `${baseMsg}（0s）`;
+
+    if (overlay) {
+      overlay.classList.remove("hidden");
+      overlay.classList.add("flex");
+    }
   }
-}
-function logStep(line) {
-  stepLines.push(`- ${line}`);
-  const log = $("overlay-log");
-  if (log) log.textContent = stepLines.join("\n");
-}
-function hideOverlay() {
-  const overlay = $("overlay");
-  if (overlay) {
-    overlay.classList.add("hidden");
-    overlay.classList.remove("flex");
+  function logStep(line) {
+    stepLines.push(`- ${line}`);
+    const log = document.getElementById("overlay-log");
+    if (log) log.textContent = stepLines.join("\n");
   }
-  if (overlayTick) {
-    clearInterval(overlayTick);
-    overlayTick = null;
+  function hideOverlay() {
+    const overlay = document.getElementById("overlay");
+    if (overlay) {
+      overlay.classList.add("hidden");
+      overlay.classList.remove("flex");
+    }
+    if (overlayTick) {
+      clearInterval(overlayTick);
+      overlayTick = null;
+    }
+    overlayStartedAt = null;
   }
-  overlayStartedAt = null;
-}
 
-// ===== Helpers =====
-function isVideoFile(file) {
-  if (!file) return false;
-  return (file.type || "").startsWith("video/");
-}
+  function setStatus(msg) {
+    statusEl.textContent = msg || "";
+  }
 
-async function getVideoDurationSeconds(file) {
-  // Reliable duration: load metadata into a temporary <video>
-  return await new Promise((resolve, reject) => {
+  function setDropActive(on) {
+    if (!dropZone) return;
+    dropZone.style.background = on ? "#f2f4f7" : "rgba(248,250,252,.6)";
+    dropZone.style.borderColor = on ? "#111" : "#94a3b8";
+  }
+
+  function resetAll() {
+    fileInput.value = "";
+    selectedVideo = null;
+    preparedImages = [];
+    previewEl.innerHTML = "";
+    outputEl.value = "";
+    selectedInfo.textContent = "";
+    setStatus("");
+  }
+
+  function addThumb(dataUrl) {
+    const d = document.createElement("div");
+    d.className = "thumb";
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    d.appendChild(img);
+    previewEl.appendChild(d);
+  }
+
+  function formatMB(bytes) {
+    return Math.round(bytes / 1024 / 1024);
+  }
+
+  async function validateVideoFile(file) {
+    if (!file) throw new Error("NoFile");
+    if (!(file.type || "").startsWith("video/")) throw new Error("VideoOnly");
+    if (formatMB(file.size) > MAX_VIDEO_MB) throw new Error("TooLarge");
+
+    // duration check via metadata
     const url = URL.createObjectURL(file);
-    const v = document.createElement("video");
-    v.preload = "metadata";
-    v.onloadedmetadata = () => {
-      const d = Number(v.duration);
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.src = url;
+    const duration = await new Promise((resolve, reject) => {
+      video.onloadedmetadata = () => resolve(Number(video.duration));
+      video.onerror = () => reject(new Error("DurationReadFailed"));
+    }).finally(() => {
       URL.revokeObjectURL(url);
-      if (!Number.isFinite(d)) return reject(new Error("DurationUnknown"));
-      resolve(d);
-    };
-    v.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("DurationReadFailed"));
-    };
-    v.src = url;
-  });
-}
-
-function setSelectedFile(file) {
-  selectedFile = file;
-  if (!file) {
-    info.textContent = "";
-    return;
-  }
-  info.textContent = `選択中：${file.name}（${Math.round(file.size / 1024 / 1024)}MB）`;
-}
-
-function showError(msg) {
-  status.textContent = msg;
-}
-
-// Click to open file picker
-drop.addEventListener("click", () => fileInput.click());
-
-// File picker change
-fileInput.addEventListener("change", async () => {
-  status.textContent = "";
-  out.textContent = "";
-  const files = fileInput.files ? Array.from(fileInput.files) : [];
-  if (files.length === 0) return;
-
-  if (files.length !== 1) {
-    fileInput.value = "";
-    setSelectedFile(null);
-    return showError("動画は1本のみ選択してください。");
-  }
-  const f = files[0];
-  if (!isVideoFile(f)) {
-    fileInput.value = "";
-    setSelectedFile(null);
-    return showError("画像は受け付けません。動画ファイルを選択してください。");
-  }
-  try {
-    const dur = await getVideoDurationSeconds(f);
-    if (dur > 30.01) {
-      fileInput.value = "";
-      setSelectedFile(null);
-      return showError("動画は30秒以内にしてください。");
-    }
-  } catch {
-    // Duration check failed -> block (safer)
-    fileInput.value = "";
-    setSelectedFile(null);
-    return showError("動画の秒数を確認できませんでした。30秒以内の動画を選択してください。");
-  }
-  setSelectedFile(f);
-});
-
-// Drag & drop handlers
-drop.addEventListener("dragover", (e) => {
-  e.preventDefault();
-  drop.classList.add("ring-2", "ring-slate-400");
-});
-drop.addEventListener("dragleave", () => {
-  drop.classList.remove("ring-2", "ring-slate-400");
-});
-drop.addEventListener("drop", async (e) => {
-  e.preventDefault();
-  drop.classList.remove("ring-2", "ring-slate-400");
-  status.textContent = "";
-  out.textContent = "";
-
-  const files = e.dataTransfer ? Array.from(e.dataTransfer.files || []) : [];
-  if (files.length === 0) return;
-
-  if (files.length !== 1) {
-    setSelectedFile(null);
-    fileInput.value = "";
-    return showError("動画は1本のみ受け付けます。");
-  }
-
-  const f = files[0];
-  if (!isVideoFile(f)) {
-    setSelectedFile(null);
-    fileInput.value = "";
-    return showError("画像は受け付けません。動画ファイルをドラッグしてください。");
-  }
-
-  try {
-    const dur = await getVideoDurationSeconds(f);
-    if (dur > 30.01) {
-      setSelectedFile(null);
-      fileInput.value = "";
-      return showError("動画は30秒以内にしてください。");
-    }
-  } catch {
-    setSelectedFile(null);
-    fileInput.value = "";
-    return showError("動画の秒数を確認できませんでした。30秒以内の動画を選択してください。");
-  }
-
-  // Put the file into the hidden input (best-effort)
-  try {
-    const dt = new DataTransfer();
-    dt.items.add(f);
-    fileInput.files = dt.files;
-  } catch {
-    // Some browsers may block programmatic set; that's fine.
-  }
-
-  setSelectedFile(f);
-});
-
-function setUIBusy(busy) {
-  btn.disabled = busy;
-  if (busy) {
-    btn.classList.add("opacity-60", "cursor-not-allowed");
-    drop.classList.add("opacity-60", "pointer-events-none");
-  } else {
-    btn.classList.remove("opacity-60", "cursor-not-allowed");
-    drop.classList.remove("opacity-60", "pointer-events-none");
-  }
-}
-
-btn.addEventListener("click", async () => {
-  status.textContent = "";
-  out.textContent = "";
-
-  if (!selectedFile) return showError("動画を1本選択してください。");
-
-  const notes = ($("notes").value || "").trim();
-  const granularity = ($("granularity").value || "standard").toString();
-
-  setUIBusy(true);
-  showOverlay("生成中…", "処理中");
-  logStep("入力チェック");
-
-  try {
-    logStep("サーバー処理（原稿生成）");
-    const res = await fetch("/api/manual-ai", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mode: "media-manual",
-        notes,
-        granularity,
-        // 既存実装に合わせてフレーム抽出はサーバ側で行う前提
-      }),
     });
 
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      console.warn("manual-ai error", data);
-      status.textContent = "生成に失敗しました。";
+    if (!Number.isFinite(duration)) throw new Error("DurationUnknown");
+    if (duration > MAX_VIDEO_SECONDS + 0.01) throw new Error("TooLong");
+
+    return duration;
+  }
+
+  async function extractVideoFrames(file) {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.src = url;
+    video.muted = true;
+    video.playsInline = true;
+
+    await new Promise((resolve, reject) => {
+      video.onloadedmetadata = resolve;
+      video.onerror = reject;
+    });
+
+    const duration = Number.isFinite(video.duration) ? video.duration : 0;
+    if (!duration) {
+      URL.revokeObjectURL(url);
+      return [];
+    }
+
+    const vw = video.videoWidth || 640;
+    const vh = video.videoHeight || 360;
+
+    const saveCanvas = document.createElement("canvas");
+    const saveScale = Math.min(1, MAX_SIDE / Math.max(vw, vh));
+    saveCanvas.width = Math.round(vw * saveScale);
+    saveCanvas.height = Math.round(vh * saveScale);
+    const saveCtx = saveCanvas.getContext("2d");
+
+    const diffCanvas = document.createElement("canvas");
+    diffCanvas.width = DIFF_DOWNSCALE_W;
+    diffCanvas.height = DIFF_DOWNSCALE_H;
+    const diffCtx = diffCanvas.getContext("2d", { willReadFrequently: true });
+
+    const frames = [];
+    let prev = null;
+    let lastAcceptedT = -999;
+
+    function captureJpeg() {
+      saveCtx.drawImage(video, 0, 0, saveCanvas.width, saveCanvas.height);
+      return saveCanvas.toDataURL("image/jpeg", JPEG_QUALITY);
+    }
+
+    async function seekTo(t) {
+      t = Math.max(0, Math.min(duration - 0.05, t));
+      await new Promise((resolve) => {
+        const onSeeked = () => {
+          video.removeEventListener("seeked", onSeeked);
+          resolve();
+        };
+        video.addEventListener("seeked", onSeeked);
+        video.currentTime = t;
+      });
+      return t;
+    }
+
+    function diffScore() {
+      diffCtx.drawImage(video, 0, 0, diffCanvas.width, diffCanvas.height);
+      const img = diffCtx.getImageData(0, 0, diffCanvas.width, diffCanvas.height);
+      const data = img.data;
+
+      if (!prev) {
+        prev = data.slice();
+        return 0;
+      }
+
+      let sum = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        sum += Math.abs(data[i] - prev[i]);
+        sum += Math.abs(data[i + 1] - prev[i + 1]);
+        sum += Math.abs(data[i + 2] - prev[i + 2]);
+      }
+      prev = data.slice();
+
+      const denom = (diffCanvas.width * diffCanvas.height) * 3;
+      return sum / denom;
+    }
+
+    // first
+    await seekTo(0);
+    frames.push(captureJpeg());
+    lastAcceptedT = 0;
+
+    const step = 1 / Math.max(1, VIDEO_SCAN_FPS);
+    for (let t = step; t < duration; t += step) {
+      if (frames.length >= MAX_IMAGES_TOTAL - 1) break;
+      const tt = await seekTo(t);
+
+      const score = diffScore();
+      const gapOk = (tt - lastAcceptedT) >= VIDEO_MIN_GAP_SEC;
+
+      if (gapOk && score >= DIFF_THRESHOLD) {
+        frames.push(captureJpeg());
+        lastAcceptedT = tt;
+      }
+    }
+
+    // last
+    if (frames.length < MAX_IMAGES_TOTAL) {
+      const endT = Math.max(0, duration - 0.2);
+      await seekTo(endT);
+      frames.push(captureJpeg());
+    }
+
+    URL.revokeObjectURL(url);
+    return frames;
+  }
+
+  async function prepareFromVideo(file) {
+    preparedImages = [];
+    previewEl.innerHTML = "";
+    outputEl.value = "";
+
+    setStatus("動画を準備中…");
+    showOverlay("準備中…", "動画を解析中");
+    logStep("動画の秒数/容量チェック");
+
+    const dur = await validateVideoFile(file);
+    logStep(`OK（${dur.toFixed(1)}秒 / ${formatMB(file.size)}MB）`);
+    selectedInfo.textContent = `選択中：${file.name}（${formatMB(file.size)}MB / ${dur.toFixed(1)}秒）`;
+
+    logStep("フレーム抽出（差分ベース）");
+    const frames = await extractVideoFrames(file);
+
+    for (let i = 0; i < frames.length; i++) {
+      preparedImages.push({ dataUrl: frames[i], name: `${file.name}#frame${i + 1}` });
+    }
+
+    previewEl.innerHTML = "";
+    for (let i = 0; i < preparedImages.length; i++) addThumb(preparedImages[i].dataUrl);
+
+    setStatus(`準備完了：${preparedImages.length}枚 送信`);
+    hideOverlay();
+  }
+
+  async function handleFiles(files) {
+    const list = Array.from(files || []);
+    if (!list.length) return;
+
+    if (list.length !== 1) {
+      resetAll();
+      setStatus("動画は1本のみ受け付けます。");
       return;
     }
 
-    logStep("結果の整形");
-    out.textContent = (data.text || "").toString();
-    status.textContent = "原稿案を生成しました。";
-  } catch (e) {
-    console.warn(e);
-    status.textContent = "生成に失敗しました。";
-  } finally {
-    hideOverlay();
-    setUIBusy(false);
+    const f = list[0];
+    if ((f.type || "").startsWith("image/")) {
+      resetAll();
+      setStatus("画像は受け付けません。動画ファイルを選択してください。");
+      return;
+    }
+
+    if (!(f.type || "").startsWith("video/")) {
+      resetAll();
+      setStatus("動画ファイルを選択してください。");
+      return;
+    }
+
+    if (Math.round(f.size / 1024 / 1024) > MAX_VIDEO_MB) {
+      resetAll();
+      setStatus(`動画サイズが大きすぎます（最大${MAX_VIDEO_MB}MB）。`);
+      return;
+    }
+
+    selectedVideo = f;
+    await prepareFromVideo(f).catch((err) => {
+      console.error(err);
+      resetAll();
+      setStatus("動画の準備に失敗しました（30秒以内の動画を選択してください）。");
+      hideOverlay();
+    });
   }
-});
+
+  async function run() {
+    outputEl.value = "";
+
+    if (!preparedImages.length) {
+      setStatus("先に動画を選択してください");
+      return;
+    }
+
+    runBtn.disabled = true;
+    clearBtn.disabled = true;
+    fileInput.disabled = true;
+
+    try {
+      showOverlay("生成中…", "AIが原稿を作成中");
+      logStep("API送信（フレーム）");
+
+      const payload = {
+        mode: "media-manual",
+        notes: (notesEl.value || ""),
+        granularity: (granularityEl.value || "standard"),
+        images: preparedImages.map((x) => ({ name: x.name, dataUrl: x.dataUrl })),
+      };
+
+      const res = await fetch("/api/manual-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const t = await res.text().catch(() => "");
+        throw new Error(`API error: ${res.status} ${t}`);
+      }
+
+      logStep("出力受信");
+      const data = await res.json();
+      outputEl.value = data && data.text ? data.text : "";
+      setStatus("完了");
+    } catch (e) {
+      console.error(e);
+      setStatus(`失敗：${e && e.message ? e.message : e}`);
+    } finally {
+      hideOverlay();
+      runBtn.disabled = false;
+      clearBtn.disabled = false;
+      fileInput.disabled = false;
+    }
+  }
+
+  // ===== events =====
+  dropZone.addEventListener("click", () => fileInput.click());
+
+  fileInput.addEventListener("change", (ev) => {
+    handleFiles(ev.target.files);
+  });
+
+  clearBtn.addEventListener("click", resetAll);
+  runBtn.addEventListener("click", run);
+
+  copyBtn.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(outputEl.value || "");
+      setStatus("コピーしました");
+      setTimeout(() => setStatus(""), 1200);
+    } catch {
+      setStatus("コピーに失敗しました");
+    }
+  });
+
+  ["dragenter", "dragover"].forEach((evName) => {
+    dropZone.addEventListener(evName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDropActive(true);
+    });
+  });
+
+  ["dragleave", "drop"].forEach((evName) => {
+    dropZone.addEventListener(evName, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDropActive(false);
+    });
+  });
+
+  dropZone.addEventListener("drop", async (e) => {
+    const dt = e.dataTransfer;
+    const files = dt ? dt.files : null;
+    if (!files || !files.length) return;
+    await handleFiles(files);
+  });
+})();
