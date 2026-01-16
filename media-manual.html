@@ -3,88 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>動画 → 取説原稿案</title>
+  <title>動画から原稿</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="/media-manual.js" defer></script>
-
-  <!-- 他ツールと同じナビ（配置・文字・外観の統一） -->
   <style>
-    body{
-      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
-      margin:0;
-      padding:0;
-    }
-
-    /* ===== Top Nav (Group + One-click) ===== */
-    .tool-nav{
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background:#374151;
-      padding: 10px 16px;
-      box-shadow: 0 2px 4px rgba(0,0,0,.12);
-
-      display:flex;
-      justify-content:center;
-      gap: 14px;
-      align-items:center;
-      flex-wrap: wrap;
-    }
-    .tool-nav .nav-groupbox{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap: 6px;
-      padding: 8px 10px;
-      border: 1px solid rgba(255,255,255,.14);
-      border-radius: 10px;
-      background: rgba(255,255,255,.04);
-    }
-    .tool-nav .nav-heading{
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:6px;
-      width:100%;
-
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      color: rgba(243,244,246,.75);
-      line-height: 1;
-      user-select: none;
-    }
-    .tool-nav .nav-heading::before{ content: "⭐"; opacity: .9; }
-    .tool-nav .nav-links{
-      display:flex;
-      gap: 8px;
-      align-items:center;
-      flex-wrap: wrap;
-      justify-content:center;
-    }
-    .tool-nav a{
-      color:#f3f4f6;
-      text-decoration:none;
-      font-weight: 600;
-      font-size: 14px;
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.06);
-      transition: background-color .15s, transform .05s;
-      display:inline-flex;
-      align-items:center;
-      gap: 6px;
-    }
-    .tool-nav a:hover{ background: rgba(255,255,255,.12); }
-    .tool-nav a:active{ transform: translateY(1px); }
-    .tool-nav a.active{ background:#172554; color:#fff; }
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;margin:0;padding:0}
+    .tool-nav{position:sticky;top:0;z-index:100;background:#374151;padding:10px 16px;box-shadow:0 2px 4px rgba(0,0,0,.12);display:flex;justify-content:center;gap:14px;align-items:center;flex-wrap:wrap}
+    .nav-groupbox{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 10px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.04)}
+    .nav-heading{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;font-weight:700;letter-spacing:.08em;color:rgba(243,244,246,.85)}
+    .nav-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .tool-nav a{color:#f3f4f6;text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06)}
+    .tool-nav a.active{background:#172554;color:#fff}
   </style>
 </head>
-
 <body class="bg-slate-100">
   <nav class="tool-nav">
     <div class="nav-groupbox">
-      <div class="nav-heading">翻訳</div>
+      <div class="nav-heading">🌐 翻訳</div>
       <div class="nav-links">
         <a href="/index.html">翻訳ツール</a>
         <a href="/verify.html">検証結果翻訳</a>
@@ -93,76 +28,53 @@
         <a href="/word-translate.html">Word翻訳</a>
       </div>
     </div>
-
     <div class="nav-groupbox">
-      <div class="nav-heading">その他</div>
+      <div class="nav-heading">📝 マニュアル</div>
+      <div class="nav-links">
+        <a href="/manual.html">原稿作成（AIチェック）</a>
+        <a href="/media-manual.html" class="active">動画から原稿</a>
+      </div>
+    </div>
+    <div class="nav-groupbox">
+      <div class="nav-heading">🧩 その他</div>
       <div class="nav-links">
         <a href="/report.html">修理レポート</a>
-        <a href="/manual.html">マニュアルツール</a>
         <a href="/prompt.html">単発プロンプト</a>
-        <a href="/media-manual.html" class="active">画像/動画→取説原稿案</a>
         <a href="/kensho.html">検証項目作成</a>
       </div>
     </div>
   </nav>
 
-  <!-- オーバーレイ（処理中） -->
-  <div id="overlay" class="fixed inset-0 hidden items-center justify-center bg-black/40 z-50">
-    <div class="bg-white rounded-xl shadow-lg w-[440px] p-5">
-      <div class="flex items-center gap-3">
-        <div class="h-6 w-6 rounded-full border-4 border-slate-300 border-t-slate-700 animate-spin"></div>
-        <div class="flex-1">
-          <div id="overlay-title" class="font-semibold">処理中…</div>
-          <div id="overlay-msg" class="text-sm text-slate-600 mt-1">しばらくお待ちください</div>
-        </div>
-      </div>
-      <div id="overlay-log" class="mt-3 text-xs text-slate-600 whitespace-pre-line"></div>
-    </div>
-  </div>
-
-  <main class="w-full max-w-[1800px] mx-auto px-6 py-4 grid grid-cols-12 gap-5">
-    <!-- 左：入力 -->
-    <section class="col-span-12 lg:col-span-5 bg-white rounded-xl p-4 shadow">
+  <main class="max-w-[1200px] mx-auto p-4 grid grid-cols-12 gap-4">
+    <section class="col-span-12 lg:col-span-4 bg-white rounded-xl p-4 shadow">
       <div class="font-bold mb-3">入力</div>
 
-      <label class="block text-sm mb-1">動画（1本のみ）</label>
-      <input id="fileInput" type="file" accept="video/*" class="w-full border rounded-lg p-2" />
+      <label class="block text-sm mb-1">備考（任意）</label>
+      <textarea id="notes" class="w-full border rounded-lg p-2 mb-3" rows="4"
+        placeholder="例：電池交換手順を作成したい / 組み立て方法を文章化したい"></textarea>
 
-      <div id="dropZone"
-        class="mt-3 border-2 border-dashed border-slate-400 bg-slate-50/60 rounded-xl p-5 text-sm text-slate-700 cursor-pointer
-               hover:bg-slate-50 min-h-[140px] flex flex-col justify-center gap-2 shadow-sm"
-      >
-        <div class="font-medium text-slate-800">ここに動画をドラッグ＆ドロップ（または上で選択）</div>
-        <div class="text-xs text-slate-600" id="limitsText">動画は1本のみ／30秒以内／最大容量：200MB</div>
+      <label class="block text-sm mb-1">粒度</label>
+      <select id="granularity" class="w-full border rounded-lg p-2 mb-3">
+        <option value="standard" selected>標準</option>
+        <option value="simple">簡潔</option>
+        <option value="detailed">詳細</option>
+      </select>
+
+      <div id="video-drop" class="border-2 border-slate-400 bg-slate-50 rounded-xl p-4 text-sm text-slate-700">
+        動画を1本アップロード（30秒以内）
+        <input id="video-file" type="file" accept="video/*" class="hidden">
       </div>
 
-      <div class="mt-3 flex gap-2">
-        <button id="clearBtn" type="button" class="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50 font-semibold">クリア</button>
-        <button id="runBtn" type="button" class="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold">原稿案を生成</button>
-      </div>
+      <button id="btn-generate" class="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl p-2 font-semibold">
+        原稿案を生成
+      </button>
 
-      <label class="block mt-4 text-sm mb-1">備考（任意）</label>
-      <textarea
-        id="notes"
-        class="w-full border rounded-lg p-2 min-h-[160px]"
-        placeholder="例：電池交換手順を作成したい／組み立て方法を文章化したい／ボタン名称の説明を入れたい など"
-      ></textarea>
-
-      <div class="mt-3 text-sm text-slate-600" id="status"></div>
-
-      <div class="mt-4">
-        <div class="text-xs text-slate-600 mb-2">プレビュー（送信予定フレーム）</div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2" id="preview"></div>
-      </div>
+      <div id="status-text" class="mt-3 text-sm text-slate-600"></div>
     </section>
 
-    <!-- 右：出力 -->
-    <section class="col-span-12 lg:col-span-7 bg-white rounded-xl p-4 shadow">
-      <div class="font-bold mb-3">出力（取扱説明書の原稿案）</div>
-      <textarea id="output" class="w-full border rounded-lg p-2 min-h-[520px]" placeholder="ここに原稿案が表示されます"></textarea>
-      <div class="mt-3 flex gap-2">
-        <button id="copyBtn" type="button" class="px-4 py-2 rounded-xl border bg-white hover:bg-slate-50 font-semibold">コピー</button>
-      </div>
+    <section class="col-span-12 lg:col-span-8 bg-white rounded-xl p-4 shadow">
+      <div class="font-bold mb-3">出力（原稿案）</div>
+      <pre id="output" class="whitespace-pre-wrap text-sm"></pre>
     </section>
   </main>
 </body>
