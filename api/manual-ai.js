@@ -1,139 +1,46 @@
-// api/manual-ai.js
 import OpenAI from "openai";
-
-const MODEL_MANUAL_CHECK =
-  process.env.MODEL_MANUAL_CHECK ||
-  process.env.MODEL_MANUAL || // 互換用（今は残す）
-  "gpt-5.2";
-
-const MODEL_MANUAL_IMAGE = process.env.MODEL_MANUAL_IMAGE || "gpt-5.1";
-
-const MANUAL_CHECK_REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
-const MANUAL_CHECK_VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
-
-const MANUAL_IMAGE_REASONING = process.env.MANUAL_IMAGE_REASONING || "none";
-const MANUAL_IMAGE_VERBOSITY = process.env.MANUAL_IMAGE_VERBOSITY || "low";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "MethodNotAllowed" });
-  }
-
+  if (req.method !== "POST") return res.status(405).end();
   try {
-    const body =
-      typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-    const { prompt, image, mode } = body;
+    const body = req.body || {};
+    if (body.mode !== "media-manual") {
+      return res.status(400).json({ error: "Unsupported mode" });
+    }
+    const notes = String(body.notes || "");
+    const granularity = String(body.granularity || "standard");
 
-    // =========================================================
-    // media-manual：動画フレーム → 取説「操作説明のみ」
-    // =========================================================
-    // フロント想定:
-    // {
-    //   mode: "media-manual",
-    //   notes,                // 任意：何を作成してほしいか等
-    //   images: [{ name, dataUrl }, ...]  // 動画から抽出したフレーム
-    // }
-    // 返却は { text } に統一（フロント互換）
-    if ((mode || "") === "media-manual") {
-      const notes = String(body.notes || "");
-      const images = Array.isArray(body.images) ? body.images : [];
+    const sys =
+      "あなたは日本語の取扱説明書向け原稿の作成者です。\n" +
+      "文体はです・ます調で統一してください。\n\n" +
+      "【絶対条件】\n" +
+      "- 推測で断定しない\n" +
+      "- 過剰な注意・免責を書かない\n\n" +
+      "【粒度】\n" +
+      "- simple: 要点のみ\n" +
+      "- standard: 通常\n" +
+      "- detailed: 丁寧\n\n" +
+      "【出力形式】\n" +
+      "1行目に必ずタイトル（例：■ 電池の交換）\n" +
+      "以降は番号付き手順。必要に応じて確認事項。";
 
-      if (!images.length) {
-        return res.status(400).json({ error: "NoImages" });
-      }
+    const user =
+      (notes ? `備考: ${notes}\n` : "") +
+      `粒度: ${granularity}\n`;
 
-      const sys =
-        "あなたは取扱説明書の「操作説明」原稿の作成者です。\n" +
-        "入力の画像（動画から抽出したフレーム）を観察し、動作説明（手順）の文章だけを日本語（です・ます）で作成してください。\n\n" +
-        "【絶対条件】\n" +
-        "- 注意事項、警告、禁止事項、免責、買い替え提案、危険表現は出力しない\n" +
-        "- 仕様や数値など、画像から断定できない内容は推測で書かない（不明として扱う）\n" +
-        "- 出力は「操作手順」に集中し、冗長な前置きは不要\n\n" +
-        "【出力形式】\n" +
-        "1. 〜 2. 〜 のように番号付きで手順を列挙\n" +
-        "最後に必要なら「確認事項：〜」を1〜3点だけ\n";
-
-      const userText =
-        (notes ? `備考: ${notes}\n` : "") +
-        `フレーム枚数: ${images.length}\n`;
-
-      const userContent = [{ type: "text", text: userText }];
-
-      for (const im of images) {
-        const dataUrl = im && im.dataUrl ? String(im.dataUrl) : "";
-        if (!dataUrl) continue;
-        if (!dataUrl.startsWith("data:image/") && !dataUrl.startsWith("http")) continue;
-
-        userContent.push({
-          type: "image_url",
-          image_url: { url: dataUrl },
-        });
-      }
-
-      const messages = [
+    const r = await client.responses.create({
+      model: "gpt-5.2",
+      input: [
         { role: "system", content: sys },
-        { role: "user", content: userContent },
-      ];
-
-      const completion = await client.chat.completions.create({
-        model: MODEL_MANUAL_IMAGE,
-        messages,
-        reasoning_effort: MANUAL_IMAGE_REASONING,
-        verbosity: MANUAL_IMAGE_VERBOSITY,
-      });
-
-      const text = completion.choices[0]?.message?.content ?? "";
-      return res.status(200).json({ text });
-    }
-
-    // =========================================================
-    // 既存：manual-ai（check/image）
-    // =========================================================
-    if (!prompt) {
-      return res.status(400).json({ error: "PromptRequired" });
-    }
-
-    const messages = [
-      {
-        role: "system",
-        content: "あなたは日本語マニュアル作成のアシスタントです。必ず日本語のみで回答してください。",
-      },
-    ];
-
-    const userContent = [{ type: "text", text: prompt }];
-
-    if (typeof image === "string") {
-      if (image.startsWith("data:image/") || image.startsWith("http")) {
-        userContent.push({
-          type: "image_url",
-          image_url: { url: image },
-        });
-      }
-    }
-
-    messages.push({ role: "user", content: userContent });
-
-    const isCheck = (mode || "check") === "check";
-
-    const completion = await client.chat.completions.create({
-      model: isCheck ? MODEL_MANUAL_CHECK : MODEL_MANUAL_IMAGE,
-      messages,
-      reasoning_effort: isCheck ? MANUAL_CHECK_REASONING : MANUAL_IMAGE_REASONING,
-      verbosity: isCheck ? MANUAL_CHECK_VERBOSITY : MANUAL_IMAGE_VERBOSITY,
+        { role: "user", content: user }
+      ],
+      max_output_tokens: 700
     });
 
-    
-    const text = completion.choices[0]?.message?.content ?? "";
-    return res.status(200).json({ text });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({
-      error: "OpenAIError",
-      detail: String(err),
-    });
+    const text = r.output_text || "";
+    res.json({ text });
+  } catch (e) {
+    res.status(500).json({ error: "Failed", detail: String(e) });
   }
 }
