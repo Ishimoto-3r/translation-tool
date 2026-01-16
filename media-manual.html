@@ -15,8 +15,16 @@
     .tool-nav a{color:#f3f4f6;text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06)}
     .tool-nav a:hover{background:rgba(255,255,255,.12)}
     .tool-nav a.active{background:#172554;color:#fff}
-    .thumb{width:96px;height:72px;border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;background:#f8fafc;display:flex;align-items:center;justify-content:center}
+
+    .thumb{position:relative;width:112px;height:84px;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#f8fafc;display:flex;align-items:center;justify-content:center}
     .thumb img{width:100%;height:100%;object-fit:cover}
+    .thumb button{
+      position:absolute;top:6px;right:6px;
+      width:22px;height:22px;border-radius:999px;
+      background:rgba(15,23,42,.75);color:white;
+      font-size:14px;line-height:22px;text-align:center;
+    }
+    .thumb button:hover{background:rgba(15,23,42,.9)}
   </style>
 </head>
 <body class="bg-slate-100">
@@ -31,6 +39,7 @@
         <a href="/word-translate.html">Word翻訳</a>
       </div>
     </div>
+
     <div class="nav-groupbox">
       <div class="nav-heading">📝 マニュアル</div>
       <div class="nav-links">
@@ -38,19 +47,20 @@
         <a href="/media-manual.html" class="active">動画から原稿</a>
       </div>
     </div>
+
     <div class="nav-groupbox">
-      <div class="nav-heading">🧩 その他</div>
+      <div class="nav-heading">★ その他</div>
       <div class="nav-links">
         <a href="/report.html">修理レポート</a>
-        <a href="/prompt.html">単発プロンプト</a>
         <a href="/kensho.html">検証項目作成</a>
+        <a href="/prompt.html">単発プロンプト</a>
       </div>
     </div>
   </nav>
 
   <!-- Overlay -->
   <div id="overlay" class="fixed inset-0 hidden items-center justify-center bg-black/40 z-50">
-    <div class="bg-white rounded-xl shadow-lg w-[420px] p-5">
+    <div class="bg-white rounded-xl shadow-lg w-[440px] p-5">
       <div class="flex items-start gap-3">
         <div class="h-6 w-6 rounded-full border-4 border-slate-300 border-t-slate-700 animate-spin mt-1"></div>
         <div class="flex-1">
@@ -70,20 +80,24 @@
       <textarea id="notes" class="w-full border rounded-lg p-2 mb-3" rows="4"
         placeholder="例：電池交換手順を作成したい / 組み立て方法を文章化したい"></textarea>
 
-      <label class="block text-sm mb-1">粒度</label>
-      <select id="granularity" class="w-full border rounded-lg p-2 mb-3">
-        <option value="standard" selected>標準</option>
-        <option value="simple">簡潔</option>
-        <option value="detailed">詳細</option>
+      <label class="block text-sm mb-1">詳しさ</label>
+      <select id="granularity" class="w-full border rounded-lg p-2">
+        <option value="simple">短め（要点だけ）</option>
+        <option value="standard" selected>ふつう（標準）</option>
+        <option value="detailed">丁寧（初心者向け）</option>
       </select>
+      <div class="text-xs text-slate-600 mt-1">
+        例：短め＝最小限 / ふつう＝取説レベル / 丁寧＝迷いやすい点も補足（推測はしません）
+      </div>
 
-      <div class="text-xs text-slate-600 mb-2">
-        動画は <span class="font-semibold">1本のみ</span> / <span class="font-semibold">30秒以内</span> / <span class="font-semibold">最大200MB</span> / 画像は不可
+      <div class="text-xs text-slate-600 mt-3">
+        動画は <span class="font-semibold">1本のみ</span> / <span class="font-semibold">30秒以内</span> / <span class="font-semibold">最大200MB</span> / 画像は不可<br>
+        送信フレーム：<span class="font-semibold">最大20枚</span>（差分ベース・補間なし）
       </div>
 
       <!-- D&D + click -->
       <div id="dropZone"
-        class="border-2 border-slate-400 bg-slate-50/60 rounded-xl p-6 text-sm text-slate-700 cursor-pointer
+        class="mt-3 border-2 border-slate-400 bg-slate-50/60 rounded-xl p-6 text-sm text-slate-700 cursor-pointer
                hover:bg-slate-50 min-h-[160px] flex flex-col justify-center gap-2 shadow-sm">
         <div class="font-medium text-slate-800">ここに動画をドラッグ＆ドロップ（またはクリックして選択）</div>
         <div class="text-xs text-slate-600">対応：mp4 / mov / webm 等（30秒以内）</div>
@@ -94,10 +108,14 @@
 
       <div class="mt-3 text-sm text-slate-600">プレビュー（送信フレーム）</div>
       <div id="preview" class="mt-2 flex flex-wrap gap-2"></div>
+      <div class="text-xs text-slate-500 mt-2">※不要なフレームはサムネ右上の×で削除できます。</div>
 
       <div class="mt-3 flex gap-2">
         <button id="clearBtn" type="button" class="flex-1 bg-slate-200 hover:bg-slate-300 rounded-xl p-2 font-semibold">クリア</button>
-        <button id="runBtn" type="button" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl p-2 font-semibold">原稿案を生成</button>
+        <button id="runBtn" type="button" disabled
+          class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl p-2 font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+          原稿案を生成
+        </button>
       </div>
 
       <div id="status" class="mt-3 text-sm text-slate-600"></div>
