@@ -375,9 +375,11 @@ async function handleGenerate(req, res) {
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
   const { selectedLabels, productInfo, images } = body;
 
-  if (!Array.isArray(selectedLabels) || selectedLabels.length === 0) {
-    return res.status(400).json({ error: "SelectedLabelsRequired" });
-  }
+// selectedLabels は未選択でも許可する（未選択=抽出0件のテンプレ生成）
+const safeLabels = Array.isArray(selectedLabels)
+  ? selectedLabels.filter(v => (v ?? "").toString().trim())
+  : [];
+
 
   // 1) SharePointのdatabase.xlsxを取得
   const buf = await downloadExcelBufferFromSharePoint();
@@ -392,10 +394,12 @@ async function handleGenerate(req, res) {
   if (!wsTpl) throw new Error("SheetError: 初回検証フォーマット が見つかりません");
 
   // C1 に選択語句（カンマ区切り）
-  wsTpl.getCell("C1").value = `選択語句：${selectedLabels.join(",")}`;
+wsTpl.getCell("C1").value = `選択語句：${safeLabels.length ? safeLabels.join(",") : "（なし）"}`;
+
 
   // 3) 検証項目リストから抽出（A=大分類、B〜Hを機械コピー）
-  const chosen = new Set(selectedLabels);
+const chosen = new Set(safeLabels);
+
   const extracted = [];
   for (let r = 3; r <= wsList.rowCount; r++) {
     const row = wsList.getRow(r);
