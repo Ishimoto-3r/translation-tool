@@ -65,6 +65,12 @@
     const log = document.getElementById("overlay-log");
     if (log) log.textContent = stepLines.join("\n");
   }
+  function setOverlayMsg(msg) {
+    const m = document.getElementById("overlay-msg");
+    if (!m) return;
+    const sec = overlayStartedAt ? Math.floor((Date.now() - overlayStartedAt) / 1000) : 0;
+    m.textContent = `${msg}（${sec}s）`;
+  }
   function hideOverlay() {
     const overlay = document.getElementById("overlay");
     if (overlay) {
@@ -81,11 +87,18 @@
   function setStatus(msg) {
     statusEl.textContent = msg || "";
   }
+  function setCanRun() {
+    runBtn.disabled = preparedImages.length === 0;
+  }
 
   function setDropActive(on) {
     if (!dropZone) return;
     dropZone.style.background = on ? "#f2f4f7" : "rgba(248,250,252,.6)";
     dropZone.style.borderColor = on ? "#111" : "#94a3b8";
+  }
+
+  function formatMB(bytes) {
+    return Math.round(bytes / 1024 / 1024);
   }
 
   function resetAll() {
@@ -96,19 +109,33 @@
     outputEl.value = "";
     selectedInfo.textContent = "";
     setStatus("");
+    setCanRun();
   }
 
-  function addThumb(dataUrl) {
-    const d = document.createElement("div");
-    d.className = "thumb";
-    const img = document.createElement("img");
-    img.src = dataUrl;
-    d.appendChild(img);
-    previewEl.appendChild(d);
-  }
+  function renderPreview() {
+    previewEl.innerHTML = "";
+    preparedImages.forEach((p, idx) => {
+      const d = document.createElement("div");
+      d.className = "thumb";
+      const img = document.createElement("img");
+      img.src = p.dataUrl;
+      d.appendChild(img);
 
-  function formatMB(bytes) {
-    return Math.round(bytes / 1024 / 1024);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "×";
+      b.title = "このフレームを削除";
+      b.addEventListener("click", (e) => {
+        e.preventDefault();
+        preparedImages.splice(idx, 1);
+        renderPreview();
+        setStatus(`準備完了：${preparedImages.length}枚 送信`);
+        setCanRun();
+      });
+      d.appendChild(b);
+
+      previewEl.appendChild(d);
+    });
   }
 
   async function validateVideoFile(file) {
@@ -130,11 +157,10 @@
 
     if (!Number.isFinite(duration)) throw new Error("DurationUnknown");
     if (duration > MAX_VIDEO_SECONDS + 0.01) throw new Error("TooLong");
-
     return duration;
   }
 
-  async function extractVideoFrames(file) {
+  async function extractVideoFrames(file, onProgress) {
     const url = URL.createObjectURL(file);
     const video = document.createElement("video");
     video.src = url;
@@ -214,6 +240,7 @@
     await seekTo(0);
     frames.push(captureJpeg());
     lastAcceptedT = 0;
+    onProgress && onProgress({ accepted: frames.length, totalLimit: MAX_IMAGES_TOTAL, phase: "scan" });
 
     const step = 1 / Math.max(1, VIDEO_SCAN_FPS);
     for (let t = step; t < duration; t += step) {
@@ -226,6 +253,7 @@
       if (gapOk && score >= DIFF_THRESHOLD) {
         frames.push(captureJpeg());
         lastAcceptedT = tt;
+        onProgress && onProgress({ accepted: frames.length, totalLimit: MAX_IMAGES_TOTAL, phase: "scan" });
       }
     }
 
@@ -234,6 +262,7 @@
       const endT = Math.max(0, duration - 0.2);
       await seekTo(endT);
       frames.push(captureJpeg());
+      onProgress && onProgress({ accepted: frames.length, totalLimit: MAX_IMAGES_TOTAL, phase: "end" });
     }
 
     URL.revokeObjectURL(url);
@@ -242,8 +271,9 @@
 
   async function prepareFromVideo(file) {
     preparedImages = [];
-    previewEl.innerHTML = "";
+    renderPreview();
     outputEl.value = "";
+    setCanRun();
 
     setStatus("動画を準備中…");
     showOverlay("準備中…", "動画を解析中");
@@ -254,16 +284,17 @@
     selectedInfo.textContent = `選択中：${file.name}（${formatMB(file.size)}MB / ${dur.toFixed(1)}秒）`;
 
     logStep("フレーム抽出（差分ベース）");
-    const frames = await extractVideoFrames(file);
+    setOverlayMsg(`フレーム抽出中… 0/${MAX_IMAGES_TOTAL}`);
 
-    for (let i = 0; i < frames.length; i++) {
-      preparedImages.push({ dataUrl: frames[i], name: `${file.name}#frame${i + 1}` });
-    }
+    const frames = await extractVideoFrames(file, ({ accepted, totalLimit }) => {
+      setOverlayMsg(`フレーム抽出中… ${accepted}/${totalLimit}`);
+    });
 
-    previewEl.innerHTML = "";
-    for (let i = 0; i < preparedImages.length; i++) addThumb(preparedImages[i].dataUrl);
+    preparedImages = frames.map((dataUrl, i) => ({ dataUrl, name: `${file.name}#frame${i + 1}` }));
 
+    renderPreview();
     setStatus(`準備完了：${preparedImages.length}枚 送信`);
+    setCanRun();
     hideOverlay();
   }
 
@@ -307,7 +338,6 @@
 
   async function run() {
     outputEl.value = "";
-
     if (!preparedImages.length) {
       setStatus("先に動画を選択してください");
       return;
@@ -342,24 +372,21 @@
       logStep("出力受信");
       const data = await res.json();
       outputEl.value = data && data.text ? data.text : "";
-      setStatus("完了");
+      setStatus("原稿案を生成しました。");
     } catch (e) {
       console.error(e);
       setStatus(`失敗：${e && e.message ? e.message : e}`);
     } finally {
       hideOverlay();
-      runBtn.disabled = false;
       clearBtn.disabled = false;
       fileInput.disabled = false;
+      setCanRun(); // 準備済みなら有効に戻る
     }
   }
 
   // ===== events =====
   dropZone.addEventListener("click", () => fileInput.click());
-
-  fileInput.addEventListener("change", (ev) => {
-    handleFiles(ev.target.files);
-  });
+  fileInput.addEventListener("change", (ev) => handleFiles(ev.target.files));
 
   clearBtn.addEventListener("click", resetAll);
   runBtn.addEventListener("click", run);
@@ -396,4 +423,7 @@
     if (!files || !files.length) return;
     await handleFiles(files);
   });
+
+  // init
+  setCanRun();
 })();
