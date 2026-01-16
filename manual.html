@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIマニュアル原稿作成支援ツール</title>
+    <title>原稿作成（AIチェック）ツール</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/docx@7.1.0/build/index.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -86,6 +86,58 @@
             align-content:flex-start;
             min-height:200px;
         }
+
+        /* 選択済みラベル（上部固定） */
+        .genre-selected-pinned {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            width: 100%;
+            background: #ffffff;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 6px 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            box-shadow: 0 1px 2px rgba(0,0,0,.06);
+        }
+        .genre-selected-pinned .pinned-title{
+            font-size: .65rem;
+            font-weight: 800;
+            color: #374151;
+            margin-right: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .genre-chip{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #1e3a8a;
+            font-size: .65rem;
+            font-weight: 700;
+            border: 1px solid #c7d2fe;
+            max-width: 100%;
+        }
+        .genre-chip button{
+            width: 16px;
+            height: 16px;
+            border-radius: 999px;
+            background: rgba(30,58,138,.12);
+            color: #1e3a8a;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            line-height: 1;
+        }
+        .genre-chip button:hover{ background: rgba(30,58,138,.20); }
         .genre-group {
             width:calc(25% - 6px);
             min-width:160px;
@@ -526,7 +578,7 @@ body {
       <div class="nav-group-title">⭐その他</div>
       <div class="nav-links">
         <a href="/report.html">修理レポート</a>
-        <a href="/manual.html" class="active">マニュアル</a>
+        <a href="/manual.html" class="active">原稿作成（AIチェック）</a>
                         <a href="/prompt.html">単発プロンプト</a>
 
       </div>
@@ -545,7 +597,7 @@ body {
 
 <h1 class="text-xl font-extrabold text-gray-900 flex items-center gap-2 tracking-tight">
   <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-600 text-white shadow-sm">🛠️</span>
-  <span>マニュアル原稿作成支援ツール</span>
+  <span>原稿作成（AIチェック）ツール</span>
   <span class="text-xs font-semibold text-gray-500 ml-1">ChatGPT API</span>
 </h1>
 
@@ -2367,6 +2419,20 @@ function renderCheckboxes() {
     gArea.innerHTML = "";
     if (fArea) fArea.innerHTML = "";
 
+    // 選択済み（上部固定）エリアを先頭に作成
+    const pinned = document.createElement("div");
+    pinned.id = "genreSelectedPinned";
+    pinned.className = "genre-selected-pinned";
+    pinned.innerHTML = `
+      <span class="pinned-title">📌 選択済み <span id="genreSelectedCount" class="text-gray-500 font-extrabold"></span></span>
+      <span id="genreSelectedEmpty" class="text-[10px] text-gray-400">未選択</span>
+      <span id="genreSelectedChips" class="flex flex-wrap gap-2"></span>
+    `;
+    gArea.appendChild(pinned);
+
+    // change/click の監視（1回だけ）
+    setupGenrePinnedHandlers();
+
     if (!Array.isArray(RAW_DATA) || !RAW_DATA.length) {
         gArea.innerHTML = `
           <div class="w-full text-center text-sm text-gray-500 py-10">
@@ -2462,7 +2528,83 @@ function renderCheckboxes() {
         div.appendChild(body);
         gArea.appendChild(div);
     });
+
+    // 初期反映
+    updateGenrePinned();
 }
+
+// --- 選択済み（上部固定） ---
+let GENRE_PINNED_WIRED = false;
+
+function setupGenrePinnedHandlers(){
+    if (GENRE_PINNED_WIRED) return;
+    const gArea = document.getElementById("genreArea");
+    if (!gArea) return;
+
+    // チェックの変化を監視
+    gArea.addEventListener("change", (e) => {
+        const t = e.target;
+        if (t && t.matches && t.matches("input[type='checkbox']")) {
+            updateGenrePinned();
+        }
+    });
+
+    // チップの × クリックで解除
+    gArea.addEventListener("click", (e) => {
+        const btn = e.target.closest && e.target.closest("button[data-genre-remove]");
+        if (!btn) return;
+        const enc = btn.getAttribute("data-genre-remove") || "";
+        if (!enc) return;
+        let label = "";
+        try { label = decodeURIComponent(enc); } catch(_) { label = enc; }
+
+        const cb = gArea.querySelector(`input[type='checkbox'][value="${CSS.escape(label)}"]`);
+        if (cb) cb.checked = false;
+        updateGenrePinned();
+    });
+
+    GENRE_PINNED_WIRED = true;
+}
+
+function updateGenrePinned(){
+    const gArea = document.getElementById("genreArea");
+    const pinned = document.getElementById("genreSelectedPinned");
+    if (!gArea || !pinned) return;
+
+    const chipsBox = document.getElementById("genreSelectedChips");
+    const empty = document.getElementById("genreSelectedEmpty");
+    const count = document.getElementById("genreSelectedCount");
+    if (!chipsBox || !empty || !count) return;
+
+    const checked = Array.from(gArea.querySelectorAll(".genre-group input[type='checkbox']:checked"))
+        .map(c => c.value)
+        .filter(v => v);
+
+    chipsBox.innerHTML = "";
+    count.textContent = checked.length ? `(${checked.length})` : "";
+    empty.style.display = checked.length ? "none" : "inline";
+
+    checked.forEach(label => {
+        const enc = encodeURIComponent(label);
+        const chip = document.createElement("span");
+        chip.className = "genre-chip";
+        chip.innerHTML = `
+          <span>${escapeHtml(label)}</span>
+          <button type="button" data-genre-remove="${enc}" aria-label="解除">×</button>
+        `;
+        chipsBox.appendChild(chip);
+    });
+}
+
+function escapeHtml(str){
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+}
+// escapeHtmlAttr は不要（data属性には encodeURIComponent を使用）
 
 /** ラベル用チェックボックスを 1 個つくる */
 function createCheck(label){
@@ -3905,11 +4047,13 @@ function toggleGroup(el){
     const body = el.parentElement.nextElementSibling;
     const checks = body.querySelectorAll("input[type='checkbox']");
     checks.forEach(c => c.checked = false);   // 解除のみ
+    updateGenrePinned();
 }
 
 function clearChecks(id){
     document.getElementById(id).querySelectorAll("input[type='checkbox']")
         .forEach(c => c.checked = false);
+    updateGenrePinned();
 }
 function filterFunc(v){
     document.querySelectorAll("#funcArea .checkbox-card").forEach(c => {
