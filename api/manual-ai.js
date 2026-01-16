@@ -29,18 +29,16 @@ export default async function handler(req, res) {
     const { prompt, image, mode } = body;
 
     // =========================================================
-    // media-manual：画像/動画フレーム → 取説「動作説明のみ」
+    // media-manual：動画フレーム → 取説「操作説明のみ」
     // =========================================================
     // フロント想定:
     // {
     //   mode: "media-manual",
-    //   category, userType, notes,
-    //   images: [{ name, dataUrl }, ...]
+    //   notes,                // 任意：何を作成してほしいか等
+    //   images: [{ name, dataUrl }, ...]  // 動画から抽出したフレーム
     // }
     // 返却は { text } に統一（フロント互換）
     if ((mode || "") === "media-manual") {
-      const category = String(body.category || "");
-      const userType = String(body.userType || "");
       const notes = String(body.notes || "");
       const images = Array.isArray(body.images) ? body.images : [];
 
@@ -56,15 +54,12 @@ export default async function handler(req, res) {
         "- 仕様や数値など、画像から断定できない内容は推測で書かない（不明として扱う）\n" +
         "- 出力は「操作手順」に集中し、冗長な前置きは不要\n\n" +
         "【出力形式】\n" +
-        "見出し：操作手順\n" +
         "1. 〜 2. 〜 のように番号付きで手順を列挙\n" +
         "最後に必要なら「確認事項：〜」を1〜3点だけ\n";
 
       const userText =
-        `カテゴリ: ${category || "(未指定)"}\n` +
-        `想定ユーザー: ${userType || "(未指定)"}\n` +
-        (notes ? `補足: ${notes}\n` : "") +
-        `画像枚数: ${images.length}\n`;
+        (notes ? `備考: ${notes}\n` : "") +
+        `フレーム枚数: ${images.length}\n`;
 
       const userContent = [{ type: "text", text: userText }];
 
