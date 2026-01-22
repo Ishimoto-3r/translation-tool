@@ -1,37 +1,42 @@
 // inspection.js（全文）
-// - PDF D&D / クリック選択
-// - ⑤ 選択リスト（/api/inspection?op=select_options）を取得し、全チェックで表示
-// - ③ 型番/製品名の入力をヘッダで送信
-// - ④ 出力ファイル名はAPI側で「検品リスト_型番_製品名」
-// - PDFはバイナリ送信（413回避）
 
 let pdfFile = null;
 
-function $(id) {
-  return document.getElementById(id);
+const $ = (id) => document.getElementById(id);
+
+function setPdf(file) {
+  pdfFile = file;
+
+  const nameEl = $("pdfName");
+  if (nameEl) {
+    nameEl.textContent = file ? `${file.name} (${Math.round(file.size / 1024)} KB)` : "";
+  }
+
+  const btn = $("generateBtn");
+  if (btn) btn.disabled = !pdfFile;
 }
 
-function setStatus(msg) {
-  const el = $("status");
+function showStatus(msg) {
+  const el = $("statusText");
   if (el) el.textContent = msg || "";
 }
 
-function showWarnings(list) {
-  const box = $("warnings");
+function showWarnings(warnings) {
+  const box = $("warningsBox");
   if (!box) return;
 
-  const warnings = Array.isArray(list) ? list : [];
-  if (warnings.length === 0) {
+  const list = Array.isArray(warnings) ? warnings : [];
+  if (list.length === 0) {
+    box.classList.add("hidden");
     box.innerHTML = "";
-    box.style.display = "none";
     return;
   }
 
-  box.style.display = "block";
+  box.classList.remove("hidden");
   box.innerHTML =
-    `<div style="font-weight:700; margin-bottom:6px;">警告</div>` +
-    `<ul style="margin:0; padding-left:18px;">` +
-    warnings.map((w) => `<li>${escapeHtml(w)}</li>`).join("") +
+    `<div class="font-bold mb-2">警告</div>` +
+    `<ul class="list-disc pl-5 space-y-1">` +
+    list.map((w) => `<li>${escapeHtml(w)}</li>`).join("") +
     `</ul>`;
 }
 
@@ -56,7 +61,7 @@ function decodeWarningsFromHeader(res) {
   }
 }
 
-// ====== ⑤ 選択リスト（デフォルト全チェック） ======
+// ②：選択リストは「検品項目リスト」A=選択リスト の C列を表示
 async function loadSelectOptions() {
   const box = $("selectListBox");
   if (!box) return;
@@ -75,20 +80,18 @@ async function loadSelectOptions() {
     }
 
     box.innerHTML = "";
-    for (const label of options) {
+    for (const text of options) {
       const row = document.createElement("label");
-      row.style.display = "flex";
-      row.style.alignItems = "center";
-      row.style.gap = "8px";
-      row.style.padding = "4px 0";
+      row.className = "flex items-start gap-2 py-1";
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
-      cb.checked = true; // ★デフォルト全チェック
-      cb.dataset.label = label;
+      cb.checked = true; // デフォルト全チェック
+      cb.dataset.value = text;
+      cb.className = "mt-1";
 
       const span = document.createElement("span");
-      span.textContent = label;
+      span.textContent = text;
 
       row.appendChild(cb);
       row.appendChild(span);
@@ -103,71 +106,84 @@ async function loadSelectOptions() {
 function collectSelectedLabels() {
   const labels = [];
 
-  // 既存固定チェック（name="labels" か name="labelCheckbox" を拾う）
-  const fixed =
-    document.querySelectorAll('input[type="checkbox"][name="labels"]:checked');
-  const fixed2 =
-    document.querySelectorAll('input[type="checkbox"][name="labelCheckbox"]:checked');
+  // 固定ラベル（name="labels"）
+  document.querySelectorAll('input[type="checkbox"][name="labels"]:checked')
+    .forEach((cb) => {
+      if (cb.value) labels.push(cb.value);
+    });
 
-  [...fixed, ...fixed2].forEach((cb) => {
-    if (cb.value) labels.push(cb.value);
-  });
-
-  // ⑤ 選択リスト（selectListBox内）
-  document.querySelectorAll('#selectListBox input[type="checkbox"]').forEach((cb) => {
-    if (cb.checked && cb.dataset.label) labels.push(cb.dataset.label);
-  });
+  // 選択リスト（C列テキスト）
+  document.querySelectorAll('#selectListBox input[type="checkbox"]')
+    .forEach((cb) => {
+      if (cb.checked && cb.dataset.value) labels.push(cb.dataset.value);
+    });
 
   // 重複除去（順序維持）
   const seen = new Set();
   return labels.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
-// ====== PDF取り込み ======
-function setPdf(file) {
-  pdfFile = file;
+// ①：D&D / クリック
+function setupPdfPicker() {
+  const drop = $("pdfDrop");
+  const input = $("pdfInput");
 
-  const btn = $("run");
-  if (btn) btn.disabled = !pdfFile;
+  if (!drop || !input) return;
 
-  // 表示（dropZone内にファイル名が出る想定があるなら、適宜）
-  const dz = $("dropZone");
-  if (dz && pdfFile) {
-    // 既存UIのテキストを壊したくないので、data属性だけ入れる
-    dz.dataset.filename = pdfFile.name;
-  }
+  // クリックで選択
+  drop.addEventListener("click", () => input.click());
+
+  // input選択
+  input.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
+      alert("PDFを選択してください。");
+      return;
+    }
+    setPdf(file);
+    showStatus("PDFを選択しました");
+  });
+
+  // D&D
+  drop.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    drop.classList.add("bg-slate-100");
+  });
+
+  drop.addEventListener("dragleave", () => {
+    drop.classList.remove("bg-slate-100");
+  });
+
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    drop.classList.remove("bg-slate-100");
+
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
+      alert("PDFをドロップしてください。");
+      return;
+    }
+    setPdf(file);
+    showStatus("PDFをドロップしました");
+  });
 }
 
-function handleFiles(files) {
-  if (!files || files.length === 0) return;
-  const f = files[0];
-  if (!f) return;
-
-  if (!/pdf$/i.test(f.name) && f.type !== "application/pdf") {
-    alert("PDFを選択してください。");
-    return;
-  }
-  setPdf(f);
-  setStatus(`PDF選択: ${f.name} (${Math.round(f.size / 1024)} KB)`);
-}
-
-// ====== 実行 ======
-async function run() {
-  const btn = $("run");
+async function runGenerate() {
+  const btn = $("generateBtn");
   if (btn) btn.disabled = true;
 
-  setStatus("生成中…");
+  showStatus("生成中…");
   showWarnings([]);
 
   try {
     if (!pdfFile) throw new Error("PDFが未選択です");
 
-    const model = $("modelInput") ? $("modelInput").value : "";
-    const product = $("productInput") ? $("productInput").value : "";
+    const model = $("modelInput")?.value || "";
+    const product = $("productInput")?.value || "";
+    const selected = collectSelectedLabels();
 
-    const labels = collectSelectedLabels();
-
-    // PDFをバイナリで送る（413回避）
     const ab = await pdfFile.arrayBuffer();
 
     const res = await fetch("/api/inspection", {
@@ -175,10 +191,9 @@ async function run() {
       headers: {
         "Content-Type": "application/pdf",
         "x-filename": encodeURIComponent(pdfFile.name || "manual.pdf"),
-        "x-selected-labels": encodeURIComponent(JSON.stringify(labels)),
-        // ③④：型番/製品名
-        "x-model": encodeURIComponent(model || ""),
-        "x-product": encodeURIComponent(product || ""),
+        "x-selected-labels": encodeURIComponent(JSON.stringify(selected)),
+        "x-model": encodeURIComponent(model),
+        "x-product": encodeURIComponent(product),
       },
       body: ab,
     });
@@ -189,79 +204,39 @@ async function run() {
       throw new Error(msg);
     }
 
-    // 警告
     const warnings = decodeWarningsFromHeader(res);
     showWarnings(warnings);
 
-    // ダウンロード
     const blob = await res.blob();
     const cd = res.headers.get("content-disposition") || "";
-    const name = (() => {
-      // RFC5987: filename*=UTF-8''xxx
-      const m = cd.match(/filename\*\=UTF-8''([^;]+)/i);
-      if (m && m[1]) return decodeURIComponent(m[1]);
-      // fallback
-      return "検品リスト.xlsx";
-    })();
+    const m = cd.match(/filename\*\=UTF-8''([^;]+)/i);
+    const filename = m?.[1] ? decodeURIComponent(m[1]) : "検品リスト.xlsx";
 
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = name;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(a.href);
 
-    setStatus("完了しました");
+    showStatus("完了しました");
   } catch (e) {
     console.error(e);
-    setStatus("エラーが発生しました");
-    alert("生成に失敗しました。\n" + (e?.message ? e.message : String(e)));
+    showStatus("エラーが発生しました");
+    alert("生成に失敗しました。\n" + (e?.message || String(e)));
   } finally {
     if (btn) btn.disabled = !pdfFile;
   }
 }
 
-// ====== 初期化 ======
 document.addEventListener("DOMContentLoaded", () => {
-  // ⑤ 選択肢を取得して表示
+  setupPdfPicker();
   loadSelectOptions();
 
-  // D&D
-  const dropZone = $("dropZone");
-  if (dropZone) {
-    dropZone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropZone.classList?.add("dragover");
-    });
-    dropZone.addEventListener("dragleave", () => {
-      dropZone.classList?.remove("dragover");
-    });
-    dropZone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropZone.classList?.remove("dragover");
-      handleFiles(e.dataTransfer.files);
-    });
-
-    // クリックでfileInputを開く
-    dropZone.addEventListener("click", () => {
-      const fi = $("fileInput");
-      if (fi) fi.click();
-    });
-  }
-
-  // fileInput
-  const fileInput = $("fileInput");
-  if (fileInput) {
-    fileInput.addEventListener("change", (e) => {
-      handleFiles(e.target.files);
-    });
-  }
-
-  // 実行ボタン
-  const runBtn = $("run");
-  if (runBtn) {
-    runBtn.disabled = true;
-    runBtn.addEventListener("click", run);
+  const btn = $("generateBtn");
+  if (btn) {
+    btn.disabled = true;
+    btn.addEventListener("click", runGenerate);
   }
 });
