@@ -11,7 +11,6 @@ function toText(v) {
   if (v == null) return "";
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
-  // 万一 object が来たら中身を落として文字列化
   try {
     if (typeof v.text === "string") return v.text;
     return JSON.stringify(v);
@@ -175,6 +174,14 @@ function collectAiSelected() {
   return picked;
 }
 
+function setIfEmpty(inputId, newVal) {
+  const el = $(inputId);
+  if (!el) return;
+  const cur = (el.value || "").trim();
+  const next = (newVal || "").toString().trim();
+  if (!cur && next) el.value = next; // ★空のときだけ自動入力
+}
+
 async function runExtract() {
   if (!pdfFile) {
     alert("PDFを選択してください。");
@@ -203,6 +210,7 @@ async function runExtract() {
     }
 
     const data = await res.json();
+
     aiExtract = {
       specText: Array.isArray(data.specText) ? data.specText : [],
       opText: Array.isArray(data.opText) ? data.opText : [],
@@ -212,6 +220,10 @@ async function runExtract() {
     renderAiBox("aiSpecBox", "仕様", aiExtract.specText);
     renderAiBox("aiOpBox", "動作", aiExtract.opText);
     renderAiBox("aiAccBox", "付属品", aiExtract.accText);
+
+    // ★ 型番・製品名を自動入力（未入力時のみ）
+    setIfEmpty("modelInput", data.model);
+    setIfEmpty("productInput", data.product);
 
     showStatus("AI抽出が完了しました（必要な項目だけチェックしてください）");
   } catch (e) {
