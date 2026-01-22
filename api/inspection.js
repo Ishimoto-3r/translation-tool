@@ -1,11 +1,5 @@
 // api/inspection.js
 // PDF（バイナリPOST）→ OpenAIで「仕様/動作/付属品」抽出 → テンプレExcelに差し込み → 日本語Excel返却
-//
-// 仕様(確定版)の差し込みルール：
-// - マーカー行（A列完全一致）: __INS_SPEC__/__INS_OP__/__INS_ACC__/__INS_SELECT__
-// - マニュアル抜粋：B=区分, C=本文, E=空欄, F=1, G=必須
-// - 選択リスト：検品項目リスト!A列 完全一致で、A列はコピーせずB以降を元シート順でコピー
-// - 未一致ラベル：warningsへ（エラーにしない）
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
@@ -179,77 +173,88 @@ function buildSelectedRowsFromListSheet(wsList, selectedLabels, warnings) {
   return rows;
 }
 
-// ===== OpenAI: PDF→抽出 =====
-async function extractFromPdfToArrays({ filename, file_data }) {
-  if (!filename || !file_data) {
-    throw new Error("InputError: pdf.filename / pdf.file_data が不足");
+// ===== OpenAI: PDF→抽出（file_id方式） =====
+async function extractFromPdfToArrays({ filename, pdfBuffer }) {
+  if (!filename || !pdfBuffer || !(pdfBuffer instanceof Buffer)) {
+    throw new Error("InputError: filename / pdfBuffer が不正");
   }
 
-  // 出力は「配列のみ」：Excel差し込み用
-  const sys =
-    "あなたは日本語の技術文書から検品リスト用の抜粋を作る担当です。\n" +
-    "与えられたPDFを読み、次の3区分の箇条書き（短文）を抽出してください。\n" +
-    "- 仕様（サイズ/材質/電源/定格/温度/互換などの仕様）\n" +
-    "- 動作（操作手順・挙動・表示・注意点のうち検品で確認すべき内容）\n" +
-    "- 付属品（同梱物）\n\n" +
-    "【重要】\n" +
-    "- 推測しない。PDFに根拠があるものだけ。\n" +
-    "- 1行は短く。重複は統合。\n" +
-    "- 型番/数値/単位は原文どおり。\n" +
-    "- 出力はJSONのみ。";
+  // 1) Files APIへアップロード → file_id を得る
+  // Node18+ (Vercel) では File が使えます
+  const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
 
-  const response = await client.responses.create({
-    model: INSPECTION_MODEL,
-    reasoning: { effort: INSPECTION_REASONING },
-    text: { verbosity: INSPECTION_VERBOSITY },
-    input: [
-      {
-        role: "user",
-        content: [
-          { type: "input_text", text: sys + "\n\nJSONで返してください。" },
-          {
-            type: "input_file",
-            filename,
-            file_data,
-          },
-          {
-            type: "input_text",
-            text:
-              "出力JSONスキーマ:\n" +
-              "{\n" +
-              '  "specText": string[],\n' +
-              '  "opText": string[],\n' +
-              '  "accText": string[],\n' +
-              '  "warnings": string[]\n' +
-              "}\n",
-          },
-        ],
-      },
-    ],
-  });
-
-  const text = (response.output_text || "").trim();
-
-  let obj;
+  let uploaded = null;
   try {
-    obj = JSON.parse(text);
-  } catch {
-    // JSON以外が混ざった時の救済（最小）
-    const first = text.indexOf("{");
-    const last = text.lastIndexOf("}");
-    if (first >= 0 && last > first) {
-      obj = JSON.parse(text.slice(first, last + 1));
-    } else {
-      throw new Error("AIParseError: JSON解析に失敗");
-    }
-  }
+    uploaded = await client.files.create({
+      file: fileObj,
+      purpose: "assistants",
+    });
 
-  return {
-    specText: normalizeStringArray(obj.specText),
-    opText: normalizeStringArray(obj.opText),
-    accText: normalizeStringArray(obj.accText),
-    aiWarnings: normalizeStringArray(obj.warnings),
-  };
+    const sys =
+      "あなたは日本語の技術文書から検品リスト用の抜粋を作る担当です。\n" +
+      "与えられたPDFを読み、次の3区分の箇条書き（短文）を抽出してください。\n" +
+      "- 仕様（サイズ/材質/電源/定格/温度/互換などの仕様）\n" +
+      "- 動作（操作手順・挙動・表示・注意点のうち検品で確認すべき内容）\n" +
+      "- 付属品（同梱物）\n\n" +
+      "【重要】\n" +
+      "- 推測しない。PDFに根拠があるものだけ。\n" +
+      "- 1行は短く。重複は統合。\n" +
+      "- 型番/数値/単位は原文どおり。\n" +
+      "- 出力はJSONのみ。";
+
+    const response = await client.responses.create({
+      model: INSPECTION_MODEL,
+      reasoning: { effort: INSPECTION_REASONING },
+      text: { verbosity: INSPECTION_VERBOSITY },
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: sys + "\n\nJSONで返してください。" },
+            { type: "input_file", file_id: uploaded.id },
+            {
+              type: "input_text",
+              text:
+                "出力JSONスキーマ:\n" +
+                "{\n" +
+                '  "specText": string[],\n' +
+                '  "opText": string[],\n' +
+                '  "accText": string[],\n' +
+                '  "warnings": string[]\n' +
+                "}\n",
+            },
+          ],
+        },
+      ],
+    });
+
+    const text = (response.output_text || "").trim();
+
+    let obj;
+    try {
+      obj = JSON.parse(text);
+    } catch {
+      const first = text.indexOf("{");
+      const last = text.lastIndexOf("}");
+      if (first >= 0 && last > first) {
+        obj = JSON.parse(text.slice(first, last + 1));
+      } else {
+        throw new Error("AIParseError: JSON解析に失敗");
+      }
+    }
+
+    return {
+      specText: normalizeStringArray(obj.specText),
+      opText: normalizeStringArray(obj.opText),
+      accText: normalizeStringArray(obj.accText),
+      aiWarnings: normalizeStringArray(obj.warnings),
+    };
+  } finally {
+    // 2) 後始末（失敗しても処理は続行）
+    try {
+      if (uploaded?.id) await client.files.del(uploaded.id);
+    } catch {}
+  }
 }
 
 export default async function handler(req, res) {
@@ -270,11 +275,11 @@ export default async function handler(req, res) {
 
     let selectedLabels = [];
     let pdfFilename = "manual.pdf";
-    let pdfBase64 = "";
+    let pdfBuffer = null;
 
     if (ct.includes("application/pdf")) {
-      // ★ バイナリ直受け（413回避）
-      const raw = await readRawBody(req);
+      // ★ バイナリ直受け
+      pdfBuffer = await readRawBody(req);
 
       const hdrLabels = req.headers["x-selected-labels"];
       if (hdrLabels) {
@@ -285,25 +290,24 @@ export default async function handler(req, res) {
       if (hdrName) {
         pdfFilename = decodeURIComponent(String(hdrName));
       }
-
-      pdfBase64 = raw.toString("base64");
     } else {
-      // 互換：JSON送信が来た場合（保険）
+      // 互換（保険）：JSONの { pdf: { filename, file_data(base64) } } が来た場合
       const body =
         typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
       selectedLabels = normalizeStringArray(body.selectedLabels);
 
       const pdf = body.pdf || {};
       pdfFilename = String(pdf.filename || "manual.pdf");
-      pdfBase64 = String(pdf.file_data || "");
+      const pdfBase64 = String(pdf.file_data || "");
+      pdfBuffer = Buffer.from(pdfBase64, "base64");
     }
 
     const warnings = [];
 
-    // 1) PDF→AI抽出
+    // 1) PDF→AI抽出（file_id方式）
     const { specText, opText, accText, aiWarnings } = await extractFromPdfToArrays({
       filename: pdfFilename,
-      file_data: pdfBase64,
+      pdfBuffer,
     });
     for (const w of aiWarnings) warnings.push(`AI抽出: ${w}`);
 
