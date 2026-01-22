@@ -3,10 +3,22 @@
 let pdfFile = null;
 let busy = false;
 
-// 抽出結果を保持（{specText:[], opText:[], accText:[] }）
 let aiExtract = { specText: [], opText: [], accText: [] };
 
 const $ = (id) => document.getElementById(id);
+
+function toText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  // 万一 object が来たら中身を落として文字列化
+  try {
+    if (typeof v.text === "string") return v.text;
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
 
 function setBusy(on, msg) {
   busy = !!on;
@@ -16,7 +28,6 @@ function setBusy(on, msg) {
   if (overlay) overlay.classList.toggle("show", busy);
   if (overlayMsg) overlayMsg.textContent = msg || "";
 
-  // 画面内操作をまとめて無効化
   const ids = [
     "modelInput", "productInput", "pdfDrop", "pdfInput",
     "extractBtn", "generateBtn",
@@ -28,18 +39,15 @@ function setBusy(on, msg) {
     if (el.tagName === "INPUT" || el.tagName === "BUTTON") {
       el.disabled = busy;
     }
-    // checkboxもまとめて無効
     if (id === "selectListBox" || id.startsWith("ai")) {
       el.querySelectorAll("input[type=checkbox]").forEach((cb) => cb.disabled = busy);
     }
-    // dropzoneはpointer-eventsで抑止
     if (id === "pdfDrop") {
       el.style.pointerEvents = busy ? "none" : "auto";
       el.style.opacity = busy ? "0.65" : "1";
     }
   }
 
-  // 固定ラベルも無効
   document.querySelectorAll('input[type="checkbox"][name="labels"]').forEach((cb) => {
     cb.disabled = busy;
   });
@@ -56,16 +64,13 @@ function setPdf(file) {
   const nameEl = $("pdfName");
   if (nameEl) nameEl.textContent = file ? `${file.name} (${Math.round(file.size / 1024)} KB)` : "";
 
-  // PDFがあれば「読み取り」ボタンを有効化
   const extractBtn = $("extractBtn");
   if (extractBtn) extractBtn.disabled = !pdfFile || busy;
 
-  // 生成ボタンは「PDFがあり、かつ（抽出チェック or 選択リスト or 固定ラベル）いずれかが選ばれる可能性がある」前提でPDFのみで有効化
   const genBtn = $("generateBtn");
   if (genBtn) genBtn.disabled = !pdfFile || busy;
 }
 
-// ===== ⑤ 選択リスト（C列） =====
 async function loadSelectOptions() {
   const box = $("selectListBox");
   if (!box) return;
@@ -84,13 +89,16 @@ async function loadSelectOptions() {
     }
 
     box.innerHTML = "";
-    for (const text of options) {
+    for (const raw of options) {
+      const text = toText(raw).trim();
+      if (!text) continue;
+
       const row = document.createElement("label");
       row.className = "flex items-start gap-2 py-1";
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
-      cb.checked = true;            // 選択リストは全チェック
+      cb.checked = true;
       cb.dataset.value = text;
       cb.className = "mt-1";
 
@@ -110,20 +118,16 @@ async function loadSelectOptions() {
 function collectSelectedLabels() {
   const labels = [];
 
-  // 固定ラベル
   document.querySelectorAll('input[type="checkbox"][name="labels"]:checked')
     .forEach((cb) => { if (cb.value) labels.push(cb.value); });
 
-  // 選択リスト（C列テキスト）
   document.querySelectorAll('#selectListBox input[type="checkbox"]')
     .forEach((cb) => { if (cb.checked && cb.dataset.value) labels.push(cb.dataset.value); });
 
-  // 重複除去（順序維持）
   const seen = new Set();
   return labels.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
-// ===== ② AI抽出（別枠：初期未チェック） =====
 function renderAiBox(boxId, kind, lines) {
   const box = $(boxId);
   if (!box) return;
@@ -134,13 +138,16 @@ function renderAiBox(boxId, kind, lines) {
     return;
   }
 
-  for (const line of lines) {
+  for (const raw of lines) {
+    const line = toText(raw).trim();
+    if (!line) continue;
+
     const row = document.createElement("label");
     row.className = "flex items-start gap-2 py-1";
 
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = false; // ★デフォルト未チェック
+    cb.checked = false; // 初期未チェック
     cb.dataset.kind = kind;
     cb.dataset.text = line;
     cb.className = "mt-1";
@@ -218,7 +225,6 @@ async function runExtract() {
   }
 }
 
-// ===== ① PDFピッカー =====
 function setupPdfPicker() {
   const drop = $("pdfDrop");
   const input = $("pdfInput");
@@ -238,7 +244,6 @@ function setupPdfPicker() {
     }
     setPdf(file);
 
-    // 新しいPDFなら抽出表示はリセット
     aiExtract = { specText: [], opText: [], accText: [] };
     renderAiBox("aiSpecBox", "仕様", []);
     renderAiBox("aiOpBox", "動作", []);
@@ -293,7 +298,7 @@ async function runGenerate() {
     const product = $("productInput")?.value || "";
 
     const selectedLabels = collectSelectedLabels();
-    const aiPicked = collectAiSelected(); // ② チェックされた抽出項目のみ
+    const aiPicked = collectAiSelected();
 
     const ab = await pdfFile.arrayBuffer();
 
@@ -336,7 +341,7 @@ async function runGenerate() {
     alert("生成に失敗しました。\n" + (e?.message || String(e)));
   } finally {
     setBusy(false, "");
-    setPdf(pdfFile); // ボタン状態を復元
+    setPdf(pdfFile);
   }
 }
 
@@ -356,7 +361,6 @@ document.addEventListener("DOMContentLoaded", () => {
     genBtn.addEventListener("click", runGenerate);
   }
 
-  // AI枠を初期化（空表示）
   renderAiBox("aiSpecBox", "仕様", []);
   renderAiBox("aiOpBox", "動作", []);
   renderAiBox("aiAccBox", "付属品", []);
