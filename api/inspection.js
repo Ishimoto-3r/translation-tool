@@ -1,10 +1,10 @@
-// api/inspection.js
+// api/inspection.js（全文）
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
 
 export const config = {
-  api: { bodyParser: false }, // PDFバイナリ受信
+  api: { bodyParser: false },
 };
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -20,23 +20,20 @@ const OUTPUT_KEEP_SHEETS = new Set([
   "検品外観基準",
 ]);
 
-// ===== raw body =====
 async function readRawBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   return Buffer.concat(chunks);
 }
 
-// ===== SharePoint (Microsoft Graph) =====
+// ===== SharePoint =====
 async function getAccessToken() {
   const tenantId = process.env.MANUAL_TENANT_ID;
   const clientId = process.env.MANUAL_CLIENT_ID;
   const clientSecret = process.env.MANUAL_CLIENT_SECRET;
 
   if (!tenantId || !clientId || !clientSecret) {
-    throw new Error(
-      "ConfigError: MANUAL_TENANT_ID / MANUAL_CLIENT_ID / MANUAL_CLIENT_SECRET が不足"
-    );
+    throw new Error("ConfigError: MANUAL_TENANT_ID / MANUAL_CLIENT_ID / MANUAL_CLIENT_SECRET が不足");
   }
 
   const tokenRes = await fetch(
@@ -54,20 +51,15 @@ async function getAccessToken() {
   );
 
   const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) {
-    throw new Error("TokenError: " + JSON.stringify(tokenData));
-  }
+  if (!tokenData.access_token) throw new Error("TokenError: " + JSON.stringify(tokenData));
   return tokenData.access_token;
 }
 
 async function downloadTemplateExcelBuffer() {
-  // ★既存ツールと同一（全ツール同一URL）
   const fileUrl = process.env.MANUAL_SHAREPOINT_FILE_URL;
   if (!fileUrl) throw new Error("ConfigError: MANUAL_SHAREPOINT_FILE_URL が不足");
 
   const accessToken = await getAccessToken();
-
-  // Graph shares API 用 shareId
   const shareId = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");
 
   const graphRes = await fetch(
@@ -116,20 +108,16 @@ function applyRowStyle(ws, rowNumber, styleSnapshot, upToCol) {
 
 function normalizeStringArray(v) {
   if (!Array.isArray(v)) return [];
-  return v
-    .map((x) => (x ?? "").toString().trim())
-    .filter((x) => x.length > 0);
+  return v.map((x) => (x ?? "").toString().trim()).filter((x) => x.length > 0);
 }
 
 function safeFilePart(s) {
   const t = (s ?? "").toString().trim();
   if (!t) return "";
-  // Windows/ExcelでNGな文字を除去
   return t.replace(/[\\\/\:\*\?\"\<\>\|]/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function buildExcerptRows(kindLabel, lines) {
-  // Aは空、B=区分、C=本文、E空、F=1、G=必須。その他列は空でOK（スタイルで罫線維持）
   return lines.map((line) => {
     const values = [];
     values[1] = "";
@@ -142,98 +130,87 @@ function buildExcerptRows(kindLabel, lines) {
   });
 }
 
-/**
- * ⑤：検品項目リストから selectable を抽出
- * - A列が「選択リスト」の行を対象
- * - 表示ラベルは B列（無い場合は C列）
- */
-function extractSelectableOptions(wsList) {
+// ②：選択肢は「検品項目リスト」A=選択リスト の C列
+function extractSelectOptions(wsList) {
   const opts = [];
   const max = wsList.rowCount || 0;
   for (let r = 1; r <= max; r++) {
     const a = (wsList.getCell(r, 1).value ?? "").toString().trim();
     if (a !== "選択リスト") continue;
-
-    const b = (wsList.getCell(r, 2).value ?? "").toString().trim();
     const c = (wsList.getCell(r, 3).value ?? "").toString().trim();
-    const label = b || c;
-    if (!label) continue;
-
-    opts.push(label);
+    if (!c) continue;
+    opts.push(c);
   }
-  // 重複除去しつつ順序維持
   const seen = new Set();
   return opts.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
-/**
- * ⑤：__INS_SELECT__ に差し込む行を作る
- * - 旧：A列完全一致（例：リチウムイオン電池 等）
- * - 新：A列=「選択リスト」かつ B列=label の行も対象
- * - A列はコピーしない。B以降をコピー。順番はシート順。
- */
-function buildSelectedRows(wsList, selectedLabels, warnings) {
-  const wanted = new Set(selectedLabels);
+// ⑤：__INS_SELECT__ に差し込み
+// - A=選択リスト の行は「C列が選択値と一致」した行を対象
+// - A列はコピーしない（B以降コピー）
+function buildSelectedRows(wsList, selectedValues, warnings) {
+  const wanted = new Set(selectedValues);
   const hit = new Set();
   const rows = [];
 
   const max = wsList.rowCount || 0;
+  const lastCol = Math.max(2, wsList.columnCount || 2);
+
   for (let r = 1; r <= max; r++) {
     const a = (wsList.getCell(r, 1).value ?? "").toString().trim();
-    const b = (wsList.getCell(r, 2).value ?? "").toString().trim();
 
-    // マッチ条件
-    const match =
-      (a && wanted.has(a)) || // 旧方式（A列=ラベル）
-      (a === "選択リスト" && b && wanted.has(b)); // 新方式（A列=選択リスト, B列=ラベル）
-
-    if (!match) continue;
-
-    // どのラベルがヒットしたか
-    if (wanted.has(a)) hit.add(a);
-    if (a === "選択リスト" && wanted.has(b)) hit.add(b);
-
-    const row = wsList.getRow(r);
-    const lastCol = Math.max(2, wsList.columnCount || 2); // 右まで罫線維持したいので固定列でもOK
-    const values = [];
-    values[1] = ""; // Aはコピーしない
-
-    // B以降コピー（値のみ）
-    for (let c = 2; c <= lastCol; c++) {
-      values[c] = wsList.getCell(r, c).value;
+    // 旧方式（A列そのものがラベル）も残す：固定ラベルに対応
+    if (a && wanted.has(a)) {
+      hit.add(a);
+      const values = [];
+      values[1] = "";
+      for (let c = 2; c <= lastCol; c++) values[c] = wsList.getCell(r, c).value;
+      rows.push(values);
+      continue;
     }
-    rows.push(values);
+
+    // 新方式：A=選択リスト かつ C が選択値
+    if (a === "選択リスト") {
+      const cText = (wsList.getCell(r, 3).value ?? "").toString().trim();
+      if (cText && wanted.has(cText)) {
+        hit.add(cText);
+        const values = [];
+        values[1] = "";
+        for (let c = 2; c <= lastCol; c++) values[c] = wsList.getCell(r, c).value;
+        rows.push(values);
+      }
+    }
   }
 
-  for (const label of selectedLabels) {
-    if (!hit.has(label)) warnings.push(`未一致ラベル: ${label}`);
+  for (const v of selectedValues) {
+    if (!hit.has(v)) warnings.push(`未一致ラベル: ${v}`);
   }
 
   return rows;
 }
 
-// ===== OpenAI: PDF→抽出（file_id方式） =====
-async function extractFromPdfToArrays({ filename, pdfBuffer }) {
-  if (!filename || !pdfBuffer || !(pdfBuffer instanceof Buffer)) {
-    throw new Error("InputError: filename / pdfBuffer が不正");
+function keepOnlySheets(workbook) {
+  const names = workbook.worksheets.map((w) => w.name);
+  for (const name of names) {
+    if (!OUTPUT_KEEP_SHEETS.has(name)) {
+      const ws = workbook.getWorksheet(name);
+      if (ws) workbook.removeWorksheet(ws.id);
+    }
   }
+}
 
-  // Files APIへアップロードして file_id を得る
+// ===== OpenAI: PDF→抽出（file_id） =====
+async function extractFromPdfToArrays({ filename, pdfBuffer }) {
   const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
 
   let uploaded = null;
   try {
-    uploaded = await client.files.create({
-      file: fileObj,
-      purpose: "assistants",
-    });
+    uploaded = await client.files.create({ file: fileObj, purpose: "assistants" });
 
     const sys =
       "あなたは日本語の技術文書から検品リスト用の抜粋を作る担当です。\n" +
       "PDFを読み、次の3区分の検品項目（短文）を抽出してください。\n" +
-      "- 仕様\n" +
-      "- 動作\n" +
-      "- 付属品\n\n" +
+      "- 仕様\n- 動作\n- 付属品\n\n" +
       "【重要】\n" +
       "- 推測しない。根拠があるものだけ。\n" +
       "- 1行は短く。重複は統合。\n" +
@@ -291,17 +268,6 @@ async function extractFromPdfToArrays({ filename, pdfBuffer }) {
   }
 }
 
-function keepOnlySheets(workbook) {
-  // 残す以外は削除
-  const names = workbook.worksheets.map((w) => w.name);
-  for (const name of names) {
-    if (!OUTPUT_KEEP_SHEETS.has(name)) {
-      const ws = workbook.getWorksheet(name);
-      if (ws) workbook.removeWorksheet(ws.id);
-    }
-  }
-}
-
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -314,7 +280,7 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
-    // ===== ⑤ HTML用：選択肢リスト取得 =====
+    // ②：選択リスト取得（HTML用）
     if (req.method === "GET") {
       const url = new URL(req.url, "http://localhost");
       const op = url.searchParams.get("op") || "";
@@ -329,13 +295,11 @@ export default async function handler(req, res) {
       const wsList = wb.getWorksheet("検品項目リスト");
       if (!wsList) throw new Error("SheetError: 検品項目リスト が見つかりません");
 
-      const options = extractSelectableOptions(wsList);
+      const options = extractSelectOptions(wsList);
       return res.status(200).json({ options });
     }
 
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "MethodNotAllowed" });
-    }
+    if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
 
     const ct = String(req.headers["content-type"] || "");
     if (!ct.includes("application/pdf")) {
@@ -349,23 +313,23 @@ export default async function handler(req, res) {
       ? normalizeStringArray(JSON.parse(decodeURIComponent(String(hdrLabels))))
       : [];
 
-    const hdrName = req.headers["x-filename"];
-    const pdfFilename = hdrName ? decodeURIComponent(String(hdrName)) : "manual.pdf";
+    const pdfFilename = req.headers["x-filename"]
+      ? decodeURIComponent(String(req.headers["x-filename"]))
+      : "manual.pdf";
 
-    // ③④：ファイル名用
     const model = safeFilePart(decodeURIComponent(String(req.headers["x-model"] || "")));
     const product = safeFilePart(decodeURIComponent(String(req.headers["x-product"] || "")));
 
     const warnings = [];
 
-    // 1) PDF→AI抽出
+    // PDF→AI抽出
     const { specText, opText, accText, aiWarnings } = await extractFromPdfToArrays({
       filename: pdfFilename,
       pdfBuffer,
     });
     for (const w of aiWarnings) warnings.push(`AI抽出: ${w}`);
 
-    // 2) テンプレ取得 → Excelロード
+    // テンプレ取得→Excelロード
     const templateBuf = await downloadTemplateExcelBuffer();
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(templateBuf);
@@ -375,7 +339,7 @@ export default async function handler(req, res) {
     if (!wsMain) throw new Error("SheetError: 検品リスト が見つかりません");
     if (!wsList) throw new Error("SheetError: 検品項目リスト が見つかりません");
 
-    // 3) マーカー検出（欠落は即エラー）
+    // マーカー
     const mSpec = findMarkerRow(wsMain, "__INS_SPEC__");
     const mOp = findMarkerRow(wsMain, "__INS_OP__");
     const mAcc = findMarkerRow(wsMain, "__INS_ACC__");
@@ -386,10 +350,10 @@ export default async function handler(req, res) {
     if (!mAcc) throw new Error("MarkerError: __INS_ACC__ が見つかりません");
     if (!mSel) throw new Error("MarkerError: __INS_SELECT__ が見つかりません");
 
-    // ①：罫線維持のため「表の右端列」を固定（K列まで = 11）
-    const STYLE_COLS = Math.max(11, wsMain.columnCount || 11);
+    // ①：罫線維持（K列=11まで固定）
+    const STYLE_COLS = 11;
 
-    // 4) 下から差し込み（行ズレ対策）
+    // 下から差し込み
     const tasks = [
       { row: mSel, type: "select" },
       { row: mAcc, type: "acc" },
@@ -403,11 +367,6 @@ export default async function handler(req, res) {
 
       if (t.type === "spec") {
         const rows = buildExcerptRows("仕様", specText);
-        if (rows.length === 0) {
-          wsMain.spliceRows(r, 1);
-          warnings.push("AI抽出: 仕様が0件");
-          continue;
-        }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
         continue;
@@ -415,11 +374,6 @@ export default async function handler(req, res) {
 
       if (t.type === "op") {
         const rows = buildExcerptRows("動作", opText);
-        if (rows.length === 0) {
-          wsMain.spliceRows(r, 1);
-          warnings.push("AI抽出: 動作が0件");
-          continue;
-        }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
         continue;
@@ -427,11 +381,6 @@ export default async function handler(req, res) {
 
       if (t.type === "acc") {
         const rows = buildExcerptRows("付属品", accText);
-        if (rows.length === 0) {
-          wsMain.spliceRows(r, 1);
-          warnings.push("AI抽出: 付属品が0件");
-          continue;
-        }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
         continue;
@@ -443,18 +392,14 @@ export default async function handler(req, res) {
           wsMain.spliceRows(r, 1);
           continue;
         }
-
         wsMain.spliceRows(r, 1, ...picked);
-        for (let i = 0; i < picked.length; i++) {
-          applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
-        }
+        for (let i = 0; i < picked.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
       }
     }
 
-    // ②：不要シート削除（最後に）
+    // ②：必要シートのみ残す
     keepOnlySheets(wb);
 
-    // 5) 書き出し
     const outBuf = await wb.xlsx.writeBuffer();
 
     // ④：ファイル名
@@ -468,10 +413,7 @@ export default async function handler(req, res) {
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename*=UTF-8''${encodeURIComponent(outName)}`
-    );
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(outName)}`);
     return res.status(200).send(Buffer.from(outBuf));
   } catch (e) {
     console.error("[inspection] error", e);
