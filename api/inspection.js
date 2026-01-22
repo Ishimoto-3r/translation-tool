@@ -3,9 +3,7 @@
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
 
-export const config = {
-  api: { bodyParser: false },
-};
+export const config = { api: { bodyParser: false } };
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -130,7 +128,7 @@ function buildExcerptRows(kindLabel, lines) {
   });
 }
 
-// ②：選択肢は「検品項目リスト」A=選択リスト の C列
+// A=選択リスト の C列一覧
 function extractSelectOptions(wsList) {
   const opts = [];
   const max = wsList.rowCount || 0;
@@ -145,9 +143,7 @@ function extractSelectOptions(wsList) {
   return opts.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
-// ⑤：__INS_SELECT__ に差し込み
-// - A=選択リスト の行は「C列が選択値と一致」した行を対象
-// - A列はコピーしない（B以降コピー）
+// __INS_SELECT__ 差し込み（固定ラベルはA一致 / 選択リストはC一致）
 function buildSelectedRows(wsList, selectedValues, warnings) {
   const wanted = new Set(selectedValues);
   const hit = new Set();
@@ -159,7 +155,7 @@ function buildSelectedRows(wsList, selectedValues, warnings) {
   for (let r = 1; r <= max; r++) {
     const a = (wsList.getCell(r, 1).value ?? "").toString().trim();
 
-    // 旧方式（A列そのものがラベル）も残す：固定ラベルに対応
+    // 固定ラベル：A一致
     if (a && wanted.has(a)) {
       hit.add(a);
       const values = [];
@@ -169,7 +165,7 @@ function buildSelectedRows(wsList, selectedValues, warnings) {
       continue;
     }
 
-    // 新方式：A=選択リスト かつ C が選択値
+    // 選択リスト：C一致
     if (a === "選択リスト") {
       const cText = (wsList.getCell(r, 3).value ?? "").toString().trim();
       if (cText && wanted.has(cText)) {
@@ -262,10 +258,23 @@ async function extractFromPdfToArrays({ filename, pdfBuffer }) {
       aiWarnings: normalizeStringArray(obj.warnings),
     };
   } finally {
-    try {
-      if (uploaded?.id) await client.files.del(uploaded.id);
-    } catch {}
+    try { if (uploaded?.id) await client.files.del(uploaded.id); } catch {}
   }
+}
+
+function splitAiPicked(aiPicked) {
+  const spec = [];
+  const op = [];
+  const acc = [];
+  for (const it of aiPicked) {
+    const kind = (it?.kind ?? "").toString().trim();
+    const text = (it?.text ?? "").toString().trim();
+    if (!text) continue;
+    if (kind === "仕様") spec.push(text);
+    else if (kind === "動作") op.push(text);
+    else if (kind === "付属品") acc.push(text);
+  }
+  return { specText: spec, opText: op, accText: acc };
 }
 
 export default async function handler(req, res) {
@@ -274,20 +283,20 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, x-filename, x-selected-labels, x-model, x-product"
+    "Content-Type, x-filename, x-selected-labels, x-ai-picked, x-model, x-product"
   );
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
   try {
-    // ②：選択リスト取得（HTML用）
+    const url = new URL(req.url, "http://localhost");
+    const op = url.searchParams.get("op") || "";
+
+    // GET: 選択リスト（C列）を返す
     if (req.method === "GET") {
-      const url = new URL(req.url, "http://localhost");
-      const op = url.searchParams.get("op") || "";
       if (op !== "select_options") {
         return res.status(400).json({ error: "BadRequest", detail: "op が不正" });
       }
-
       const templateBuf = await downloadTemplateExcelBuffer();
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(templateBuf);
@@ -307,27 +316,37 @@ export default async function handler(req, res) {
     }
 
     const pdfBuffer = await readRawBody(req);
+    const pdfFilename = req.headers["x-filename"]
+      ? decodeURIComponent(String(req.headers["x-filename"]))
+      : "manual.pdf";
+
+    // POST: AI抽出のみ（②のボタン用）
+    if (op === "extract") {
+      const { specText, opText, accText } = await extractFromPdfToArrays({
+        filename: pdfFilename,
+        pdfBuffer,
+      });
+      return res.status(200).json({ specText, opText, accText });
+    }
+
+    // POST: 生成（②の選択結果を反映）
+    if (op !== "generate" && op !== "") {
+      return res.status(400).json({ error: "BadRequest", detail: "op が不正" });
+    }
 
     const hdrLabels = req.headers["x-selected-labels"];
     const selectedLabels = hdrLabels
       ? normalizeStringArray(JSON.parse(decodeURIComponent(String(hdrLabels))))
       : [];
 
-    const pdfFilename = req.headers["x-filename"]
-      ? decodeURIComponent(String(req.headers["x-filename"]))
-      : "manual.pdf";
+    const hdrAi = req.headers["x-ai-picked"];
+    const aiPicked = hdrAi ? JSON.parse(decodeURIComponent(String(hdrAi))) : [];
+    const { specText, opText, accText } = splitAiPicked(Array.isArray(aiPicked) ? aiPicked : []);
 
     const model = safeFilePart(decodeURIComponent(String(req.headers["x-model"] || "")));
     const product = safeFilePart(decodeURIComponent(String(req.headers["x-product"] || "")));
 
     const warnings = [];
-
-    // PDF→AI抽出
-    const { specText, opText, accText, aiWarnings } = await extractFromPdfToArrays({
-      filename: pdfFilename,
-      pdfBuffer,
-    });
-    for (const w of aiWarnings) warnings.push(`AI抽出: ${w}`);
 
     // テンプレ取得→Excelロード
     const templateBuf = await downloadTemplateExcelBuffer();
@@ -350,7 +369,7 @@ export default async function handler(req, res) {
     if (!mAcc) throw new Error("MarkerError: __INS_ACC__ が見つかりません");
     if (!mSel) throw new Error("MarkerError: __INS_SELECT__ が見つかりません");
 
-    // ①：罫線維持（K列=11まで固定）
+    // 罫線維持（K列まで）
     const STYLE_COLS = 11;
 
     // 下から差し込み
@@ -367,6 +386,7 @@ export default async function handler(req, res) {
 
       if (t.type === "spec") {
         const rows = buildExcerptRows("仕様", specText);
+        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
         continue;
@@ -374,6 +394,7 @@ export default async function handler(req, res) {
 
       if (t.type === "op") {
         const rows = buildExcerptRows("動作", opText);
+        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
         continue;
@@ -381,6 +402,7 @@ export default async function handler(req, res) {
 
       if (t.type === "acc") {
         const rows = buildExcerptRows("付属品", accText);
+        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
         continue;
@@ -388,27 +410,23 @@ export default async function handler(req, res) {
 
       if (t.type === "select") {
         const picked = buildSelectedRows(wsList, selectedLabels, warnings);
-        if (picked.length === 0) {
-          wsMain.spliceRows(r, 1);
-          continue;
-        }
+        if (picked.length === 0) { wsMain.spliceRows(r, 1); continue; }
         wsMain.spliceRows(r, 1, ...picked);
         for (let i = 0; i < picked.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
       }
     }
 
-    // ②：必要シートのみ残す
+    // 必要シートのみ残す
     keepOnlySheets(wb);
 
     const outBuf = await wb.xlsx.writeBuffer();
 
-    // ④：ファイル名
+    // ファイル名
     const fnModel = model || "型番未入力";
     const fnProduct = product || "製品名未入力";
     const outName = `検品リスト_${fnModel}_${fnProduct}.xlsx`;
 
-    res.setHeader("X-Warnings", encodeURIComponent(JSON.stringify(warnings)));
-    res.setHeader("X-Warnings-Count", String(warnings.length));
+    // ③：警告は使わないのでヘッダは付けない（不要情報を出さない）
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
