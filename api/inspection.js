@@ -24,6 +24,45 @@ async function readRawBody(req) {
   return Buffer.concat(chunks);
 }
 
+// ===== Excel cell value -> string（★ [object Object] 根絶） =====
+function cellToText(v) {
+  if (v == null) return "";
+
+  if (typeof v === "string") return v;
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+
+  // ExcelJS の代表的な型
+  // { richText: [{text:""}...] }
+  if (v && typeof v === "object") {
+    if (Array.isArray(v.richText)) {
+      return v.richText.map((p) => p?.text ?? "").join("").trim();
+    }
+    // { text, hyperlink }
+    if (typeof v.text === "string") return v.text.trim();
+    // { formula, result }
+    if (typeof v.result !== "undefined") return cellToText(v.result).trim();
+    if (typeof v.formula === "string") {
+      // resultが無い場合は式そのものは表示したくないので空扱い
+      return "";
+    }
+    // Date
+    if (v instanceof Date) return v.toISOString();
+  }
+
+  try { return String(v); } catch { return ""; }
+}
+
+function normalizeStringArray(v) {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => (x ?? "").toString().trim()).filter((x) => x.length > 0);
+}
+
+function safeFilePart(s) {
+  const t = (s ?? "").toString().trim();
+  if (!t) return "";
+  return t.replace(/[\\\/\:\*\?\"\<\>\|]/g, " ").replace(/\s+/g, " ").trim();
+}
+
 // ===== SharePoint =====
 async function getAccessToken() {
   const tenantId = process.env.MANUAL_TENANT_ID;
@@ -78,8 +117,7 @@ async function downloadTemplateExcelBuffer() {
 function findMarkerRow(ws, markerText) {
   const max = ws.rowCount || 0;
   for (let r = 1; r <= max; r++) {
-    const v = ws.getCell(r, 1).value;
-    const s = (v ?? "").toString().trim();
+    const s = cellToText(ws.getCell(r, 1).value).trim();
     if (s === markerText) return r;
   }
   return null;
@@ -104,17 +142,6 @@ function applyRowStyle(ws, rowNumber, styleSnapshot, upToCol) {
   }
 }
 
-function normalizeStringArray(v) {
-  if (!Array.isArray(v)) return [];
-  return v.map((x) => (x ?? "").toString().trim()).filter((x) => x.length > 0);
-}
-
-function safeFilePart(s) {
-  const t = (s ?? "").toString().trim();
-  if (!t) return "";
-  return t.replace(/[\\\/\:\*\?\"\<\>\|]/g, " ").replace(/\s+/g, " ").trim();
-}
-
 function buildExcerptRows(kindLabel, lines) {
   return lines.map((line) => {
     const values = [];
@@ -128,22 +155,23 @@ function buildExcerptRows(kindLabel, lines) {
   });
 }
 
-// A=選択リスト の C列一覧
+// A=選択リスト の C列一覧（★必ず文字列化）
 function extractSelectOptions(wsList) {
   const opts = [];
   const max = wsList.rowCount || 0;
   for (let r = 1; r <= max; r++) {
-    const a = (wsList.getCell(r, 1).value ?? "").toString().trim();
+    const a = cellToText(wsList.getCell(r, 1).value).trim();
     if (a !== "選択リスト") continue;
-    const c = (wsList.getCell(r, 3).value ?? "").toString().trim();
+
+    const c = cellToText(wsList.getCell(r, 3).value).trim();
     if (!c) continue;
+
     opts.push(c);
   }
   const seen = new Set();
   return opts.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
-// __INS_SELECT__ 差し込み（固定ラベルはA一致 / 選択リストはC一致）
 function buildSelectedRows(wsList, selectedValues, warnings) {
   const wanted = new Set(selectedValues);
   const hit = new Set();
@@ -153,7 +181,7 @@ function buildSelectedRows(wsList, selectedValues, warnings) {
   const lastCol = Math.max(2, wsList.columnCount || 2);
 
   for (let r = 1; r <= max; r++) {
-    const a = (wsList.getCell(r, 1).value ?? "").toString().trim();
+    const a = cellToText(wsList.getCell(r, 1).value).trim();
 
     // 固定ラベル：A一致
     if (a && wanted.has(a)) {
@@ -167,7 +195,7 @@ function buildSelectedRows(wsList, selectedValues, warnings) {
 
     // 選択リスト：C一致
     if (a === "選択リスト") {
-      const cText = (wsList.getCell(r, 3).value ?? "").toString().trim();
+      const cText = cellToText(wsList.getCell(r, 3).value).trim();
       if (cText && wanted.has(cText)) {
         hit.add(cText);
         const values = [];
@@ -195,7 +223,7 @@ function keepOnlySheets(workbook) {
   }
 }
 
-// ===== OpenAI: PDF→抽出（file_id） =====
+// ===== OpenAI: PDF→抽出 =====
 async function extractFromPdfToArrays({ filename, pdfBuffer }) {
   const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
 
@@ -255,7 +283,6 @@ async function extractFromPdfToArrays({ filename, pdfBuffer }) {
       specText: normalizeStringArray(obj.specText),
       opText: normalizeStringArray(obj.opText),
       accText: normalizeStringArray(obj.accText),
-      aiWarnings: normalizeStringArray(obj.warnings),
     };
   } finally {
     try { if (uploaded?.id) await client.files.del(uploaded.id); } catch {}
@@ -292,7 +319,7 @@ export default async function handler(req, res) {
     const url = new URL(req.url, "http://localhost");
     const op = url.searchParams.get("op") || "";
 
-    // GET: 選択リスト（C列）を返す
+    // GET: 選択リスト
     if (req.method === "GET") {
       if (op !== "select_options") {
         return res.status(400).json({ error: "BadRequest", detail: "op が不正" });
@@ -320,7 +347,7 @@ export default async function handler(req, res) {
       ? decodeURIComponent(String(req.headers["x-filename"]))
       : "manual.pdf";
 
-    // POST: AI抽出のみ（②のボタン用）
+    // POST: 抽出
     if (op === "extract") {
       const { specText, opText, accText } = await extractFromPdfToArrays({
         filename: pdfFilename,
@@ -329,7 +356,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ specText, opText, accText });
     }
 
-    // POST: 生成（②の選択結果を反映）
+    // POST: 生成
     if (op !== "generate" && op !== "") {
       return res.status(400).json({ error: "BadRequest", detail: "op が不正" });
     }
@@ -348,7 +375,6 @@ export default async function handler(req, res) {
 
     const warnings = [];
 
-    // テンプレ取得→Excelロード
     const templateBuf = await downloadTemplateExcelBuffer();
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(templateBuf);
@@ -358,7 +384,6 @@ export default async function handler(req, res) {
     if (!wsMain) throw new Error("SheetError: 検品リスト が見つかりません");
     if (!wsList) throw new Error("SheetError: 検品項目リスト が見つかりません");
 
-    // マーカー
     const mSpec = findMarkerRow(wsMain, "__INS_SPEC__");
     const mOp = findMarkerRow(wsMain, "__INS_OP__");
     const mAcc = findMarkerRow(wsMain, "__INS_ACC__");
@@ -369,10 +394,8 @@ export default async function handler(req, res) {
     if (!mAcc) throw new Error("MarkerError: __INS_ACC__ が見つかりません");
     if (!mSel) throw new Error("MarkerError: __INS_SELECT__ が見つかりません");
 
-    // 罫線維持（K列まで）
     const STYLE_COLS = 11;
 
-    // 下から差し込み
     const tasks = [
       { row: mSel, type: "select" },
       { row: mAcc, type: "acc" },
@@ -416,17 +439,14 @@ export default async function handler(req, res) {
       }
     }
 
-    // 必要シートのみ残す
     keepOnlySheets(wb);
 
     const outBuf = await wb.xlsx.writeBuffer();
 
-    // ファイル名
     const fnModel = model || "型番未入力";
     const fnProduct = product || "製品名未入力";
     const outName = `検品リスト_${fnModel}_${fnProduct}.xlsx`;
 
-    // ③：警告は使わないのでヘッダは付けない（不要情報を出さない）
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
