@@ -100,20 +100,6 @@
     <div class="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 md:p-8">
       <h1 class="text-xl md:text-2xl font-bold text-slate-800">検品リスト作成ツール</h1>
 
-      <div class="mt-6 grid gap-5 md:grid-cols-2">
-        <label class="block">
-          <div class="text-sm font-semibold text-slate-700">型番</div>
-          <input id="modelInput"
-                 class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-300" />
-        </label>
-
-        <label class="block">
-          <div class="text-sm font-semibold text-slate-700">製品名</div>
-          <input id="productInput"
-                 class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-300" />
-        </label>
-      </div>
-
       <!-- PDF -->
       <div class="mt-7">
         <div class="text-sm font-semibold text-slate-700">PDF（ドラッグ＆ドロップ / クリックで選択）</div>
@@ -153,7 +139,7 @@
         </div>
       </div>
 
-      <!-- AI抽出（1列・内スクロールなし） -->
+      <!-- AI抽出（PDF読み取り + 型番/製品名入力欄をここへ移動） -->
       <div class="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -168,6 +154,21 @@
                          hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">
             PDFをAIに読み取らせる
           </button>
+        </div>
+
+        <!-- ★ 型番/製品名（未入力ならPDF抽出で自動入力） -->
+        <div class="mt-4 grid gap-4 md:grid-cols-2">
+          <label class="block">
+            <div class="text-sm font-semibold text-slate-700">型番（未入力ならPDFから自動取得）</div>
+            <input id="modelInput"
+                   class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-300" />
+          </label>
+
+          <label class="block">
+            <div class="text-sm font-semibold text-slate-700">製品名（未入力ならPDFから自動取得）</div>
+            <input id="productInput"
+                   class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-300" />
+          </label>
         </div>
 
         <div class="mt-4 space-y-4">
