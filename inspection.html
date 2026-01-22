@@ -82,7 +82,7 @@
     </div>
   </nav>
 
-  <!-- ① 進捗オーバーレイ（操作不可） -->
+  <!-- 進捗オーバーレイ（操作不可） -->
   <div id="overlay" class="overlay" aria-hidden="true">
     <div class="overlay-card">
       <div class="flex items-center gap-3">
@@ -144,16 +144,16 @@
         </div>
       </div>
 
-      <!-- ⑤ 選択リスト（C列） -->
+      <!-- 選択リスト（内スクロールなし） -->
       <div class="mt-7">
         <div class="text-sm font-semibold text-slate-700">選択リスト（不要なものだけチェックを外す）</div>
         <div id="selectListBox"
-             class="mt-2 rounded-2xl border border-slate-300 bg-white p-4 max-h-72 overflow-auto text-sm leading-relaxed">
+             class="mt-2 rounded-2xl border border-slate-300 bg-white p-4 text-sm leading-relaxed">
           読み込み中…
         </div>
       </div>
 
-      <!-- ② AI抽出（別枠） -->
+      <!-- AI抽出（1列・内スクロールなし） -->
       <div class="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -170,20 +170,20 @@
           </button>
         </div>
 
-        <div class="mt-4 grid gap-4 md:grid-cols-3">
-          <div class="rounded-xl border border-slate-200 bg-white p-3">
+        <div class="mt-4 space-y-4">
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
             <div class="text-sm font-semibold text-slate-700">仕様</div>
-            <div id="aiSpecBox" class="mt-2 max-h-56 overflow-auto text-sm"></div>
+            <div id="aiSpecBox" class="mt-2 text-sm"></div>
           </div>
 
-          <div class="rounded-xl border border-slate-200 bg-white p-3">
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
             <div class="text-sm font-semibold text-slate-700">動作</div>
-            <div id="aiOpBox" class="mt-2 max-h-56 overflow-auto text-sm"></div>
+            <div id="aiOpBox" class="mt-2 text-sm"></div>
           </div>
 
-          <div class="rounded-xl border border-slate-200 bg-white p-3">
+          <div class="rounded-xl border border-slate-200 bg-white p-4">
             <div class="text-sm font-semibold text-slate-700">付属品</div>
-            <div id="aiAccBox" class="mt-2 max-h-56 overflow-auto text-sm"></div>
+            <div id="aiAccBox" class="mt-2 text-sm"></div>
           </div>
         </div>
       </div>
