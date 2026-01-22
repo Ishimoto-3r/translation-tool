@@ -56,13 +56,24 @@ async function getAccessToken() {
 }
 
 async function downloadTemplateExcelBuffer() {
-  // ★ 既存ツール(kensho)と同じ方式：SharePointの共有URLからテンプレを取得
-  const fileUrl = process.env.INSPECTION_SHAREPOINT_FILE_URL;
-  if (!fileUrl) throw new Error("ConfigError: INSPECTION_SHAREPOINT_FILE_URL が不足");
+  // ★ 既存ツール群と同じ「共通SharePoint URL」環境変数を自動で拾う
+  const fileUrl =
+    process.env.INSPECTION_SHAREPOINT_FILE_URL || // もし今後追加するなら
+    process.env.MANUAL_DATABASE_URL ||
+    process.env.MANUAL_SHAREPOINT_URL ||
+    process.env.SHAREPOINT_FILE_URL ||
+    process.env.SP_FILE_URL ||
+    process.env.DATABASE_XLSX_URL;
+
+  if (!fileUrl) {
+    throw new Error(
+      "ConfigError: SharePoint URL env が不足（候補: MANUAL_DATABASE_URL / MANUAL_SHAREPOINT_URL / SHAREPOINT_FILE_URL / SP_FILE_URL / DATABASE_XLSX_URL）"
+    );
+  }
 
   const accessToken = await getAccessToken();
 
-  // shareId を URL から生成（Graph の shares API 形式）
+  // Graph shares API 用に shareId を生成
   const shareId = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");
 
   const graphRes = await fetch(
@@ -78,6 +89,7 @@ async function downloadTemplateExcelBuffer() {
   const ab = await graphRes.arrayBuffer();
   return Buffer.from(ab);
 }
+
 
 
 // ===== Excel helpers =====
