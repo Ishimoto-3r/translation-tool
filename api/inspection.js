@@ -1,11 +1,20 @@
 // api/inspection.js
-// Step1: 検品リスト生成API（日本語Excelのみ）
-// - SharePointからテンプレExcel取得（siteId/driveId/itemId）
-// - 検品リスト シートのマーカー行に差し込み
-// - 選択ラベルは「検品項目リスト!A列 完全一致」で抽出し、B列以降をコピー
-// - 不一致ラベルは warnings で返す（X-Warnings ヘッダ）
+// PDF → OpenAIで「仕様/動作/付属品」抽出 → テンプレExcelに差し込み → 日本語Excel返却
+//
+// 仕様(確定版)の差し込みルール：
+// - マーカー行（A列完全一致）: __INS_SPEC__/__INS_OP__/__INS_ACC__/__INS_SELECT__
+// - マニュアル抜粋：B=区分, C=本文, E=空欄, F=1, G=必須
+// - 選択リスト：検品項目リスト!A列 完全一致で、A列はコピーせずB以降を元シート順でコピー
+// - 未一致ラベル：warningsへ（エラーにしない）
 
 import ExcelJS from "exceljs";
+import OpenAI from "openai";
+
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+const INSPECTION_MODEL = process.env.INSPECTION_MODEL || "gpt-5.2";
+const INSPECTION_REASONING = process.env.INSPECTION_REASONING || "medium";
+const INSPECTION_VERBOSITY = process.env.INSPECTION_VERBOSITY || "low";
 
 // ===== SharePoint (Microsoft Graph) =====
 async function getAccessToken() {
@@ -14,9 +23,7 @@ async function getAccessToken() {
   const clientSecret = process.env.MANUAL_CLIENT_SECRET;
 
   if (!tenantId || !clientId || !clientSecret) {
-    throw new Error(
-      "ConfigError: MANUAL_TENANT_ID / MANUAL_CLIENT_ID / MANUAL_CLIENT_SECRET が不足"
-    );
+    throw new Error("ConfigError: MANUAL_TENANT_ID / MANUAL_CLIENT_ID / MANUAL_CLIENT_SECRET が不足");
   }
 
   const tokenRes = await fetch(
@@ -44,14 +51,12 @@ async function downloadTemplateExcelBuffer() {
   const itemId = process.env.INSPECTION_TEMPLATE_ITEM_ID;
 
   if (!siteId || !driveId || !itemId) {
-    throw new Error(
-      "ConfigError: INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID が不足"
-    );
+    throw new Error("ConfigError: INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID が不足");
   }
 
   const accessToken = await getAccessToken();
-
   const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${itemId}/content`;
+
   const graphRes = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -95,21 +100,18 @@ function applyRowStyle(ws, rowNumber, styleSnapshot, upToCol) {
   }
 }
 
-function normalizeStringArray(v) {
-  if (!Array.isArray(v)) return [];
-  return v
-    .map((x) => (x ?? "").toString().trim())
-    .filter((x) => x.length > 0);
+function getLastUsedCol(row) {
+  let last = 1;
+  row.eachCell({ includeEmpty: false }, (cell, col) => {
+    const v = cell.value;
+    if (v !== null && v !== undefined && v !== "") last = Math.max(last, col);
+  });
+  return last;
 }
 
-function parseRequestBody(req) {
-  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
-  return {
-    selectedLabels: normalizeStringArray(body.selectedLabels),
-    specText: normalizeStringArray(body.specText),
-    opText: normalizeStringArray(body.opText),
-    accText: normalizeStringArray(body.accText),
-  };
+function normalizeStringArray(v) {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => (x ?? "").toString().trim()).filter((x) => x.length > 0);
 }
 
 function buildExcerptRows(kindLabel, lines) {
@@ -123,15 +125,6 @@ function buildExcerptRows(kindLabel, lines) {
     values[7] = "必須";       // G
     return values;
   });
-}
-
-function getLastUsedCol(row) {
-  let last = 1;
-  row.eachCell({ includeEmpty: false }, (cell, col) => {
-    const v = cell.value;
-    if (v !== null && v !== undefined && v !== "") last = Math.max(last, col);
-  });
-  return last;
 }
 
 function buildSelectedRowsFromListSheet(wsList, selectedLabels, warnings) {
@@ -166,8 +159,80 @@ function buildSelectedRowsFromListSheet(wsList, selectedLabels, warnings) {
   return rows;
 }
 
+// ===== OpenAI: PDF→抽出 =====
+async function extractFromPdfToArrays({ filename, file_data }) {
+  if (!filename || !file_data) {
+    throw new Error("InputError: pdf.filename / pdf.file_data が不足");
+  }
+
+  // 出力は「配列のみ」：Excel差し込み用
+  const sys =
+    "あなたは日本語の技術文書から検品リスト用の抜粋を作る担当です。\n" +
+    "与えられたPDFを読み、次の3区分の箇条書き（短文）を抽出してください。\n" +
+    "- 仕様（サイズ/材質/電源/定格/温度/互換などの仕様）\n" +
+    "- 動作（操作手順・挙動・表示・注意点のうち検品で確認すべき内容）\n" +
+    "- 付属品（同梱物）\n\n" +
+    "【重要】\n" +
+    "- 推測しない。PDFに根拠があるものだけ。\n" +
+    "- 1行は短く。重複は統合。\n" +
+    "- 型番/数値/単位は原文どおり。\n" +
+    "- 出力はJSONのみ。";
+
+  const response = await client.responses.create({
+    model: INSPECTION_MODEL,
+    reasoning: { effort: INSPECTION_REASONING },
+    text: { verbosity: INSPECTION_VERBOSITY },
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: sys + "\n\nJSONで返してください。" },
+          {
+            type: "input_file",
+            filename,
+            file_data,
+          },
+          {
+            type: "input_text",
+            text:
+              "出力JSONスキーマ:\n" +
+              "{\n" +
+              '  "specText": string[],\n' +
+              '  "opText": string[],\n' +
+              '  "accText": string[],\n' +
+              '  "warnings": string[]\n' +
+              "}\n",
+          },
+        ],
+      },
+    ],
+  });
+
+  const text = (response.output_text || "").trim();
+  let obj;
+  try {
+    obj = JSON.parse(text);
+  } catch {
+    // JSON以外が混ざった時の救済（最小）
+    const first = text.indexOf("{");
+    const last = text.lastIndexOf("}");
+    if (first >= 0 && last > first) {
+      obj = JSON.parse(text.slice(first, last + 1));
+    } else {
+      throw new Error("AIParseError: JSON解析に失敗");
+    }
+  }
+
+  return {
+    specText: normalizeStringArray(obj.specText),
+    opText: normalizeStringArray(obj.opText),
+    accText: normalizeStringArray(obj.accText),
+    aiWarnings: normalizeStringArray(obj.warnings),
+  };
+}
+
 export default async function handler(req, res) {
-  // CORS/OPTIONS（既存APIと同等）
+  // CORS（既存APIと同等）
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
@@ -176,30 +241,36 @@ export default async function handler(req, res) {
     "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
   );
 
-  if (req.method === "OPTIONS") {
-    res.status(200).end();
-    return;
-  }
-
-  if (req.method !== "POST") {
-    res.status(405).json({ error: "MethodNotAllowed" });
-    return;
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
 
   try {
-    const { selectedLabels, specText, opText, accText } = parseRequestBody(req);
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const selectedLabels = normalizeStringArray(body.selectedLabels);
+    const pdf = body.pdf || {};
 
+    const warnings = [];
+
+    // 1) PDF→AI抽出
+    const { specText, opText, accText, aiWarnings } = await extractFromPdfToArrays({
+      filename: String(pdf.filename || "manual.pdf"),
+      file_data: String(pdf.file_data || ""),
+    });
+    for (const w of aiWarnings) warnings.push(`AI抽出: ${w}`);
+
+    // 2) テンプレ取得
     const templateBuf = await downloadTemplateExcelBuffer();
 
+    // 3) Excelロード
     const wb = new ExcelJS.Workbook();
     await wb.xlsx.load(templateBuf);
 
     const wsMain = wb.getWorksheet("検品リスト");
     const wsList = wb.getWorksheet("検品項目リスト");
-
     if (!wsMain) throw new Error("SheetError: 検品リスト が見つかりません");
     if (!wsList) throw new Error("SheetError: 検品項目リスト が見つかりません");
 
+    // 4) マーカー検出（欠落は即エラー）
     const mSpec = findMarkerRow(wsMain, "__INS_SPEC__");
     const mOp = findMarkerRow(wsMain, "__INS_OP__");
     const mAcc = findMarkerRow(wsMain, "__INS_ACC__");
@@ -210,9 +281,7 @@ export default async function handler(req, res) {
     if (!mAcc) throw new Error("MarkerError: __INS_ACC__ が見つかりません");
     if (!mSel) throw new Error("MarkerError: __INS_SELECT__ が見つかりません");
 
-    const warnings = [];
-
-    // spliceRowsで行番号がズレるので、下から処理
+    // 5) 下から差し込み（行ズレ対策）
     const tasks = [
       { row: mSel, type: "select" },
       { row: mAcc, type: "acc" },
@@ -226,7 +295,7 @@ export default async function handler(req, res) {
 
       if (t.type === "spec") {
         const rows = buildExcerptRows("仕様", specText);
-        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
+        if (rows.length === 0) { wsMain.spliceRows(r, 1); warnings.push("AI抽出: 仕様が0件"); continue; }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, 7);
         continue;
@@ -234,7 +303,7 @@ export default async function handler(req, res) {
 
       if (t.type === "op") {
         const rows = buildExcerptRows("動作", opText);
-        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
+        if (rows.length === 0) { wsMain.spliceRows(r, 1); warnings.push("AI抽出: 動作が0件"); continue; }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, 7);
         continue;
@@ -242,7 +311,7 @@ export default async function handler(req, res) {
 
       if (t.type === "acc") {
         const rows = buildExcerptRows("付属品", accText);
-        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
+        if (rows.length === 0) { wsMain.spliceRows(r, 1); warnings.push("AI抽出: 付属品が0件"); continue; }
         wsMain.spliceRows(r, 1, ...rows);
         for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, 7);
         continue;
@@ -253,31 +322,29 @@ export default async function handler(req, res) {
         if (picked.length === 0) { wsMain.spliceRows(r, 1); continue; }
 
         wsMain.spliceRows(r, 1, ...picked.map((x) => x.values));
-
         for (let i = 0; i < picked.length; i++) {
           const upTo = Math.max(7, picked[i].lastCol);
           applyRowStyle(wsMain, r + i, styleSnap, upTo);
         }
-        continue;
       }
     }
 
+    // 6) 書き出し
     const outBuf = await wb.xlsx.writeBuffer();
 
     res.setHeader("X-Warnings", encodeURIComponent(JSON.stringify(warnings)));
     res.setHeader("X-Warnings-Count", String(warnings.length));
-
-    res.setHeader(
-      "Content-Type",
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    );
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader(
       "Content-Disposition",
       "attachment; filename*=UTF-8''%E6%A4%9C%E5%93%81%E3%83%AA%E3%82%B9%E3%83%88_%E6%97%A5%E6%9C%AC%E8%AA%9E.xlsx"
     );
-    res.status(200).send(Buffer.from(outBuf));
+    return res.status(200).send(Buffer.from(outBuf));
   } catch (e) {
     console.error("[inspection] error", e);
-    res.status(500).json({ error: "InspectionError", detail: e?.message ? String(e.message) : "UnknownError" });
+    return res.status(500).json({
+      error: "InspectionError",
+      detail: e?.message ? String(e.message) : "UnknownError",
+    });
   }
 }
