@@ -1,21 +1,9 @@
-// inspection.js（フロント）
-// Step1: /api/inspection にPOSTして日本語ExcelをDL
+// inspection.js
+// PDF D&D → base64 → /api/inspection → 日本語Excel DL
 
 const $ = (id) => document.getElementById(id);
 
-function getSelectedLabels() {
-  const labels = [];
-  if ($("lbl-li").checked) labels.push("リチウムイオン電池");
-  if ($("lbl-law").checked) labels.push("法的対象(PSE/無線)");
-  return labels;
-}
-
-function splitLines(text) {
-  return (text || "")
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
+let pdfFile = null; // File
 
 function setStatus(msg) {
   $("status").textContent = msg || "";
@@ -30,7 +18,6 @@ function showWarnings(warnings) {
     box.style.display = "none";
     return;
   }
-
   for (const w of warnings) {
     const li = document.createElement("li");
     li.textContent = w;
@@ -51,6 +38,33 @@ function decodeWarningsFromHeader(res) {
   }
 }
 
+function getSelectedLabels() {
+  const labels = [];
+  if ($("lbl-li").checked) labels.push("リチウムイオン電池");
+  if ($("lbl-law").checked) labels.push("法的対象(PSE/無線)");
+  return labels;
+}
+
+function updateUI() {
+  $("fileinfo").textContent = pdfFile ? `${pdfFile.name} (${Math.round(pdfFile.size / 1024)} KB)` : "未選択";
+  $("run").disabled = !pdfFile;
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(new Error("FileReadError"));
+    fr.onload = () => {
+      const s = String(fr.result || "");
+      // data:application/pdf;base64,XXXX
+      const idx = s.indexOf("base64,");
+      if (idx >= 0) return resolve(s.slice(idx + "base64,".length));
+      reject(new Error("Base64ParseError"));
+    };
+    fr.readAsDataURL(file);
+  });
+}
+
 async function run() {
   const btn = $("run");
   btn.disabled = true;
@@ -58,11 +72,16 @@ async function run() {
   showWarnings([]);
 
   try {
+    if (!pdfFile) throw new Error("PDFが未選択です");
+
+    const pdfBase64 = await readFileAsBase64(pdfFile);
+
     const payload = {
       selectedLabels: getSelectedLabels(),
-      specText: splitLines($("spec").value),
-      opText: splitLines($("op").value),
-      accText: splitLines($("acc").value),
+      pdf: {
+        filename: pdfFile.name || "manual.pdf",
+        file_data: pdfBase64,
+      },
     };
 
     const res = await fetch("/api/inspection", {
@@ -101,10 +120,39 @@ async function run() {
     setStatus("エラーが発生しました");
     alert("生成に失敗しました。\n" + (e?.message ? e.message : String(e)));
   } finally {
-    btn.disabled = false;
+    btn.disabled = !pdfFile;
   }
 }
 
+function setPdf(file) {
+  if (!file) return;
+  if (file.type !== "application/pdf") {
+    alert("PDFのみ対応です");
+    return;
+  }
+  pdfFile = file;
+  updateUI();
+}
+
 window.addEventListener("DOMContentLoaded", () => {
+  const dz = $("dropzone");
+  const fp = $("filepicker");
+
+  dz.addEventListener("click", () => fp.click());
+  fp.addEventListener("change", () => setPdf(fp.files && fp.files[0]));
+
+  dz.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dz.classList.add("dragover");
+  });
+  dz.addEventListener("dragleave", () => dz.classList.remove("dragover"));
+  dz.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dz.classList.remove("dragover");
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    setPdf(f);
+  });
+
   $("run").addEventListener("click", run);
+  updateUI();
 });
