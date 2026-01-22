@@ -74,20 +74,19 @@ async function run() {
   try {
     if (!pdfFile) throw new Error("PDFが未選択です");
 
-    const pdfBase64 = await readFileAsBase64(pdfFile);
+    const labels = getSelectedLabels();
 
-    const payload = {
-      selectedLabels: getSelectedLabels(),
-      pdf: {
-        filename: pdfFile.name || "manual.pdf",
-        file_data: pdfBase64,
-      },
-    };
+    // ★ base64化しない（413回避）
+    const ab = await pdfFile.arrayBuffer();
 
     const res = await fetch("/api/inspection", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      headers: {
+        "Content-Type": "application/pdf",
+        "x-filename": encodeURIComponent(pdfFile.name || "manual.pdf"),
+        "x-selected-labels": encodeURIComponent(JSON.stringify(labels)),
+      },
+      body: ab,
     });
 
     if (!res.ok) {
@@ -123,6 +122,7 @@ async function run() {
     btn.disabled = !pdfFile;
   }
 }
+
 
 function setPdf(file) {
   if (!file) return;
