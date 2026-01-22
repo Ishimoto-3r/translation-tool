@@ -56,22 +56,19 @@ async function getAccessToken() {
 }
 
 async function downloadTemplateExcelBuffer() {
-  const siteId = process.env.INSPECTION_SITE_ID;
-  const driveId = process.env.INSPECTION_DRIVE_ID;
-  const itemId = process.env.INSPECTION_TEMPLATE_ITEM_ID;
-
-  if (!siteId || !driveId || !itemId) {
-    throw new Error(
-      "ConfigError: INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID が不足"
-    );
-  }
+  // ★ 既存ツール(kensho)と同じ方式：SharePointの共有URLからテンプレを取得
+  const fileUrl = process.env.INSPECTION_SHAREPOINT_FILE_URL;
+  if (!fileUrl) throw new Error("ConfigError: INSPECTION_SHAREPOINT_FILE_URL が不足");
 
   const accessToken = await getAccessToken();
-  const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${itemId}/content`;
 
-  const graphRes = await fetch(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  // shareId を URL から生成（Graph の shares API 形式）
+  const shareId = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");
+
+  const graphRes = await fetch(
+    `https://graph.microsoft.com/v1.0/shares/u!${shareId}/driveItem/content`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
 
   if (!graphRes.ok) {
     const txt = await graphRes.text();
@@ -81,6 +78,7 @@ async function downloadTemplateExcelBuffer() {
   const ab = await graphRes.arrayBuffer();
   return Buffer.from(ab);
 }
+
 
 // ===== Excel helpers =====
 function findMarkerRow(ws, markerText) {
