@@ -12,19 +12,27 @@
     .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
     .tool-nav a { text-decoration:none; color:#333; padding:6px 10px; border-radius:8px; }
     .tool-nav a.active { background:#333; color:#fff; }
+
     .container { max-width:1100px; margin:18px auto; padding:0 16px; }
     .card { background:#fff; border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
     h1 { margin:0 0 12px; font-size:20px; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
-    @media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
+
     .section-title { font-size:14px; color:#444; margin:14px 0 6px; font-weight:700; }
-    textarea { width:100%; min-height:110px; resize:vertical; border:1px solid #ccc; border-radius:10px; padding:10px; font-size:14px; }
-    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
     .checkboxes { display:flex; gap:14px; flex-wrap:wrap; }
     label { display:flex; gap:8px; align-items:center; cursor:pointer; }
+    .note { font-size:12px; color:#666; }
+
+    .dropzone {
+      border:2px dashed #bbb; border-radius:14px; padding:18px;
+      background:#fafafa; text-align:center; cursor:pointer;
+    }
+    .dropzone.dragover { border-color:#333; background:#f0f0f0; }
+    .fileinfo { margin-top:8px; font-size:13px; color:#333; }
+
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
     .btn { border:none; background:#333; color:#fff; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700; }
     .btn:disabled { opacity:.5; cursor:not-allowed; }
-    .note { font-size:12px; color:#666; }
+
     .warn { background:#fff7e6; border:1px solid #ffd591; padding:10px 12px; border-radius:12px; margin-top:12px; display:none; }
     .warn ul { margin:6px 0 0 18px; }
   </style>
@@ -59,6 +67,14 @@
     <div class="card">
       <h1>検品リスト作成ツール</h1>
 
+      <div class="section-title">PDF（ドラッグ＆ドロップ）</div>
+      <div class="dropzone" id="dropzone">
+        ここにPDFをドロップ（またはクリックで選択）
+        <div class="fileinfo" id="fileinfo">未選択</div>
+      </div>
+      <input type="file" id="filepicker" accept="application/pdf" style="display:none;" />
+      <div class="note">※ PDFからAIが「仕様 / 動作 / 付属品」を抽出し、テンプレExcelへ差し込みます。</div>
+
       <div class="section-title">ラベル選択</div>
       <div class="checkboxes">
         <label><input type="checkbox" id="lbl-li" /> リチウムイオン電池</label>
@@ -66,30 +82,8 @@
       </div>
       <div class="note">※ 選択値は「検品項目リスト」シートのA列と完全一致で突合します。</div>
 
-      <div class="section-title">マニュアル抜粋（貼り付け）</div>
-      <div class="grid">
-        <div>
-          <div class="note">仕様</div>
-          <textarea id="spec" placeholder="例）サイズ：100×50×30mm"></textarea>
-        </div>
-        <div>
-          <div class="note">動作</div>
-          <textarea id="op" placeholder="例）充電電流：1.5A"></textarea>
-        </div>
-        <div>
-          <div class="note">付属品</div>
-          <textarea id="acc" placeholder="例）USBケーブル×1"></textarea>
-        </div>
-        <div>
-          <div class="note">PDF（将来用）</div>
-          <textarea disabled placeholder="Step3で対応（PDF D&Dは将来用）"></textarea>
-        </div>
-      </div>
-
-      <div style="height:12px;"></div>
-
       <div class="row">
-        <button class="btn" id="run">検品リストExcel生成</button>
+        <button class="btn" id="run" disabled>検品リストExcel生成</button>
         <div class="note" id="status"></div>
       </div>
 
