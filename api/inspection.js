@@ -24,28 +24,16 @@ async function readRawBody(req) {
   return Buffer.concat(chunks);
 }
 
-// ===== Excel cell value -> string（★ [object Object] 根絶） =====
 function cellToText(v) {
   if (v == null) return "";
-
   if (typeof v === "string") return v;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
 
-  // ExcelJS の代表的な型
-  // { richText: [{text:""}...] }
   if (v && typeof v === "object") {
-    if (Array.isArray(v.richText)) {
-      return v.richText.map((p) => p?.text ?? "").join("").trim();
-    }
-    // { text, hyperlink }
+    if (Array.isArray(v.richText)) return v.richText.map((p) => p?.text ?? "").join("").trim();
     if (typeof v.text === "string") return v.text.trim();
-    // { formula, result }
     if (typeof v.result !== "undefined") return cellToText(v.result).trim();
-    if (typeof v.formula === "string") {
-      // resultが無い場合は式そのものは表示したくないので空扱い
-      return "";
-    }
-    // Date
+    if (typeof v.formula === "string") return "";
     if (v instanceof Date) return v.toISOString();
   }
 
@@ -155,7 +143,6 @@ function buildExcerptRows(kindLabel, lines) {
   });
 }
 
-// A=選択リスト の C列一覧（★必ず文字列化）
 function extractSelectOptions(wsList) {
   const opts = [];
   const max = wsList.rowCount || 0;
@@ -223,8 +210,8 @@ function keepOnlySheets(workbook) {
   }
 }
 
-// ===== OpenAI: PDF→抽出 =====
-async function extractFromPdfToArrays({ filename, pdfBuffer }) {
+// ===== OpenAI: PDF→抽出（仕様/動作/付属品 + 型番/製品名） =====
+async function extractFromPdfToPayload({ filename, pdfBuffer }) {
   const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
 
   let uploaded = null;
@@ -232,13 +219,20 @@ async function extractFromPdfToArrays({ filename, pdfBuffer }) {
     uploaded = await client.files.create({ file: fileObj, purpose: "assistants" });
 
     const sys =
-      "あなたは日本語の技術文書から検品リスト用の抜粋を作る担当です。\n" +
-      "PDFを読み、次の3区分の検品項目（短文）を抽出してください。\n" +
-      "- 仕様\n- 動作\n- 付属品\n\n" +
+      "あなたは日本語の技術文書（取扱説明書等）から検品リスト用の抜粋を作る担当です。\n" +
+      "PDFを読み、次の情報を抽出してください。\n\n" +
+      "1) 型番（model）\n" +
+      "2) 製品名（product）\n" +
+      "3) 検品項目（短文）を3区分で\n" +
+      "   - 仕様（specText）\n" +
+      "   - 動作（opText）\n" +
+      "   - 付属品（accText）\n\n" +
       "【重要】\n" +
-      "- 推測しない。根拠があるものだけ。\n" +
-      "- 1行は短く。重複は統合。\n" +
+      "- 推測しない。PDFに明記があるものだけ。\n" +
       "- 型番/数値/単位は原文どおり。\n" +
+      "- 製品名は正式名称があればそれ。\n" +
+      "- 型番が複数ある場合は、最も主要（表紙・製品仕様欄等）なものを1つ。\n" +
+      "- 見つからない場合は空文字。\n" +
       "- 出力はJSONのみ。";
 
     const response = await client.responses.create({
@@ -256,10 +250,11 @@ async function extractFromPdfToArrays({ filename, pdfBuffer }) {
               text:
                 "出力JSONスキーマ:\n" +
                 "{\n" +
+                '  "model": string,\n' +
+                '  "product": string,\n' +
                 '  "specText": string[],\n' +
                 '  "opText": string[],\n' +
-                '  "accText": string[],\n' +
-                '  "warnings": string[]\n' +
+                '  "accText": string[]\n' +
                 "}\n",
             },
           ],
@@ -280,6 +275,8 @@ async function extractFromPdfToArrays({ filename, pdfBuffer }) {
     }
 
     return {
+      model: (obj.model ?? "").toString().trim(),
+      product: (obj.product ?? "").toString().trim(),
       specText: normalizeStringArray(obj.specText),
       opText: normalizeStringArray(obj.opText),
       accText: normalizeStringArray(obj.accText),
@@ -347,13 +344,13 @@ export default async function handler(req, res) {
       ? decodeURIComponent(String(req.headers["x-filename"]))
       : "manual.pdf";
 
-    // POST: 抽出
+    // POST: 抽出（★ model/product を返す）
     if (op === "extract") {
-      const { specText, opText, accText } = await extractFromPdfToArrays({
+      const payload = await extractFromPdfToPayload({
         filename: pdfFilename,
         pdfBuffer,
       });
-      return res.status(200).json({ specText, opText, accText });
+      return res.status(200).json(payload);
     }
 
     // POST: 生成
