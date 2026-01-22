@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>検品リスト作成ツール</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f5f5f5; margin:0; padding:0; }
+    .tool-nav { background:#fff; padding:10px 16px; border-bottom:1px solid #ddd; display:flex; gap:12px; flex-wrap:wrap; }
+    .nav-groupbox { background:#fafafa; border:1px solid #e6e6e6; border-radius:10px; padding:8px 10px; }
+    .nav-heading { font-size:12px; color:#666; margin-bottom:6px; }
+    .nav-links { display:flex; gap:10px; flex-wrap:wrap; }
+    .tool-nav a { text-decoration:none; color:#333; padding:6px 10px; border-radius:8px; }
+    .tool-nav a.active { background:#333; color:#fff; }
+    .container { max-width:1100px; margin:18px auto; padding:0 16px; }
+    .card { background:#fff; border-radius:14px; padding:16px; box-shadow:0 2px 10px rgba(0,0,0,.06); }
+    h1 { margin:0 0 12px; font-size:20px; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    @media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
+    .section-title { font-size:14px; color:#444; margin:14px 0 6px; font-weight:700; }
+    textarea { width:100%; min-height:110px; resize:vertical; border:1px solid #ccc; border-radius:10px; padding:10px; font-size:14px; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .checkboxes { display:flex; gap:14px; flex-wrap:wrap; }
+    label { display:flex; gap:8px; align-items:center; cursor:pointer; }
+    .btn { border:none; background:#333; color:#fff; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:700; }
+    .btn:disabled { opacity:.5; cursor:not-allowed; }
+    .note { font-size:12px; color:#666; }
+    .warn { background:#fff7e6; border:1px solid #ffd591; padding:10px 12px; border-radius:12px; margin-top:12px; display:none; }
+    .warn ul { margin:6px 0 0 18px; }
+  </style>
+</head>
+
+<body>
+  <nav class="tool-nav">
+    <div class="nav-groupbox">
+      <div class="nav-heading">翻訳</div>
+      <div class="nav-links">
+        <a href="/index.html">翻訳ツール</a>
+        <a href="/verify.html">検証結果翻訳</a>
+        <a href="/column-translate.html">列指定翻訳</a>
+        <a href="/sheet-translate.html">シート翻訳</a>
+        <a href="/word-translate.html">Word翻訳</a>
+      </div>
+    </div>
+
+    <div class="nav-groupbox">
+      <div class="nav-heading">その他</div>
+      <div class="nav-links">
+        <a href="/report.html">修理レポート</a>
+        <a href="/kensho.html">検証項目作成</a>
+        <a href="/manual.html">原稿作成（AIチェック）</a>
+        <a href="/prompt.html">単発プロンプト</a>
+        <a href="/inspection.html" class="active">検品リスト作成</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="card">
+      <h1>検品リスト作成ツール</h1>
+
+      <div class="section-title">ラベル選択</div>
+      <div class="checkboxes">
+        <label><input type="checkbox" id="lbl-li" /> リチウムイオン電池</label>
+        <label><input type="checkbox" id="lbl-law" /> 法的対象(PSE/無線)</label>
+      </div>
+      <div class="note">※ 選択値は「検品項目リスト」シートのA列と完全一致で突合します。</div>
+
+      <div class="section-title">マニュアル抜粋（貼り付け）</div>
+      <div class="grid">
+        <div>
+          <div class="note">仕様</div>
+          <textarea id="spec" placeholder="例）サイズ：100×50×30mm"></textarea>
+        </div>
+        <div>
+          <div class="note">動作</div>
+          <textarea id="op" placeholder="例）充電電流：1.5A"></textarea>
+        </div>
+        <div>
+          <div class="note">付属品</div>
+          <textarea id="acc" placeholder="例）USBケーブル×1"></textarea>
+        </div>
+        <div>
+          <div class="note">PDF（将来用）</div>
+          <textarea disabled placeholder="Step3で対応（PDF D&Dは将来用）"></textarea>
+        </div>
+      </div>
+
+      <div style="height:12px;"></div>
+
+      <div class="row">
+        <button class="btn" id="run">検品リストExcel生成</button>
+        <div class="note" id="status"></div>
+      </div>
+
+      <div class="warn" id="warnBox">
+        <div><b>警告</b></div>
+        <ul id="warnList"></ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="/inspection.js" defer></script>
+</body>
+</html>
