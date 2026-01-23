@@ -11,12 +11,14 @@ const INSPECTION_MODEL = process.env.INSPECTION_MODEL || "gpt-5.2";
 const INSPECTION_REASONING = process.env.INSPECTION_REASONING || "medium";
 const INSPECTION_VERBOSITY = process.env.INSPECTION_VERBOSITY || "low";
 
+// ④ 出力に残すのは2シートだけ
 const OUTPUT_KEEP_SHEETS = new Set([
   "検品リスト",
   "検品用画像",
-  "検品ルールブック",
-  "検品外観基準",
 ]);
+
+const GLOBAL_FONT_NAME = "游ゴシック";
+const GLOBAL_FONT_SIZE = 10;
 
 async function readRawBody(req) {
   const chunks = [];
@@ -130,6 +132,30 @@ function applyRowStyle(ws, rowNumber, styleSnapshot, upToCol) {
   }
 }
 
+// ⑤ 全セルに「游ゴシック / 10」適用（name/sizeだけ上書き）
+function applyGlobalFont(workbook) {
+  for (const ws of workbook.worksheets) {
+    ws.eachRow({ includeEmpty: true }, (row) => {
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        const cur = cell.font || {};
+        cell.font = { ...cur, name: GLOBAL_FONT_NAME, size: GLOBAL_FONT_SIZE };
+      });
+    });
+  }
+}
+
+// ③ G列をセンター揃えに強制（途中崩れ対策）
+function forceCenterAlignColumnG(ws) {
+  const col = 7; // G
+  const max = ws.rowCount || 0;
+  for (let r = 1; r <= max; r++) {
+    const cell = ws.getCell(r, col);
+    const cur = cell.alignment || {};
+    cell.alignment = { ...cur, horizontal: "center", vertical: "middle" };
+  }
+}
+
+// ④ 必要シート以外削除
 function keepOnlySheets(workbook) {
   const names = workbook.worksheets.map((w) => w.name);
   for (const name of names) {
@@ -202,7 +228,7 @@ function buildSelectedRows(wsList, selectedValues, warnings) {
 function normalizeAccessoriesEnsureManual(accText) {
   const src = normalizeStringArray(accText);
 
-  // 取扱説明書の表記ブレを吸収して「取扱説明書」に正規化
+  // 取扱説明書の表記ブレを「取扱説明書」に正規化
   const manualRegex = /(取扱|取り扱)\s*説明書|説明書|マニュアル/i;
 
   const out = [];
@@ -229,7 +255,17 @@ function normalizeAccessoriesEnsureManual(accText) {
   return out.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
-// ===== OpenAI: PDF→抽出（仕様/動作グループ/付属品 + 型番/製品名） =====
+// ===== 動作ノイズ除去（安全/禁止/中止/注意喚起系） =====
+function isOperationNoise(s) {
+  const t = (s || "").toString().trim();
+  if (!t) return true;
+  if (/^(安全|注意|警告|禁止|中止|危険)/.test(t)) return true;
+  if (/(使用しない|使用を中止|しないでください|禁止|分解|改造|修理しない|感電|火災|高温|濡れた手|水にかけない)/.test(t)) return true;
+  if (/安全.*取扱.*注意/.test(t)) return true;
+  return false;
+}
+
+// ===== OpenAI: PDF→抽出 =====
 async function extractFromPdfToPayload({ filename, pdfBuffer }) {
   const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
 
@@ -237,7 +273,6 @@ async function extractFromPdfToPayload({ filename, pdfBuffer }) {
   try {
     uploaded = await client.files.create({ file: fileObj, purpose: "assistants" });
 
-    // ※動作量は前の“広め抽出”を維持しつつ、opGroups（タイトル＋items）を作る
     const sys =
       "あなたは日本語の取扱説明書（技術文書）から、検品リスト用の抜粋を作る担当です。\n" +
       "PDFを読み、次の情報を抽出してください。\n\n" +
@@ -248,7 +283,8 @@ async function extractFromPdfToPayload({ filename, pdfBuffer }) {
       "B) 型番（model）と製品名（product）\n\n" +
       "【抽出ルール】\n" +
       "- 検品項目は、取説に基づき「検品で確認すべき内容」として言い換えてよい（意味は変えない）。\n" +
-      "- “動作” は特に漏れなく：操作手順、表示、起動/停止、モード切替、充電、接続、エラー表示、注意事項に紐づく動作も含める。\n" +
+      "- “動作” は特に漏れなく：操作手順、表示、起動/停止、モード切替、充電、接続、エラー表示など「機能・操作」に関する内容のみ。\n" +
+      "- 重要：安全・取扱注意（禁止/中止/警告/注意/危険/使用しない等）の注意喚起は“動作”に含めない（抽出不要）。\n" +
       "- 重複は統合してよい。\n" +
       "- 1行は短く。\n" +
       "- 型番/数値/単位は原文どおり。\n" +
@@ -300,22 +336,23 @@ async function extractFromPdfToPayload({ filename, pdfBuffer }) {
     }
 
     const specText = normalizeStringArray(obj.specText);
-    const opText = normalizeStringArray(obj.opText);
 
-    // opGroups整形（空ならnull扱いにしてUIがfallbackできるように）
-    let opGroups = null;
+    // 動作は後処理でもノイズ除去（①の二重保険）
+    const opText = normalizeStringArray(obj.opText).filter((x) => !isOperationNoise(x));
+
+    let opGroups = [];
     if (Array.isArray(obj.opGroups)) {
       const tmp = [];
       for (const g of obj.opGroups) {
-        const title = (g?.title ?? "").toString().trim();
-        const items = normalizeStringArray(g?.items);
+        const titleRaw = (g?.title ?? "").toString().trim();
+        const title = titleRaw && !isOperationNoise(titleRaw) ? titleRaw : "";
+        const items = normalizeStringArray(g?.items).filter((x) => !isOperationNoise(x));
         if (!title && items.length === 0) continue;
         tmp.push({ title, items });
       }
-      if (tmp.length > 0) opGroups = tmp;
+      opGroups = tmp;
     }
 
-    // 付属品：取扱説明書を常に候補化（表記ブレはここで正規化）
     const accText = normalizeAccessoriesEnsureManual(obj.accText);
 
     return {
@@ -323,7 +360,7 @@ async function extractFromPdfToPayload({ filename, pdfBuffer }) {
       product: (obj.product ?? "").toString().trim(),
       specText,
       opText,
-      opGroups: opGroups || [],
+      opGroups,
       accText,
     };
   } finally {
@@ -331,7 +368,7 @@ async function extractFromPdfToPayload({ filename, pdfBuffer }) {
   }
 }
 
-// ===== generate 用：aiPicked（isTitle込み）を区分ごとに保持 =====
+// ===== generate 用：aiPicked（isTitle込み） =====
 function splitAiPicked(aiPicked) {
   const spec = [];
   const op = [];
@@ -341,7 +378,6 @@ function splitAiPicked(aiPicked) {
     const kind = (it?.kind ?? "").toString().trim();
     const text = (it?.text ?? "").toString().trim();
     const isTitle = !!it?.isTitle;
-
     if (!text) continue;
 
     const row = { text, isTitle };
@@ -353,9 +389,7 @@ function splitAiPicked(aiPicked) {
   return { specRows: spec, opRows: op, accRows: acc };
 }
 
-// ===== Excel 挿入（タイトルは太字） =====
 function buildExcerptRows(kindLabel, rows) {
-  // rows: [{text,isTitle}]
   return rows.map(({ text, isTitle }) => {
     const values = [];
     values[1] = "";
@@ -366,11 +400,6 @@ function buildExcerptRows(kindLabel, rows) {
     values[7] = "必須";
     return { values, isTitle: !!isTitle };
   });
-}
-
-function setCellBold(cell, bold) {
-  const cur = cell.font || {};
-  cell.font = { ...cur, bold: !!bold };
 }
 
 export default async function handler(req, res) {
@@ -484,7 +513,7 @@ export default async function handler(req, res) {
         wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
         for (let i = 0; i < rows.length; i++) {
           applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
-          if (rows[i].isTitle) setCellBold(wsMain.getRow(r + i).getCell(3), true);
+          // ② タイトル太字はしない（何もしない）
         }
         continue;
       }
@@ -496,20 +525,19 @@ export default async function handler(req, res) {
         wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
         for (let i = 0; i < rows.length; i++) {
           applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
-          if (rows[i].isTitle) setCellBold(wsMain.getRow(r + i).getCell(3), true);
+          // ② タイトル太字はしない（何もしない）
         }
         continue;
       }
 
       if (t.type === "acc") {
-        // 付属品：取扱説明書は候補化済み（extract時）
         const rows = buildExcerptRows("付属品", accRows);
         if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
 
         wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
         for (let i = 0; i < rows.length; i++) {
           applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
-          if (rows[i].isTitle) setCellBold(wsMain.getRow(r + i).getCell(3), true);
+          // ② タイトル太字はしない（何もしない）
         }
         continue;
       }
@@ -522,7 +550,14 @@ export default async function handler(req, res) {
       }
     }
 
+    // ③ G列センター揃えを強制
+    forceCenterAlignColumnG(wsMain);
+
+    // ④ 不要シート削除
     keepOnlySheets(wb);
+
+    // ⑤ 全シートのフォント統一
+    applyGlobalFont(wb);
 
     const outBuf = await wb.xlsx.writeBuffer();
 
