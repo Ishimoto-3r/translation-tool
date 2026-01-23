@@ -132,20 +132,38 @@ function collectSelectedLabels() {
   return labels.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
+// 動作の不要抽出（安全注意/禁止/中止）を弾く（表示側の二重保険）
+function isOperationNoise(s) {
+  const t = (s || "").toString().trim();
+  if (!t) return true;
+  // 見出しや注意喚起
+  if (/^(安全|注意|警告|禁止|中止|危険)/.test(t)) return true;
+  if (/(使用しない|使用を中止|しないでください|禁止|分解|改造|修理しない|感電|火災|高温|濡れた手|水にかけない)/.test(t)) return true;
+  // 「安全・取扱注意（…）」系の括弧見出し
+  if (/安全.*取扱.*注意/.test(t)) return true;
+  return false;
+}
+
 function renderSimpleList(boxId, kind, lines, defaultChecked) {
   const box = $(boxId);
   if (!box) return;
   box.innerHTML = "";
 
-  if (!lines || lines.length === 0) {
+  const arr = (lines || [])
+    .map((x) => toText(x).trim())
+    .filter((x) => x.length > 0);
+
+  const filtered =
+    kind === "動作"
+      ? arr.filter((x) => !isOperationNoise(x))
+      : arr;
+
+  if (filtered.length === 0) {
     box.innerHTML = `<div class="text-xs text-slate-500">（抽出なし）</div>`;
     return;
   }
 
-  for (const raw of lines) {
-    const line = toText(raw).trim();
-    if (!line) continue;
-
+  for (const line of filtered) {
     const row = document.createElement("label");
     row.className = "flex items-start gap-2 py-1";
 
@@ -166,20 +184,36 @@ function renderSimpleList(boxId, kind, lines, defaultChecked) {
   }
 }
 
-// 動作：グループ（タイトル＋items）表示
+// 動作：グループ（タイトル＋items）表示（タイトルは太字＋下線）
 function renderOpGrouped(opGroups) {
   const box = $("aiOpBox");
   if (!box) return;
   box.innerHTML = "";
 
-  if (!Array.isArray(opGroups) || opGroups.length === 0) {
+  const groups = Array.isArray(opGroups) ? opGroups : [];
+  const normalized = [];
+
+  for (const g of groups) {
+    const title = toText(g?.title).trim();
+    const items = (Array.isArray(g?.items) ? g.items : [])
+      .map((x) => toText(x).trim())
+      .filter((x) => x.length > 0)
+      .filter((x) => !isOperationNoise(x));
+
+    // タイトル自体もノイズなら捨てる
+    const okTitle = title && !isOperationNoise(title) ? title : "";
+
+    if (!okTitle && items.length === 0) continue;
+    normalized.push({ title: okTitle, items });
+  }
+
+  if (normalized.length === 0) {
     box.innerHTML = `<div class="text-xs text-slate-500">（抽出なし）</div>`;
     return;
   }
 
-  for (const g of opGroups) {
-    const title = toText(g?.title).trim();
-    const items = Array.isArray(g?.items) ? g.items : [];
+  for (const g of normalized) {
+    const title = g.title;
 
     if (title) {
       const rowT = document.createElement("label");
@@ -195,17 +229,14 @@ function renderOpGrouped(opGroups) {
 
       const spanT = document.createElement("span");
       spanT.textContent = title;
-      spanT.className = "font-bold";
+      spanT.className = "font-bold underline decoration-slate-400 underline-offset-4";
 
       rowT.appendChild(cbT);
       rowT.appendChild(spanT);
       box.appendChild(rowT);
     }
 
-    for (const raw of items) {
-      const line = toText(raw).trim();
-      if (!line) continue;
-
+    for (const line of g.items) {
       const row = document.createElement("label");
       row.className = "flex items-start gap-2 py-1";
 
@@ -292,7 +323,7 @@ async function runExtract() {
     // 仕様：初期未チェック
     renderSimpleList("aiSpecBox", "仕様", aiExtract.specText, false);
 
-    // 動作：opGroupsがあればタイトル＋itemsで描画（タイトルもチェック有＆太字）
+    // 動作：opGroupsがあればタイトル＋itemsで描画（タイトルは下線）
     if (aiExtract.opGroups && aiExtract.opGroups.length > 0) {
       renderOpGrouped(aiExtract.opGroups);
     } else {
@@ -454,7 +485,6 @@ document.addEventListener("DOMContentLoaded", () => {
     genBtn.addEventListener("click", runGenerate);
   }
 
-  // 初期表示
   renderSimpleList("aiSpecBox", "仕様", [], false);
   renderSimpleList("aiOpBox", "動作", [], false);
   renderSimpleList("aiAccBox", "付属品", [], true);
