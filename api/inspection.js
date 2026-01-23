@@ -43,7 +43,13 @@ async function getAccessToken() {
 async function downloadTemplateBuffer() {
   const accessToken = await getAccessToken();
 
-  const url = process.env.INSPECTION_TEMPLATE_URL || "";
+  // 優先：INSPECTION_TEMPLATE_URL（Shareリンク）
+  // 互換：INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID
+  // 旧互換：MANUAL_SHAREPOINT_FILE_URL（inspectionが動いていた時期のキー）
+  const url =
+    process.env.INSPECTION_TEMPLATE_URL ||
+    process.env.MANUAL_SHAREPOINT_FILE_URL ||
+    "";
   const siteId = process.env.INSPECTION_SITE_ID || "";
   const driveId = process.env.INSPECTION_DRIVE_ID || "";
   const itemId = process.env.INSPECTION_TEMPLATE_ITEM_ID || "";
@@ -55,27 +61,29 @@ async function downloadTemplateBuffer() {
       { headers: { Authorization: `Bearer ${accessToken}` } }
     );
     if (!graphRes.ok) {
-      const txt = await graphRes.text();
-      throw new Error(`GraphError(${graphRes.status}): ${txt}`);
+      const t = await graphRes.text().catch(() => "");
+      throw new Error(`GraphDownloadError: ${graphRes.status} ${t}`);
     }
     const ab = await graphRes.arrayBuffer();
     return Buffer.from(ab);
   }
 
-  if (!siteId || !driveId || !itemId) {
-    throw new Error("ConfigError: INSPECTION_TEMPLATE_URL または INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID が不足");
+  if (siteId && driveId && itemId) {
+    const graphRes = await fetch(
+      `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${itemId}/content`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!graphRes.ok) {
+      const t = await graphRes.text().catch(() => "");
+      throw new Error(`GraphDownloadError: ${graphRes.status} ${t}`);
+    }
+    const ab = await graphRes.arrayBuffer();
+    return Buffer.from(ab);
   }
 
-  const graphRes = await fetch(
-    `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${itemId}/content`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
+  throw new Error(
+    "ConfigError: INSPECTION_TEMPLATE_URL または INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID（または旧キー MANUAL_SHAREPOINT_FILE_URL）が不足"
   );
-  if (!graphRes.ok) {
-    const txt = await graphRes.text();
-    throw new Error(`GraphError(${graphRes.status}): ${txt}`);
-  }
-  const ab = await graphRes.arrayBuffer();
-  return Buffer.from(ab);
 }
 
 // ===== Helpers =====
@@ -219,12 +227,12 @@ ${pdfText}
   const resp = await client.responses.create({
     model: MODEL,
     reasoning: { effort: REASONING },
-    verbosity: VERBOSITY,
+    // 新Responses API：verbosity/format は text.* に移動（互換のため、指定しない or text.verbosity を使う）
+    text: { verbosity: VERBOSITY },
     input: [
       { role: "system", content: sys.trim() },
       { role: "user", content: user.trim() },
     ],
-    response_format: { type: "json_object" },
   });
 
   const text = resp.output_text || "{}";
