@@ -1,4 +1,35 @@
-// api/inspection.js（全文）
+//
+async function extractFromTextToArrays({ filename, pdfText }) {
+  const prompt =
+    "あなたは日本語の技術文書から検品リスト用の抜粋を作る担当です。\n" +
+    "以下はPDFから抽出したテキストです。PDFのレイアウト崩れや改行乱れがある前提で読み取ってください。\n\n" +
+    "PDFファイル名: " + filename + "\n\n" +
+    "PDFテキスト:\n" + pdfText + "\n\n" +
+    "次の3区分の検品項目（短文）を抽出してください。\n" +
+    "- 仕様\n- 動作\n- 付属品\n\n" +
+    "【重要】\n" +
+    "- 推測しない。根拠があるものだけ。\n" +
+    "- 1行は短く。重複は統合。\n" +
+    "- 型番/数値/単位は原文どおり。\n" +
+    "- 出力はJSONのみ。";
+
+  const response = await client.responses.create({
+    model: INSPECTION_MODEL,
+    reasoning: { effort: INSPECTION_REASONING },
+    text: { verbosity: INSPECTION_VERBOSITY },
+    input: [
+      {
+        role: "user",
+        content: [{ type: "input_text", text: prompt }],
+      },
+    ],
+  });
+
+  const raw = response?.output_text || "";
+  const parsed = safeJsonParse(raw) || {};
+  return normalizePick(parsed);
+}
+ api/inspection.js（全文）
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
@@ -338,21 +369,36 @@ export default async function handler(req, res) {
     if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
 
     const ct = String(req.headers["content-type"] || "");
-    if (!ct.includes("application/pdf")) {
-      return res.status(400).json({ error: "BadRequest", detail: "Content-Type は application/pdf" });
-    }
 
-    const pdfBuffer = await readRawBody(req);
+    // 受信方式：
+    // - application/pdf : PDFバイナリ
+    // - application/json: { fileName, pdfText }
+
+    let pdfBuffer = null;
+    let pdfText = null;
+
     const pdfFilename = req.headers["x-filename"]
       ? decodeURIComponent(String(req.headers["x-filename"]))
-      : "manual.pdf";
+      : (req.body && req.body.fileName) || "manual.pdf";
+
+    if (ct.includes("application/pdf")) {
+      pdfBuffer = await readRawBody(req);
+    } else if (ct.includes("application/json")) {
+      const raw = await readRawBody(req);
+      const obj = safeJsonParse(raw.toString("utf-8")) || {};
+      pdfText = (obj.pdfText || "").toString();
+      if (!pdfText) {
+        return res.status(400).json({ error: "BadRequest", detail: "pdfText is required" });
+      }
+    } else {
+      return res.status(400).json({ error: "BadRequest", detail: "Content-Type は application/pdf または application/json" });
+    }
 
     // POST: 抽出
     if (op === "extract") {
-      const { specText, opText, accText } = await extractFromPdfToArrays({
-        filename: pdfFilename,
-        pdfBuffer,
-      });
+      const { specText, opText, accText } = pdfText
+        ? await extractFromTextToArrays({ filename: pdfFilename, pdfText })
+        : await extractFromPdfToArrays({ filename: pdfFilename, pdfBuffer });
       return res.status(200).json({ specText, opText, accText });
     }
 
@@ -461,4 +507,3 @@ export default async function handler(req, res) {
     });
   }
 }
-
