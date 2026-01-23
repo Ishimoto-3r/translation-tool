@@ -116,6 +116,29 @@
     <div class="bg-white rounded-2xl shadow p-6 border border-gray-200">
       <h1 class="text-2xl font-bold">検品リスト作成ツール</h1>
 
+      
+      <section class="mt-6">
+        <h2 class="text-lg font-bold">ラベル選択</h2>
+        <div class="mt-2 flex flex-wrap gap-6 text-sm">
+          <label class="inline-flex items-center gap-2">
+            <input id="lblLiion" type="checkbox" class="h-4 w-4" />
+            リチウムイオン電池
+          </label>
+          <label class="inline-flex items-center gap-2">
+            <input id="lblLegal" type="checkbox" class="h-4 w-4" />
+            法的対象(PSE/無線)
+          </label>
+        </div>
+      </section>
+
+      <section class="mt-6">
+        <h2 class="text-lg font-bold">選択リスト（不要なものだけチェックを外す）</h2>
+        <div class="mt-2 text-xs text-gray-500">※「検品項目リスト」シートの A列=「選択リスト」の C列を表示しています。</div>
+        <div class="mt-3 border border-gray-200 rounded-xl p-4 bg-white">
+          <div id="selectList" class="space-y-2 text-sm text-gray-700">読み込み中...</div>
+        </div>
+      </section>
+
       <!-- PDF -->
       <section class="mt-6">
         <div class="flex items-center justify-between gap-3">
@@ -131,28 +154,6 @@
           </div>
           <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
         </div>
-
-        <!-- ラベル選択（選択リストの上） -->
-        <section class="mt-6">
-          <h2 class="text-lg font-bold">ラベル選択</h2>
-          <div class="mt-2 flex flex-wrap gap-6 text-sm">
-            <label class="inline-flex items-center gap-2">
-              <input id="lblLiion" type="checkbox" class="h-4 w-4" />
-              リチウムイオン電池
-            </label>
-            <label class="inline-flex items-center gap-2">
-              <input id="lblLegal" type="checkbox" class="h-4 w-4" />
-              法的対象(PSE/無線)
-            </label>
-          </div>
-        </section>
-
-        <!-- 選択リスト（SharePointの検品項目リスト: A列=選択リスト の C列を表示） -->
-        <section class="mt-6">
-          <h2 class="text-lg font-bold">選択リスト（不要なものだけチェックを外す）</h2>
-          <div class="mt-2 text-xs text-gray-500">※「検品項目リスト」シートの A列=「選択リスト」の C列を表示しています。</div>
-          <div id="selectList" class="mt-3 space-y-2 text-sm text-gray-700">読み込み中...</div>
-        </section>
 
         <!-- AI抽出ブロック（ここに型番・製品名も配置） -->
         <div class="mt-5 bg-white border border-gray-200 rounded-2xl p-5">
@@ -204,6 +205,9 @@
           </div>
         </div>
       </section>
+
+      <!-- ラベル選択 -->
+      
 
       <!-- 実行 -->
       <section class="mt-8 flex items-center gap-3 flex-wrap">
