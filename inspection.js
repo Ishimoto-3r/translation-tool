@@ -1,5 +1,5 @@
 // inspection.js（全文）
-console.log("[inspection] front version: v6");
+console.log("[inspection] front version: v7");
 
 let pdfFile = null;
 let busy = false;
@@ -7,6 +7,40 @@ let busy = false;
 let aiExtract = { specText: [], opText: [], accText: [] };
 
 const $ = (id) => document.getElementById(id);
+
+
+// pdf.js 初期化（大きいPDFの413回避用：ブラウザ側でテキスト抽出して送信）
+function initPdfJs() {
+  if (!window.pdfjsLib) return false;
+  try {
+    // worker 指定（CDN版）
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.worker.min.js";
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function extractPdfTextClient(file, maxPages = 20, maxChars = 35000) {
+  if (!initPdfJs()) throw new Error("pdf.js が読み込めませんでした。");
+  const ab = await file.arrayBuffer();
+  const loadingTask = window.pdfjsLib.getDocument({ data: ab });
+  const pdf = await loadingTask.promise;
+  const n = Math.min(pdf.numPages || 1, maxPages);
+  let out = "";
+  for (let p = 1; p <= n; p++) {
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    const strings = (content.items || []).map((it) => it.str || "").filter(Boolean);
+    out += strings.join(" ") + "\n";
+    if (out.length >= maxChars) break;
+  }
+  // 余計な連続空白を整理
+  out = out.replace(/\s+/g, " ").trim();
+  return out;
+}
+
 
 function toText(v) {
   if (v == null) return "";
@@ -188,6 +222,80 @@ async function runExtract() {
     alert("PDFを選択してください。");
     return;
   }
+
+  setBusy(true, "PDFを解析しています（AI抽出）…");
+  showStatus("AI抽出中…");
+
+  const fileName = pdfFile.name || "manual.pdf";
+  const SIZE_LIMIT = 4 * 1024 * 1024; // Vercelの受信上限対策（概ね4MB）
+
+  // 送信方式：
+  // - 小さいPDF：PDFバイナリを送る（従来通り）
+  // - 大きいPDF：ブラウザでテキスト抽出してJSON送信（413回避）
+  async function postAsPdfBinary() {
+    const ab = await pdfFile.arrayBuffer();
+    const res = await fetch("/api/inspection?op=extract", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/pdf",
+        "x-filename": encodeURIComponent(fileName),
+      },
+      body: ab,
+    });
+    return res;
+  }
+
+  async function postAsJsonText() {
+    const pdfText = await extractPdfTextClient(pdfFile);
+    if (!pdfText) throw new Error("PDFテキストを取得できませんでした。");
+    const res = await fetch("/api/inspection?op=extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fileName, pdfText }),
+    });
+    return res;
+  }
+
+  try {
+    let res;
+    if (pdfFile.size > SIZE_LIMIT) {
+      res = await postAsJsonText();
+    } else {
+      res = await postAsPdfBinary();
+      if (res.status === 413) {
+        // 念のため：小さく見えても413ならテキスト送信へ切替
+        res = await postAsJsonText();
+      }
+    }
+
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      const msg = j?.detail ? String(j.detail) : `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+
+    const data = await res.json();
+
+    aiExtract = {
+      specText: Array.isArray(data.specText) ? data.specText : [],
+      opText: Array.isArray(data.opText) ? data.opText : [],
+      accText: Array.isArray(data.accText) ? data.accText : [],
+    };
+
+    // 型番/製品名が返ってきたら反映（手入力は維持）
+    if (data.model && $("modelInput") && !$("modelInput").value) $("modelInput").value = String(data.model);
+    if (data.productName && $("productNameInput") && !$("productNameInput").value) $("productNameInput").value = String(data.productName);
+
+    renderAiExtract();
+    showStatus("AI抽出が完了しました。");
+  } catch (e) {
+    console.error(e);
+    alert(`AI抽出に失敗しました。\n${e?.message || e}`);
+    showStatus("AI抽出に失敗しました。");
+  } finally {
+    setBusy(false);
+  }
+}
 
   setBusy(true, "PDFを解析しています（AI抽出）…");
   showStatus("AI抽出中…");
