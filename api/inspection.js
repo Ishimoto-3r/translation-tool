@@ -130,19 +130,17 @@ function applyRowStyle(ws, rowNumber, styleSnapshot, upToCol) {
   }
 }
 
-function buildExcerptRows(kindLabel, lines) {
-  return lines.map((line) => {
-    const values = [];
-    values[1] = "";
-    values[2] = kindLabel;
-    values[3] = line;
-    values[5] = "";
-    values[6] = 1;
-    values[7] = "必須";
-    return values;
-  });
+function keepOnlySheets(workbook) {
+  const names = workbook.worksheets.map((w) => w.name);
+  for (const name of names) {
+    if (!OUTPUT_KEEP_SHEETS.has(name)) {
+      const ws = workbook.getWorksheet(name);
+      if (ws) workbook.removeWorksheet(ws.id);
+    }
+  }
 }
 
+// ===== 検品項目（選択リスト） =====
 function extractSelectOptions(wsList) {
   const opts = [];
   const max = wsList.rowCount || 0;
@@ -200,17 +198,38 @@ function buildSelectedRows(wsList, selectedValues, warnings) {
   return rows;
 }
 
-function keepOnlySheets(workbook) {
-  const names = workbook.worksheets.map((w) => w.name);
-  for (const name of names) {
-    if (!OUTPUT_KEEP_SHEETS.has(name)) {
-      const ws = workbook.getWorksheet(name);
-      if (ws) workbook.removeWorksheet(ws.id);
+// ===== 付属品：取扱説明書の正規化・常時候補化 =====
+function normalizeAccessoriesEnsureManual(accText) {
+  const src = normalizeStringArray(accText);
+
+  // 取扱説明書の表記ブレを吸収して「取扱説明書」に正規化
+  const manualRegex = /(取扱|取り扱)\s*説明書|説明書|マニュアル/i;
+
+  const out = [];
+  let hasManual = false;
+
+  for (const s of src) {
+    const t = s.replace(/\s+/g, " ").trim();
+    if (!t) continue;
+
+    if (manualRegex.test(t)) {
+      if (!hasManual) {
+        out.push("取扱説明書");
+        hasManual = true;
+      }
+      continue;
     }
+    out.push(t);
   }
+
+  if (!hasManual) out.push("取扱説明書");
+
+  // 重複除去（順序保持）
+  const seen = new Set();
+  return out.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
-// ===== OpenAI: PDF→抽出（仕様/動作/付属品 + 型番/製品名） =====
+// ===== OpenAI: PDF→抽出（仕様/動作グループ/付属品 + 型番/製品名） =====
 async function extractFromPdfToPayload({ filename, pdfBuffer }) {
   const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
 
@@ -218,24 +237,27 @@ async function extractFromPdfToPayload({ filename, pdfBuffer }) {
   try {
     uploaded = await client.files.create({ file: fileObj, purpose: "assistants" });
 
-const sys =
-  "あなたは日本語の取扱説明書（技術文書）から、検品リスト用の抜粋を作る担当です。\n" +
-  "PDFを読み、次の情報を抽出してください。\n\n" +
-  "A) 検品項目（短文）を3区分でできるだけ漏れなく\n" +
-  "   - 仕様（specText）\n" +
-  "   - 動作（opText）\n" +
-  "   - 付属品（accText）\n\n" +
-  "B) 型番（model）と製品名（product）\n\n" +
-  "【抽出ルール】\n" +
-  "- 検品項目は、取説に基づき「検品で確認すべき内容」として言い換えてよい（ただし意味は変えない）。\n" +
-  "- “動作” は特に漏れなく：操作手順、表示、起動/停止、モード切替、充電、接続、エラー表示を含める。\n" +
-  "- 重複は統合してよい。\n" +
-  "- 1行は短く。\n" +
-  "- 型番/数値/単位は原文どおり。\n" +
-  "- 工場が検品でチェックできる粒度にする。\n" +
-  "- 型番/製品名が見つからない場合は空文字。\n" +
-  "- 出力はJSONのみ。";
-
+    // ※動作量は前の“広め抽出”を維持しつつ、opGroups（タイトル＋items）を作る
+    const sys =
+      "あなたは日本語の取扱説明書（技術文書）から、検品リスト用の抜粋を作る担当です。\n" +
+      "PDFを読み、次の情報を抽出してください。\n\n" +
+      "A) 検品項目（短文）を3区分でできるだけ漏れなく\n" +
+      "   - 仕様（specText）\n" +
+      "   - 動作（opText）\n" +
+      "   - 付属品（accText）\n\n" +
+      "B) 型番（model）と製品名（product）\n\n" +
+      "【抽出ルール】\n" +
+      "- 検品項目は、取説に基づき「検品で確認すべき内容」として言い換えてよい（意味は変えない）。\n" +
+      "- “動作” は特に漏れなく：操作手順、表示、起動/停止、モード切替、充電、接続、エラー表示、注意事項に紐づく動作も含める。\n" +
+      "- 重複は統合してよい。\n" +
+      "- 1行は短く。\n" +
+      "- 型番/数値/単位は原文どおり。\n" +
+      "- 工場が検品でチェックできる粒度にする。\n" +
+      "- 型番/製品名が見つからない場合は空文字。\n\n" +
+      "【追加】動作（opText）は、関連する項目のまとまりごとに「タイトル」を作ってグループ化してください。\n" +
+      "例：多数の『メニュー項目を変更できる』が並ぶ場合は、タイトル『メニューの各項目の設定ができる』の下にまとめる。\n" +
+      "タイトル自体も後段でチェック項目として使うため、短く要点のみ。\n" +
+      "出力はJSONのみ。";
 
     const response = await client.responses.create({
       model: INSPECTION_MODEL,
@@ -256,6 +278,7 @@ const sys =
                 '  "product": string,\n' +
                 '  "specText": string[],\n' +
                 '  "opText": string[],\n' +
+                '  "opGroups": { "title": string, "items": string[] }[],\n' +
                 '  "accText": string[]\n' +
                 "}\n",
             },
@@ -276,31 +299,78 @@ const sys =
       else throw new Error("AIParseError: JSON解析に失敗");
     }
 
+    const specText = normalizeStringArray(obj.specText);
+    const opText = normalizeStringArray(obj.opText);
+
+    // opGroups整形（空ならnull扱いにしてUIがfallbackできるように）
+    let opGroups = null;
+    if (Array.isArray(obj.opGroups)) {
+      const tmp = [];
+      for (const g of obj.opGroups) {
+        const title = (g?.title ?? "").toString().trim();
+        const items = normalizeStringArray(g?.items);
+        if (!title && items.length === 0) continue;
+        tmp.push({ title, items });
+      }
+      if (tmp.length > 0) opGroups = tmp;
+    }
+
+    // 付属品：取扱説明書を常に候補化（表記ブレはここで正規化）
+    const accText = normalizeAccessoriesEnsureManual(obj.accText);
+
     return {
       model: (obj.model ?? "").toString().trim(),
       product: (obj.product ?? "").toString().trim(),
-      specText: normalizeStringArray(obj.specText),
-      opText: normalizeStringArray(obj.opText),
-      accText: normalizeStringArray(obj.accText),
+      specText,
+      opText,
+      opGroups: opGroups || [],
+      accText,
     };
   } finally {
     try { if (uploaded?.id) await client.files.del(uploaded.id); } catch {}
   }
 }
 
+// ===== generate 用：aiPicked（isTitle込み）を区分ごとに保持 =====
 function splitAiPicked(aiPicked) {
   const spec = [];
   const op = [];
   const acc = [];
+
   for (const it of aiPicked) {
     const kind = (it?.kind ?? "").toString().trim();
     const text = (it?.text ?? "").toString().trim();
+    const isTitle = !!it?.isTitle;
+
     if (!text) continue;
-    if (kind === "仕様") spec.push(text);
-    else if (kind === "動作") op.push(text);
-    else if (kind === "付属品") acc.push(text);
+
+    const row = { text, isTitle };
+
+    if (kind === "仕様") spec.push(row);
+    else if (kind === "動作") op.push(row);
+    else if (kind === "付属品") acc.push(row);
   }
-  return { specText: spec, opText: op, accText: acc };
+  return { specRows: spec, opRows: op, accRows: acc };
+}
+
+// ===== Excel 挿入（タイトルは太字） =====
+function buildExcerptRows(kindLabel, rows) {
+  // rows: [{text,isTitle}]
+  return rows.map(({ text, isTitle }) => {
+    const values = [];
+    values[1] = "";
+    values[2] = kindLabel;
+    values[3] = text;
+    values[5] = "";
+    values[6] = 1;
+    values[7] = "必須";
+    return { values, isTitle: !!isTitle };
+  });
+}
+
+function setCellBold(cell, bold) {
+  const cur = cell.font || {};
+  cell.font = { ...cur, bold: !!bold };
 }
 
 export default async function handler(req, res) {
@@ -346,7 +416,7 @@ export default async function handler(req, res) {
       ? decodeURIComponent(String(req.headers["x-filename"]))
       : "manual.pdf";
 
-    // POST: 抽出（★ model/product を返す）
+    // POST: 抽出
     if (op === "extract") {
       const payload = await extractFromPdfToPayload({
         filename: pdfFilename,
@@ -367,7 +437,7 @@ export default async function handler(req, res) {
 
     const hdrAi = req.headers["x-ai-picked"];
     const aiPicked = hdrAi ? JSON.parse(decodeURIComponent(String(hdrAi))) : [];
-    const { specText, opText, accText } = splitAiPicked(Array.isArray(aiPicked) ? aiPicked : []);
+    const { specRows, opRows, accRows } = splitAiPicked(Array.isArray(aiPicked) ? aiPicked : []);
 
     const model = safeFilePart(decodeURIComponent(String(req.headers["x-model"] || "")));
     const product = safeFilePart(decodeURIComponent(String(req.headers["x-product"] || "")));
@@ -395,6 +465,7 @@ export default async function handler(req, res) {
 
     const STYLE_COLS = 11;
 
+    // 下から処理（行ズレ防止）
     const tasks = [
       { row: mSel, type: "select" },
       { row: mAcc, type: "acc" },
@@ -407,26 +478,39 @@ export default async function handler(req, res) {
       const styleSnap = cloneRowStyle(wsMain.getRow(r));
 
       if (t.type === "spec") {
-        const rows = buildExcerptRows("仕様", specText);
+        const rows = buildExcerptRows("仕様", specRows);
         if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
-        wsMain.spliceRows(r, 1, ...rows);
-        for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+
+        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
+        for (let i = 0; i < rows.length; i++) {
+          applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+          if (rows[i].isTitle) setCellBold(wsMain.getRow(r + i).getCell(3), true);
+        }
         continue;
       }
 
       if (t.type === "op") {
-        const rows = buildExcerptRows("動作", opText);
+        const rows = buildExcerptRows("動作", opRows);
         if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
-        wsMain.spliceRows(r, 1, ...rows);
-        for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+
+        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
+        for (let i = 0; i < rows.length; i++) {
+          applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+          if (rows[i].isTitle) setCellBold(wsMain.getRow(r + i).getCell(3), true);
+        }
         continue;
       }
 
       if (t.type === "acc") {
-        const rows = buildExcerptRows("付属品", accText);
+        // 付属品：取扱説明書は候補化済み（extract時）
+        const rows = buildExcerptRows("付属品", accRows);
         if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
-        wsMain.spliceRows(r, 1, ...rows);
-        for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+
+        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
+        for (let i = 0; i < rows.length; i++) {
+          applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+          if (rows[i].isTitle) setCellBold(wsMain.getRow(r + i).getCell(3), true);
+        }
         continue;
       }
 
