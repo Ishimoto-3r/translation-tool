@@ -10,84 +10,58 @@
   <style>
     body{
       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
-      margin:0;
-      padding:0;
+      margin:0;padding:0;
     }
 
-    /* ===== Top Nav（他ツール風） ===== */
+    /* ===== NAV（他ツール風） ===== */
     .tool-nav{
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background:#374151;
-      padding: 10px 16px;
+      position: sticky; top: 0; z-index: 100;
+      background:#374151; padding: 10px 16px;
       box-shadow: 0 2px 4px rgba(0,0,0,.12);
-
-      display:flex;
-      justify-content:center;
-      gap: 14px;
-      align-items:center;
-      flex-wrap: wrap;
+      display:flex; justify-content:center; gap: 14px; align-items:center; flex-wrap: wrap;
     }
     .tool-nav .nav-groupbox{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap: 6px;
-      padding: 8px 10px;
-      border: 1px solid rgba(255,255,255,.14);
-      border-radius: 10px;
-      background: rgba(255,255,255,.04);
+      display:flex; flex-direction:column; align-items:center; gap: 6px;
+      padding: 8px 10px; border: 1px solid rgba(255,255,255,.14);
+      border-radius: 10px; background: rgba(255,255,255,.04);
     }
     .tool-nav .nav-heading{
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:6px;
-      width:100%;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      color: rgba(243,244,246,.75);
-      line-height: 1;
-      user-select: none;
+      display:flex; align-items:center; justify-content:center; gap:6px; width:100%;
+      font-size: 12px; font-weight: 700; letter-spacing: .08em;
+      color: rgba(243,244,246,.75); line-height: 1; user-select: none;
     }
-    .tool-nav .nav-links{
-      display:flex;
-      gap: 8px;
-      align-items:center;
-      flex-wrap: wrap;
-      justify-content:center;
-    }
+    .tool-nav .nav-heading::before{ content:"⭐"; opacity:.9; }
+    .tool-nav .nav-links{ display:flex; gap: 8px; align-items:center; flex-wrap: wrap; justify-content:center; }
     .tool-nav a{
-      color:#f3f4f6;
-      text-decoration:none;
-      font-weight: 600;
-      font-size: 14px;
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.06);
+      color:#f3f4f6; text-decoration:none; font-weight: 600; font-size: 14px;
+      padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.06);
       transition: background-color .15s, transform .05s;
-      display:inline-flex;
-      align-items:center;
-      gap: 6px;
+      display:inline-flex; align-items:center; gap: 6px;
     }
     .tool-nav a:hover{ background: rgba(255,255,255,.12); }
     .tool-nav a:active{ transform: translateY(1px); }
     .tool-nav a.active{ background:#172554; color:#fff; }
-    .tool-nav .nav-heading::before{ content: "⭐"; opacity: .9; }
 
     /* 内部スクロール禁止（全体スクロールのみ） */
     .no-inner-scroll{ overflow: visible !important; max-height: none !important; }
 
     /* Dropzone 強調 */
     .dz-over{ border-color:#2563eb !important; background:#eff6ff !important; }
+
+    /* ===== オーバーレイ（復活） ===== */
+    .overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: rgba(15,23,42,.55);
+      display: none;
+      align-items: center; justify-content: center;
+      padding: 24px;
+    }
+    .overlay.show { display: flex; }
   </style>
 </head>
 
 <body class="bg-slate-100">
 
-  <!-- ===== NAV ===== -->
   <nav class="tool-nav">
     <div class="nav-groupbox">
       <div class="nav-heading">翻訳</div>
@@ -99,7 +73,6 @@
         <a href="/word-translate.html">Word翻訳</a>
       </div>
     </div>
-
     <div class="nav-groupbox">
       <div class="nav-heading">その他</div>
       <div class="nav-links">
@@ -112,14 +85,21 @@
     </div>
   </nav>
 
+  <!-- ===== オーバーレイ（処理中） ===== -->
+  <div id="overlay" class="overlay" aria-hidden="true">
+    <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md space-y-3">
+      <div class="text-sm font-semibold">処理中</div>
+      <div id="overlayMsg" class="text-sm text-slate-700">処理を開始しました…</div>
+      <div class="text-xs text-slate-500">完了まで画面操作はできません。</div>
+    </div>
+  </div>
+
   <main class="max-w-5xl mx-auto px-4 py-6">
     <div class="bg-white rounded-2xl shadow p-6 space-y-8">
 
-      <div class="flex items-center justify-between gap-4 flex-wrap">
-        <h1 class="text-xl font-bold">検品リスト作成ツール</h1>
-      </div>
+      <h1 class="text-xl font-bold">検品リスト作成ツール</h1>
 
-      <!-- ===== PDF選択 ===== -->
+      <!-- PDF -->
       <section class="space-y-3">
         <div class="text-sm font-semibold">PDF（ドラッグ＆ドロップ / クリック選択）</div>
 
@@ -131,22 +111,21 @@
             <div class="text-slate-700">ここにPDFをドロップ（またはクリックで選択）</div>
             <div id="fileName" class="text-xs text-slate-500">未選択</div>
           </div>
-
           <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
         </label>
       </section>
 
-      <!-- ===== ラベル選択 ===== -->
+      <!-- ラベル選択（デフォルト OFF に戻す） -->
       <section class="space-y-3">
         <div class="text-sm font-semibold">ラベル選択</div>
 
         <div class="flex flex-wrap gap-6 text-sm">
           <label class="flex items-center gap-2">
-            <input id="lblLiion" type="checkbox" class="h-4 w-4" checked />
+            <input id="lblLiion" type="checkbox" class="h-4 w-4" />
             リチウムイオン電池
           </label>
           <label class="flex items-center gap-2">
-            <input id="lblLegal" type="checkbox" class="h-4 w-4" checked />
+            <input id="lblLegal" type="checkbox" class="h-4 w-4" />
             法的対象(PSE/無線)
           </label>
         </div>
@@ -155,11 +134,10 @@
           ※ 下の選択リストは SharePoint（テンプレExcel）から取得します。不要なものだけチェックを外します（初期は全チェック）。
         </div>
 
-        <!-- ✅ 枠を復活 -->
         <div id="selectList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-slate-50 p-4"></div>
       </section>
 
-      <!-- ===== PDF読み取り（AI抽出） ===== -->
+      <!-- PDF読み取り -->
       <section class="space-y-4 border border-slate-200 rounded-xl p-4 bg-slate-50">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -189,7 +167,6 @@
           </div>
         </div>
 
-        <!-- ✅ 各リストに枠を付ける -->
         <div class="space-y-6">
           <div class="space-y-2">
             <div class="text-sm font-semibold">仕様</div>
@@ -208,7 +185,7 @@
         </div>
       </section>
 
-      <!-- ===== 生成 ===== -->
+      <!-- 生成 -->
       <section class="space-y-3">
         <button
           id="btnGenerate"
@@ -224,7 +201,7 @@
     </div>
   </main>
 
-  <!-- ===== D&D（確実に動く版） ===== -->
+  <!-- D&D -->
   <script>
     (function(){
       const dz = document.getElementById('dropZone');
@@ -241,15 +218,13 @@
 
       ['dragenter','dragover'].forEach(evt => {
         dz.addEventListener(evt, (e) => {
-          e.preventDefault();
-          e.stopPropagation();
+          e.preventDefault(); e.stopPropagation();
           dz.classList.add('dz-over');
         });
       });
       ['dragleave','drop'].forEach(evt => {
         dz.addEventListener(evt, (e) => {
-          e.preventDefault();
-          e.stopPropagation();
+          e.preventDefault(); e.stopPropagation();
           dz.classList.remove('dz-over');
         });
       });
@@ -269,7 +244,7 @@
     })();
   </script>
 
-  <!-- pdf.js は inspection.js 内で ESM import（cdnjs 禁止） -->
+  <!-- pdf.js は inspection.js 内で ESM import -->
   <script type="module" src="/inspection.js"></script>
 </body>
 </html>
