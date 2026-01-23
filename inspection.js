@@ -253,6 +253,36 @@ async function extractPdfTextInBrowser(file) {
   return out.join("\n\n");
 }
 
+
+async function renderPdfImagesInBrowser(file, maxPages = 5) {
+  const ab = await file.arrayBuffer();
+  const pdfjsLib = await import("https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.mjs");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
+
+  const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+  const pages = Math.min(pdf.numPages, maxPages);
+  const images = [];
+
+  for (let p = 1; p <= pages; p++) {
+    $("overlayStep").textContent = `PDF画像化 ${p}/${pages}`;
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: 1.25 });
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { alpha: false });
+
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    // JPEGで軽量化（payload肥大を抑える）
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.65);
+    images.push(dataUrl);
+  }
+  return images;
+}
+
+
 function getSelectedLabels() {
   const labels = [];
   if ($("lblLiion").checked) labels.push("リチウムイオン電池");
@@ -358,13 +388,20 @@ async function runExtract() {
     const pdfText = await extractPdfTextInBrowser(pdfFile);
     $("overlayBar").style.width = "55%";
 
+    // テキスト抽出できないPDF（文字がパス化/画像）対策：先頭数ページを画像化してAIへ渡す
+    let pdfImages = [];
+    if (!pdfText || pdfText.trim().length < 30) {
+      pdfImages = await renderPdfImagesInBrowser(pdfFile, 5);
+    }
+
     // 未入力ならPDF抽出結果で埋める（API側でも補完するが、ここで明示）
     const model = $("modelInput").value.trim();
     const productName = $("productInput").value.trim();
 
     $("overlayStep").textContent = "AI抽出";
     const r = await api("extract", {
-      pdfText,
+      pdfText: pdfText || "",
+      pdfImages,
       fileName: pdfFile.name,
       modelHint: model || "",
       productHint: productName || ""
@@ -501,4 +538,3 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   await loadMeta();
 });
-
