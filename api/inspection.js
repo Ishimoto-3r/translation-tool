@@ -40,12 +40,10 @@ async function getAccessToken() {
 // ===== Template download =====
 // 優先：INSPECTION_TEMPLATE_URL（Shareリンク）
 // 互換：INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID
-// 追加互換：既存環境に合わせて MANUAL_SHAREPOINT_FILE_URL も許容（新規env追加を避ける）
 async function downloadTemplateBuffer() {
   const accessToken = await getAccessToken();
 
-  // 既存ツール(kensho等)で使っているSharePointファイルURLを流用できるようにする
-  const url = process.env.INSPECTION_TEMPLATE_URL || process.env.MANUAL_SHAREPOINT_FILE_URL || "";
+  const url = process.env.INSPECTION_TEMPLATE_URL || "";
   const siteId = process.env.INSPECTION_SITE_ID || "";
   const driveId = process.env.INSPECTION_DRIVE_ID || "";
   const itemId = process.env.INSPECTION_TEMPLATE_ITEM_ID || "";
@@ -65,9 +63,7 @@ async function downloadTemplateBuffer() {
   }
 
   if (!siteId || !driveId || !itemId) {
-    throw new Error(
-      "ConfigError: INSPECTION_TEMPLATE_URL（または MANUAL_SHAREPOINT_FILE_URL） または INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID が不足"
-    );
+    throw new Error("ConfigError: INSPECTION_TEMPLATE_URL または INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID が不足");
   }
 
   const graphRes = await fetch(
@@ -85,6 +81,25 @@ async function downloadTemplateBuffer() {
 // ===== Helpers =====
 function norm(s) {
   return (s ?? "").toString().trim();
+function cellValueToText(v) {
+  if (v == null) return "";
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return String(v).trim();
+  // ExcelJS: { richText: [{text:".."}] }
+  if (typeof v === "object") {
+    if (Array.isArray(v.richText)) {
+      return v.richText.map(rt => (rt && rt.text ? rt.text : "")).join("").trim();
+    }
+    if (typeof v.text === "string") return v.text.trim(); // hyperlink等
+    if (v.result != null) return String(v.result).trim(); // formula結果
+    if (v.hyperlink && typeof v.hyperlink === "string") {
+      // 表示文字があればそれ優先
+      if (typeof v.text === "string" && v.text.trim()) return v.text.trim();
+      return v.hyperlink.trim();
+    }
+  }
+  return String(v).trim();
+}
+
 }
 
 function thinBorder() {
@@ -151,9 +166,9 @@ async function getSelectionItemsFromTemplate() {
   const items = [];
   // A列=選択リスト の行で、C列を採用
   sheet.eachRow((row, rowNumber) => {
-    const a = norm(row.getCell(1).value);
+    const a = cellValueToText(row.getCell(1).value);
     if (a !== "選択リスト") return;
-    const c = norm(row.getCell(3).value);
+    const c = cellValueToText(row.getCell(3).value);
     if (c) items.push(c);
   });
 
@@ -202,9 +217,6 @@ async function aiExtractFromPdfText({ pdfText, fileName, modelHint, productHint 
 ${pdfText}
 `;
 
-  // NOTE:
-  // Responses API の仕様差分により response_format が弾かれる環境があるため、
-  // ここでは "JSONのみ返す" をプロンプトで強制し、レスポンスからJSON部分を抽出してパースする。
   const resp = await client.responses.create({
     model: MODEL,
     reasoning: { effort: REASONING },
@@ -213,12 +225,12 @@ ${pdfText}
       { role: "system", content: sys.trim() },
       { role: "user", content: user.trim() },
     ],
+    text: { format: { type: "json_object" } },
   });
 
-  const text = resp.output_text || "";
-  const jsonText = extractJsonObject(text) || "{}";
+  const text = resp.output_text || "{}";
   let obj;
-  try { obj = JSON.parse(jsonText); } catch { obj = {}; }
+  try { obj = JSON.parse(text); } catch { obj = {}; }
 
   const model = norm(obj.model);
   const productName = norm(obj.productName);
@@ -254,38 +266,69 @@ ${pdfText}
   return { model, productName, specs, ops, accs };
 }
 
-// 文字列から最初のJSONオブジェクト({ ... })を抽出（余計な説明文が混じっても壊れないようにする）
-function extractJsonObject(s) {
-  const str = (s ?? "").toString();
-  const start = str.indexOf("{");
-  if (start < 0) return "";
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < str.length; i++) {
-    const ch = str[i];
-    if (inString) {
-      if (escape) {
-        escape = false;
-      } else if (ch === "\\") {
-        escape = true;
-      } else if (ch === '"') {
-        inString = false;
-      }
-      continue;
-    }
-    if (ch === '"') {
-      inString = true;
-      continue;
-    }
-    if (ch === "{") depth++;
-    if (ch === "}") depth--;
-    if (depth === 0) {
-      return str.slice(start, i + 1);
-    }
+
+async function aiExtractFromImages({ pdfImages, fileName, modelHint, productHint }) {
+  const MODEL = process.env.MODEL_MANUAL_IMAGE || process.env.MODEL_MANUAL_CHECK || "gpt-5.1";
+  const REASONING = process.env.MANUAL_IMAGE_REASONING || "low";
+  const VERBOSITY = process.env.MANUAL_IMAGE_VERBOSITY || "low";
+
+  const sys = `
+あなたは日本語の取扱説明書（PDF画像）から、検品リスト作成に必要な情報だけを抽出する担当です。
+- 仕様(specs): 箇条書き。寸法/重量/電源/材質/定格など。
+- 動作(ops): 「安全・注意・禁止・警告」に該当する内容は絶対に含めない。
+  形式: [{title:"見出し", items:["項目","項目"]}]
+- 付属品(accs): 付属品の名詞列挙。必ず「取扱説明書」を候補に含める。
+- 型番(model) / 製品名(productName) も抽出する（ヒントがあれば優先）。
+出力は必ずJSONのみ。`;
+
+  const userText = `
+ファイル名: ${fileName}
+型番ヒント: ${modelHint || "(なし)"}
+製品名ヒント: ${productHint || "(なし)"}
+
+上記を参考に、画像から抽出してください。`;
+
+  const content = [{ type: "input_text", text: userText }];
+  for (const img of pdfImages.slice(0, 6)) {
+    content.push({ type: "input_image", image_url: img });
   }
-  return "";
+
+  const resp = await client.responses.create({
+    model: MODEL,
+    reasoning: { effort: REASONING },
+    verbosity: VERBOSITY,
+    input: [
+      { role: "system", content: sys.trim() },
+      { role: "user", content },
+    ],
+    text: { format: { type: "json_object" } },
+  });
+
+  const text = resp.output_text || "{}";
+  let obj;
+  try { obj = JSON.parse(text); } catch { obj = {}; }
+
+  const model = norm(obj.model || modelHint || "");
+  const productName = norm(obj.productName || productHint || "");
+  const specs = Array.isArray(obj.specs) ? obj.specs.map(norm).filter(Boolean) : [];
+  const accs0 = Array.isArray(obj.accs) ? obj.accs.map(norm).filter(Boolean) : [];
+
+  // 取扱説明書を必ず候補にする
+  const accs = dedupeKeepOrder(["取扱説明書", ...accs0]);
+
+  const ops = Array.isArray(obj.ops) ? obj.ops : [];
+  const cleanedOps = [];
+  for (const b of ops) {
+    const title = norm(b?.title);
+    const items = Array.isArray(b?.items) ? b.items.map(norm).filter(Boolean) : [];
+    const safeItems = items.filter((t) => !shouldSkipOpItem(t));
+    if (!title && safeItems.length === 0) continue;
+    cleanedOps.push({ title, items: safeItems });
+  }
+
+  return { model, productName, specs, ops: cleanedOps, accs };
 }
+
 
 // ===== Excel generate =====
 function findMarkerRow(ws, marker) {
@@ -513,16 +556,26 @@ export default async function handler(req, res) {
     }
 
     if (op === "extract") {
-      const { pdfText, fileName, modelHint, productHint } = req.body || {};
-      if (!pdfText || typeof pdfText !== "string") {
-        return res.status(400).json({ error: "BadRequest", detail: "pdfText is required" });
+      const { pdfText, pdfImages, fileName, modelHint, productHint } = req.body || {};
+      const hasText = typeof pdfText === "string" && pdfText.trim().length >= 30;
+      const hasImages = Array.isArray(pdfImages) && pdfImages.length > 0;
+      if (!hasText && !hasImages) {
+        return res.status(400).json({ error: "BadRequest", detail: "pdfText or pdfImages is required" });
       }
-      const r = await aiExtractFromPdfText({
-        pdfText,
-        fileName: fileName || "manual.pdf",
-        modelHint: modelHint || "",
-        productHint: productHint || ""
-      });
+
+      const r = hasText
+        ? await aiExtractFromPdfText({
+            pdfText,
+            fileName: fileName || "manual.pdf",
+            modelHint: modelHint || "",
+            productHint: productHint || ""
+          })
+        : await aiExtractFromImages({
+            pdfImages,
+            fileName: fileName || "manual.pdf",
+            modelHint: modelHint || "",
+            productHint: productHint || ""
+          });
       return res.status(200).json(r);
     }
 
