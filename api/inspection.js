@@ -40,10 +40,12 @@ async function getAccessToken() {
 // ===== Template download =====
 // 優先：INSPECTION_TEMPLATE_URL（Shareリンク）
 // 互換：INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID
+// 追加互換：既存環境に合わせて MANUAL_SHAREPOINT_FILE_URL も許容（新規env追加を避ける）
 async function downloadTemplateBuffer() {
   const accessToken = await getAccessToken();
 
-  const url = process.env.INSPECTION_TEMPLATE_URL || "";
+  // 既存ツール(kensho等)で使っているSharePointファイルURLを流用できるようにする
+  const url = process.env.INSPECTION_TEMPLATE_URL || process.env.MANUAL_SHAREPOINT_FILE_URL || "";
   const siteId = process.env.INSPECTION_SITE_ID || "";
   const driveId = process.env.INSPECTION_DRIVE_ID || "";
   const itemId = process.env.INSPECTION_TEMPLATE_ITEM_ID || "";
@@ -63,7 +65,9 @@ async function downloadTemplateBuffer() {
   }
 
   if (!siteId || !driveId || !itemId) {
-    throw new Error("ConfigError: INSPECTION_TEMPLATE_URL または INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID が不足");
+    throw new Error(
+      "ConfigError: INSPECTION_TEMPLATE_URL（または MANUAL_SHAREPOINT_FILE_URL） または INSPECTION_SITE_ID / INSPECTION_DRIVE_ID / INSPECTION_TEMPLATE_ITEM_ID が不足"
+    );
   }
 
   const graphRes = await fetch(
@@ -198,6 +202,9 @@ async function aiExtractFromPdfText({ pdfText, fileName, modelHint, productHint 
 ${pdfText}
 `;
 
+  // NOTE:
+  // Responses API の仕様差分により response_format が弾かれる環境があるため、
+  // ここでは "JSONのみ返す" をプロンプトで強制し、レスポンスからJSON部分を抽出してパースする。
   const resp = await client.responses.create({
     model: MODEL,
     reasoning: { effort: REASONING },
@@ -206,12 +213,12 @@ ${pdfText}
       { role: "system", content: sys.trim() },
       { role: "user", content: user.trim() },
     ],
-    response_format: { type: "json_object" },
   });
 
-  const text = resp.output_text || "{}";
+  const text = resp.output_text || "";
+  const jsonText = extractJsonObject(text) || "{}";
   let obj;
-  try { obj = JSON.parse(text); } catch { obj = {}; }
+  try { obj = JSON.parse(jsonText); } catch { obj = {}; }
 
   const model = norm(obj.model);
   const productName = norm(obj.productName);
@@ -245,6 +252,39 @@ ${pdfText}
   accs = dedupeKeepOrder(accs);
 
   return { model, productName, specs, ops, accs };
+}
+
+// 文字列から最初のJSONオブジェクト({ ... })を抽出（余計な説明文が混じっても壊れないようにする）
+function extractJsonObject(s) {
+  const str = (s ?? "").toString();
+  const start = str.indexOf("{");
+  if (start < 0) return "";
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < str.length; i++) {
+    const ch = str[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === "\\") {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") depth++;
+    if (ch === "}") depth--;
+    if (depth === 0) {
+      return str.slice(start, i + 1);
+    }
+  }
+  return "";
 }
 
 // ===== Excel generate =====
