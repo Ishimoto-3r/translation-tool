@@ -1,59 +1,21 @@
 // api/inspection.js（全文）
+// op=select_options : GET  選択リスト（検品項目リスト A列=選択リスト のC列）を返す
+// op=extract_text   : POST {filename,text} → AI抽出（仕様/動作/付属品 + 型番/製品名）
+// op=generate_text  : POST {filename,text,selectedLabels,aiPicked,model,product} → Excel生成（必要シートのみ）
+//
+// 注意：フロント側でPDF→text抽出（pdf.js）済みテキストを送る想定（413回避）
+// 既存ツールと同じく SharePoint は ReadOnly
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
 
-export const config = { api: { bodyParser: false } };
-
+// ===== OpenAI =====
+const INSPECTION_MODEL = process.env.INSPECTION_MODEL || process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
+const INSPECTION_REASONING = process.env.INSPECTION_REASONING || process.env.MANUAL_CHECK_REASONING || "medium";
+const INSPECTION_VERBOSITY = process.env.INSPECTION_VERBOSITY || process.env.MANUAL_CHECK_VERBOSITY || "low";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const INSPECTION_MODEL = process.env.INSPECTION_MODEL || "gpt-5.2";
-const INSPECTION_REASONING = process.env.INSPECTION_REASONING || "medium";
-const INSPECTION_VERBOSITY = process.env.INSPECTION_VERBOSITY || "low";
-
-// ④ 出力に残すのは2シートだけ
-const OUTPUT_KEEP_SHEETS = new Set([
-  "検品リスト",
-  "検品用画像",
-]);
-
-const GLOBAL_FONT_NAME = "游ゴシック";
-const GLOBAL_FONT_SIZE = 10;
-
-async function readRawBody(req) {
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  return Buffer.concat(chunks);
-}
-
-function cellToText(v) {
-  if (v == null) return "";
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-
-  if (v && typeof v === "object") {
-    if (Array.isArray(v.richText)) return v.richText.map((p) => p?.text ?? "").join("").trim();
-    if (typeof v.text === "string") return v.text.trim();
-    if (typeof v.result !== "undefined") return cellToText(v.result).trim();
-    if (typeof v.formula === "string") return "";
-    if (v instanceof Date) return v.toISOString();
-  }
-
-  try { return String(v); } catch { return ""; }
-}
-
-function normalizeStringArray(v) {
-  if (!Array.isArray(v)) return [];
-  return v.map((x) => (x ?? "").toString().trim()).filter((x) => x.length > 0);
-}
-
-function safeFilePart(s) {
-  const t = (s ?? "").toString().trim();
-  if (!t) return "";
-  return t.replace(/[\\\/\:\*\?\"\<\>\|]/g, " ").replace(/\s+/g, " ").trim();
-}
-
-// ===== SharePoint =====
+// ===== SharePoint (Microsoft Graph) =====
 async function getAccessToken() {
   const tenantId = process.env.MANUAL_TENANT_ID;
   const clientId = process.env.MANUAL_CLIENT_ID;
@@ -82,73 +44,344 @@ async function getAccessToken() {
   return tokenData.access_token;
 }
 
+function pickSharePointUrlEnv() {
+  // 既存ツール互換（どれか1つ入っていればOK）
+  const candidates = [
+    process.env.MANUAL_DATABASE_URL,
+    process.env.MANUAL_SHAREPOINT_URL,
+    process.env.SHAREPOINT_FILE_URL,
+    process.env.SP_FILE_URL,
+    process.env.DATABASE_XLSX_URL,
+    process.env.MANUAL_SHAREPOINT_FILE_URL, // kensho.js 互換
+  ].filter(Boolean);
+
+  return candidates.length ? candidates[0] : "";
+}
+
 async function downloadTemplateExcelBuffer() {
-  const fileUrl = process.env.MANUAL_SHAREPOINT_FILE_URL;
-  if (!fileUrl) throw new Error("ConfigError: MANUAL_SHAREPOINT_FILE_URL が不足");
+  // 優先：ID指定（設計方針）
+  const siteId = process.env.INSPECTION_SITE_ID;
+  const driveId = process.env.INSPECTION_DRIVE_ID;
+  const itemId = process.env.INSPECTION_TEMPLATE_ITEM_ID;
 
   const accessToken = await getAccessToken();
-  const shareId = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");
 
-  const graphRes = await fetch(
+  if (siteId && driveId && itemId) {
+    const url = `https://graph.microsoft.com/v1.0/sites/${siteId}/drives/${driveId}/items/${itemId}/content`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!r.ok) {
+      const t = await r.text();
+      throw new Error(`GraphError(${r.status}): ${t}`);
+    }
+    const ab = await r.arrayBuffer();
+    return Buffer.from(ab);
+  }
+
+  // フォールバック：ShareリンクURL（既存ツール互換）
+  const fileUrl = pickSharePointUrlEnv();
+  if (!fileUrl) {
+    throw new Error(
+      "ConfigError: SharePoint URL env が不足（候補: MANUAL_DATABASE_URL / MANUAL_SHAREPOINT_URL / SHAREPOINT_FILE_URL / SP_FILE_URL / DATABASE_XLSX_URL / MANUAL_SHAREPOINT_FILE_URL）"
+    );
+  }
+
+  const shareId = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");
+  const r = await fetch(
     `https://graph.microsoft.com/v1.0/shares/u!${shareId}/driveItem/content`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
 
-  if (!graphRes.ok) {
-    const txt = await graphRes.text();
-    throw new Error(`GraphError(${graphRes.status}): ${txt}`);
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`GraphError(${r.status}): ${t}`);
   }
 
-  const ab = await graphRes.arrayBuffer();
+  const ab = await r.arrayBuffer();
   return Buffer.from(ab);
 }
 
-// ===== Excel helpers =====
-function findMarkerRow(ws, markerText) {
+// ===== Utils =====
+async function readRawBody(req) {
+  const chunks = [];
+  for await (const c of req) chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c));
+  return Buffer.concat(chunks);
+}
+
+function normalizeStringArray(v) {
+  if (!v) return [];
+  if (Array.isArray(v)) {
+    return v
+      .map((x) => (x == null ? "" : String(x)).trim())
+      .filter((x) => x.length > 0);
+  }
+  return [String(v).trim()].filter((x) => x.length > 0);
+}
+
+function safeFilePart(s) {
+  return (s || "")
+    .toString()
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isOperationNoise(s) {
+  const t = (s || "").toString().trim();
+  if (!t) return true;
+  if (/^(安全|注意|警告|禁止|中止|危険)/.test(t)) return true;
+  if (/安全.*取扱.*注意/.test(t)) return true;
+  if (/(使用しない|使用を中止|しないでください|禁止|分解|改造|修理しない|感電|火災|高温|濡れた手|水にかけない)/.test(t)) return true;
+  return false;
+}
+
+function normalizeAccessoriesEnsureManual(list) {
+  const arr = normalizeStringArray(list);
+  // 表記ブレの追記は不要（ユーザー指示）→ ただし「説明書」系がなければ追加する
+  const hasManual = arr.some((x) => /取扱|取り扱い|説明書|マニュアル/.test(x));
+  if (!hasManual) arr.push("取扱説明書");
+  return arr;
+}
+
+// ===== Select options =====
+async function getSelectOptionsFromTemplate() {
+  const buf = await downloadTemplateExcelBuffer();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+
+  const ws = wb.getWorksheet("検品項目リスト");
+  if (!ws) throw new Error("SheetError: 検品項目リスト が見つかりません");
+
+  // A列=「選択リスト」の行の C列を返す
+  const options = [];
+  ws.eachRow((row, rowNumber) => {
+    const a = (row.getCell(1).value ?? "").toString().trim();
+    if (a !== "選択リスト") return;
+
+    const cVal = row.getCell(3).value;
+    const c = (cVal ?? "").toString().trim();
+    if (c) options.push(c);
+  });
+
+  // 重複排除（順序維持）
+  const seen = new Set();
+  return options.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
+}
+
+// ===== AI Extract (text mode) =====
+async function extractFromTextToPayload({ filename, text }) {
+  const sys =
+    "あなたは日本語の取扱説明書（技術文書）から、検品リスト用の抜粋を作る担当です。\n" +
+    "次の情報を抽出してください。\n\n" +
+    "A) 検品項目（短文）を3区分で漏れなく\n" +
+    "  - 仕様（specText）\n" +
+    "  - 動作（opText）※安全/注意/警告/禁止/中止などの注意喚起は含めない\n" +
+    "  - 付属品（accText）※取扱説明書は常に候補に入れる\n\n" +
+    "B) 型番（model）と製品名（product）\n\n" +
+    "【動作のグルーピング】\n" +
+    "動作（opText）については、関連する項目のまとまりごとに「タイトル」を作って opGroups にまとめる。\n" +
+    "タイトルは短く要点のみ。タイトルもチェック対象として使うため、抽象的すぎる語は避ける。\n\n" +
+    "出力はJSONのみ。";
+
+  const response = await client.responses.create({
+    model: INSPECTION_MODEL,
+    reasoning: { effort: INSPECTION_REASONING },
+    text: { verbosity: INSPECTION_VERBOSITY },
+    input: [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: sys },
+          { type: "input_text", text: `ファイル名: ${filename}` },
+          { type: "input_text", text: "以下がPDFから抽出した本文テキストです。\n---\n" + text.slice(0, 250000) },
+          {
+            type: "input_text",
+            text:
+              "出力JSONスキーマ:\n" +
+              "{\n" +
+              '  "model": string,\n' +
+              '  "product": string,\n' +
+              '  "specText": string[],\n' +
+              '  "opText": string[],\n' +
+              '  "opGroups": { "title": string, "items": string[] }[],\n' +
+              '  "accText": string[]\n' +
+              "}\n",
+          },
+        ],
+      },
+    ],
+  });
+
+  const out = (response.output_text || "").trim();
+  let obj;
+  try {
+    obj = JSON.parse(out);
+  } catch {
+    const first = out.indexOf("{");
+    const last = out.lastIndexOf("}");
+    if (first >= 0 && last > first) obj = JSON.parse(out.slice(first, last + 1));
+    else throw new Error("AIParseError: JSON解析に失敗");
+  }
+
+  const specText = normalizeStringArray(obj.specText);
+
+  const opText = normalizeStringArray(obj.opText).filter((x) => !isOperationNoise(x));
+
+  let opGroups = [];
+  if (Array.isArray(obj.opGroups)) {
+    const tmp = [];
+    for (const g of obj.opGroups) {
+      const titleRaw = (g?.title ?? "").toString().trim();
+      const title = titleRaw && !isOperationNoise(titleRaw) ? titleRaw : "";
+      const items = normalizeStringArray(g?.items).filter((x) => !isOperationNoise(x));
+      if (!title && items.length === 0) continue;
+      tmp.push({ title, items });
+    }
+    opGroups = tmp;
+  }
+
+  const accText = normalizeAccessoriesEnsureManual(obj.accText);
+
+  return {
+    model: (obj.model ?? "").toString().trim(),
+    product: (obj.product ?? "").toString().trim(),
+    specText,
+    opText,
+    opGroups,
+    accText,
+  };
+}
+
+// ===== Excel generation helpers =====
+function findMarkerRow(ws, marker) {
   const max = ws.rowCount || 0;
   for (let r = 1; r <= max; r++) {
-    const s = cellToText(ws.getCell(r, 1).value).trim();
-    if (s === markerText) return r;
+    const v = ws.getCell(r, 1).value;
+    const s = (v ?? "").toString().trim();
+    if (s === marker) return r;
   }
-  return null;
+  return 0;
 }
 
 function cloneRowStyle(row) {
-  const style = { ...row.style };
-  const cellStyles = {};
+  // セル単位で必要（border等）
+  const snap = {
+    rowHeight: row.height,
+    cells: {},
+  };
   row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-    cellStyles[colNumber] = { ...cell.style };
+    snap.cells[colNumber] = {
+      style: { ...cell.style },
+      numFmt: cell.numFmt,
+      alignment: cell.alignment ? { ...cell.alignment } : undefined,
+      border: cell.border ? { ...cell.border } : undefined,
+      fill: cell.fill ? { ...cell.fill } : undefined,
+      font: cell.font ? { ...cell.font } : undefined,
+      protection: cell.protection ? { ...cell.protection } : undefined,
+    };
   });
-  return { style, cellStyles };
+  return snap;
 }
 
-function applyRowStyle(ws, rowNumber, styleSnapshot, upToCol) {
+function applyRowStyle(ws, rowNumber, styleSnap, maxCols) {
   const row = ws.getRow(rowNumber);
-  row.style = { ...styleSnapshot.style };
-  for (let c = 1; c <= upToCol; c++) {
+  if (styleSnap.rowHeight != null) row.height = styleSnap.rowHeight;
+
+  for (let c = 1; c <= maxCols; c++) {
     const cell = row.getCell(c);
-    const st = styleSnapshot.cellStyles[c];
-    if (st) cell.style = { ...st };
+    const s = styleSnap.cells[c];
+    if (!s) continue;
+
+    // ExcelJSは style を丸ごとコピーすると一部欠けることがあるので個別に
+    if (s.font) cell.font = { ...s.font };
+    if (s.alignment) cell.alignment = { ...s.alignment };
+    if (s.border) cell.border = { ...s.border };
+    if (s.fill) cell.fill = { ...s.fill };
+    if (s.protection) cell.protection = { ...s.protection };
+    if (s.numFmt) cell.numFmt = s.numFmt;
   }
 }
 
-// ⑤ 全セルに「游ゴシック / 10」適用（name/sizeだけ上書き）
-function applyGlobalFont(workbook) {
-  for (const ws of workbook.worksheets) {
-    ws.eachRow({ includeEmpty: true }, (row) => {
-      row.eachCell({ includeEmpty: true }, (cell) => {
-        const cur = cell.font || {};
-        cell.font = { ...cur, name: GLOBAL_FONT_NAME, size: GLOBAL_FONT_SIZE };
-      });
+function buildExcerptRows(kind, pickedArr) {
+  // kind: "仕様" / "動作" / "付属品"
+  // pickedArr: [{text,isTitle}]
+  // 既定列: B=区分, C=本文, E空, F=1, G=必須
+  const rows = [];
+  for (const p of pickedArr) {
+    const text = (p?.text ?? "").toString().trim();
+    if (!text) continue;
+
+    // 動作のノイズはここで最終除外（念のため）
+    if (kind === "動作" && isOperationNoise(text)) continue;
+
+    rows.push({
+      isTitle: !!p.isTitle,
+      values: {
+        2: kind,
+        3: text,
+        6: 1,
+        7: "必須",
+      },
     });
   }
+  return rows;
+}
+
+function readSelectMapFromWs(wsList) {
+  // 検品項目リストの A列=ラベル（完全一致）→ B以降の行データ（Aはコピーしない）
+  const map = new Map();
+  wsList.eachRow((row) => {
+    const a = (row.getCell(1).value ?? "").toString().trim();
+    if (!a) return;
+
+    // A列はコピーしない：B列以降を values へ
+    const obj = {};
+    for (let c = 2; c <= 11; c++) {
+      const v = row.getCell(c).value;
+      if (v != null && v !== "") obj[c] = v;
+    }
+    map.set(a, obj);
+  });
+  return map;
+}
+
+function buildSelectedRows(wsList, selectedLabels, warnings) {
+  const map = readSelectMapFromWs(wsList);
+  const out = [];
+  for (const label of selectedLabels) {
+    if (!map.has(label)) {
+      warnings.push(`未一致ラベル: ${label}`);
+      continue;
+    }
+    out.push(map.get(label));
+  }
+  return out;
+}
+
+function splitAiPicked(aiPicked) {
+  const spec = [];
+  const op = [];
+  const acc = [];
+
+  for (const p of aiPicked || []) {
+    const kind = (p?.kind ?? "").toString().trim();
+    const text = (p?.text ?? "").toString();
+    const isTitle = !!p?.isTitle;
+
+    if (!kind || !text.trim()) continue;
+
+    if (kind === "仕様") spec.push({ text, isTitle: false });
+    else if (kind === "動作") op.push({ text, isTitle });
+    else if (kind === "付属品") acc.push({ text, isTitle: false });
+  }
+
+  return { spec, op, acc };
 }
 
 function forceCenterAlignColumnG(ws) {
   const col = 7; // G
   const max = ws.rowCount || 0;
 
-  // 14行目以降のみセンター強制（13行目まで＝ヘッダー/基本情報は元のまま）
+  // 14行目以降のみ
   for (let r = 14; r <= max; r++) {
     const cell = ws.getCell(r, col);
     const cur = cell.alignment || {};
@@ -156,323 +389,60 @@ function forceCenterAlignColumnG(ws) {
   }
 }
 
+function applyGlobalFont(workbook) {
+  // 全シート全セル：游ゴシック 10
+  workbook.eachSheet((ws) => {
+    const maxRow = ws.rowCount || 0;
+    const maxCol = ws.columnCount || 0;
 
-// ④ 必要シート以外削除
-function keepOnlySheets(workbook) {
-  const names = workbook.worksheets.map((w) => w.name);
-  for (const name of names) {
-    if (!OUTPUT_KEEP_SHEETS.has(name)) {
-      const ws = workbook.getWorksheet(name);
-      if (ws) workbook.removeWorksheet(ws.id);
-    }
-  }
-}
-
-// ===== 検品項目（選択リスト） =====
-function extractSelectOptions(wsList) {
-  const opts = [];
-  const max = wsList.rowCount || 0;
-  for (let r = 1; r <= max; r++) {
-    const a = cellToText(wsList.getCell(r, 1).value).trim();
-    if (a !== "選択リスト") continue;
-
-    const c = cellToText(wsList.getCell(r, 3).value).trim();
-    if (!c) continue;
-
-    opts.push(c);
-  }
-  const seen = new Set();
-  return opts.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
-}
-
-function buildSelectedRows(wsList, selectedValues, warnings) {
-  const wanted = new Set(selectedValues);
-  const hit = new Set();
-  const rows = [];
-
-  const max = wsList.rowCount || 0;
-  const lastCol = Math.max(2, wsList.columnCount || 2);
-
-  for (let r = 1; r <= max; r++) {
-    const a = cellToText(wsList.getCell(r, 1).value).trim();
-
-    // 固定ラベル：A一致
-    if (a && wanted.has(a)) {
-      hit.add(a);
-      const values = [];
-      values[1] = "";
-      for (let c = 2; c <= lastCol; c++) values[c] = wsList.getCell(r, c).value;
-      rows.push(values);
-      continue;
-    }
-
-    // 選択リスト：C一致
-    if (a === "選択リスト") {
-      const cText = cellToText(wsList.getCell(r, 3).value).trim();
-      if (cText && wanted.has(cText)) {
-        hit.add(cText);
-        const values = [];
-        values[1] = "";
-        for (let c = 2; c <= lastCol; c++) values[c] = wsList.getCell(r, c).value;
-        rows.push(values);
+    for (let r = 1; r <= maxRow; r++) {
+      const row = ws.getRow(r);
+      for (let c = 1; c <= maxCol; c++) {
+        const cell = row.getCell(c);
+        const cur = cell.font || {};
+        cell.font = {
+          ...cur,
+          name: "游ゴシック",
+          size: 10,
+        };
       }
     }
-  }
-
-  for (const v of selectedValues) {
-    if (!hit.has(v)) warnings.push(`未一致ラベル: ${v}`);
-  }
-
-  return rows;
-}
-
-// ===== 付属品：取扱説明書の正規化・常時候補化 =====
-function normalizeAccessoriesEnsureManual(accText) {
-  const src = normalizeStringArray(accText);
-
-  // 取扱説明書の表記ブレを「取扱説明書」に正規化
-  const manualRegex = /(取扱|取り扱)\s*説明書|説明書|マニュアル/i;
-
-  const out = [];
-  let hasManual = false;
-
-  for (const s of src) {
-    const t = s.replace(/\s+/g, " ").trim();
-    if (!t) continue;
-
-    if (manualRegex.test(t)) {
-      if (!hasManual) {
-        out.push("取扱説明書");
-        hasManual = true;
-      }
-      continue;
-    }
-    out.push(t);
-  }
-
-  if (!hasManual) out.push("取扱説明書");
-
-  // 重複除去（順序保持）
-  const seen = new Set();
-  return out.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
-}
-
-// ===== 動作ノイズ除去（安全/禁止/中止/注意喚起系） =====
-function isOperationNoise(s) {
-  const t = (s || "").toString().trim();
-  if (!t) return true;
-  if (/^(安全|注意|警告|禁止|中止|危険)/.test(t)) return true;
-  if (/(使用しない|使用を中止|しないでください|禁止|分解|改造|修理しない|感電|火災|高温|濡れた手|水にかけない)/.test(t)) return true;
-  if (/安全.*取扱.*注意/.test(t)) return true;
-  return false;
-}
-
-// ===== OpenAI: PDF→抽出 =====
-async function extractFromPdfToPayload({ filename, pdfBuffer }) {
-  const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
-
-  let uploaded = null;
-  try {
-    uploaded = await client.files.create({ file: fileObj, purpose: "assistants" });
-
-    const sys =
-      "あなたは日本語の取扱説明書（技術文書）から、検品リスト用の抜粋を作る担当です。\n" +
-      "PDFを読み、次の情報を抽出してください。\n\n" +
-      "A) 検品項目（短文）を3区分でできるだけ漏れなく\n" +
-      "   - 仕様（specText）\n" +
-      "   - 動作（opText）\n" +
-      "   - 付属品（accText）\n\n" +
-      "B) 型番（model）と製品名（product）\n\n" +
-      "【抽出ルール】\n" +
-      "- 検品項目は、取説に基づき「検品で確認すべき内容」として言い換えてよい（意味は変えない）。\n" +
-      "- “動作” は特に漏れなく：操作手順、表示、起動/停止、モード切替、充電、接続、エラー表示など「機能・操作」に関する内容のみ。\n" +
-      "- 重要：安全・取扱注意（禁止/中止/警告/注意/危険/使用しない等）の注意喚起は“動作”に含めない（抽出不要）。\n" +
-      "- 重複は統合してよい。\n" +
-      "- 1行は短く。\n" +
-      "- 型番/数値/単位は原文どおり。\n" +
-      "- 工場が検品でチェックできる粒度にする。\n" +
-      "- 型番/製品名が見つからない場合は空文字。\n\n" +
-      "【追加】動作（opText）は、関連する項目のまとまりごとに「タイトル」を作ってグループ化してください。\n" +
-      "例：多数の『メニュー項目を変更できる』が並ぶ場合は、タイトル『メニューの各項目の設定ができる』の下にまとめる。\n" +
-      "タイトル自体も後段でチェック項目として使うため、短く要点のみ。\n" +
-      "出力はJSONのみ。";
-
-    const response = await client.responses.create({
-      model: INSPECTION_MODEL,
-      reasoning: { effort: INSPECTION_REASONING },
-      text: { verbosity: INSPECTION_VERBOSITY },
-      input: [
-        {
-          role: "user",
-          content: [
-            { type: "input_text", text: sys + "\n\nJSONで返してください。" },
-            { type: "input_file", file_id: uploaded.id },
-            {
-              type: "input_text",
-              text:
-                "出力JSONスキーマ:\n" +
-                "{\n" +
-                '  "model": string,\n' +
-                '  "product": string,\n' +
-                '  "specText": string[],\n' +
-                '  "opText": string[],\n' +
-                '  "opGroups": { "title": string, "items": string[] }[],\n' +
-                '  "accText": string[]\n' +
-                "}\n",
-            },
-          ],
-        },
-      ],
-    });
-
-    const text = (response.output_text || "").trim();
-
-    let obj;
-    try {
-      obj = JSON.parse(text);
-    } catch {
-      const first = text.indexOf("{");
-      const last = text.lastIndexOf("}");
-      if (first >= 0 && last > first) obj = JSON.parse(text.slice(first, last + 1));
-      else throw new Error("AIParseError: JSON解析に失敗");
-    }
-
-    const specText = normalizeStringArray(obj.specText);
-
-    // 動作は後処理でもノイズ除去（①の二重保険）
-    const opText = normalizeStringArray(obj.opText).filter((x) => !isOperationNoise(x));
-
-    let opGroups = [];
-    if (Array.isArray(obj.opGroups)) {
-      const tmp = [];
-      for (const g of obj.opGroups) {
-        const titleRaw = (g?.title ?? "").toString().trim();
-        const title = titleRaw && !isOperationNoise(titleRaw) ? titleRaw : "";
-        const items = normalizeStringArray(g?.items).filter((x) => !isOperationNoise(x));
-        if (!title && items.length === 0) continue;
-        tmp.push({ title, items });
-      }
-      opGroups = tmp;
-    }
-
-    const accText = normalizeAccessoriesEnsureManual(obj.accText);
-
-    return {
-      model: (obj.model ?? "").toString().trim(),
-      product: (obj.product ?? "").toString().trim(),
-      specText,
-      opText,
-      opGroups,
-      accText,
-    };
-  } finally {
-    try { if (uploaded?.id) await client.files.del(uploaded.id); } catch {}
-  }
-}
-
-// ===== generate 用：aiPicked（isTitle込み） =====
-function splitAiPicked(aiPicked) {
-  const spec = [];
-  const op = [];
-  const acc = [];
-
-  for (const it of aiPicked) {
-    const kind = (it?.kind ?? "").toString().trim();
-    const text = (it?.text ?? "").toString().trim();
-    const isTitle = !!it?.isTitle;
-    if (!text) continue;
-
-    const row = { text, isTitle };
-
-    if (kind === "仕様") spec.push(row);
-    else if (kind === "動作") op.push(row);
-    else if (kind === "付属品") acc.push(row);
-  }
-  return { specRows: spec, opRows: op, accRows: acc };
-}
-
-function buildExcerptRows(kindLabel, rows) {
-  return rows.map(({ text, isTitle }) => {
-    const values = [];
-    values[1] = "";
-    values[2] = kindLabel;
-    values[3] = text;
-    values[5] = "";
-    values[6] = 1;
-    values[7] = "必須";
-    return { values, isTitle: !!isTitle };
   });
 }
 
-export default async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Credentials", "true");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, x-filename, x-selected-labels, x-ai-picked, x-model, x-product"
-  );
+function keepOnlySheets(workbook) {
+  const keep = new Set(["検品リスト", "検品用画像", "検品外観基準"]);
+  const toRemove = [];
+  workbook.eachSheet((ws) => {
+    if (!keep.has(ws.name)) toRemove.push(ws.id);
+  });
+  for (const id of toRemove) workbook.removeWorksheet(id);
+}
 
-  if (req.method === "OPTIONS") return res.status(200).end();
+function clearBoldUnderlineForOperationTitles(wsMain, insertedRowRanges) {
+  // タイトルをExcelに入れる時は太字解除・下線なし（指定）
+  // insertedRowRanges: [{start, end, kind}]  kind="動作"
+  for (const seg of insertedRowRanges) {
+    if (seg.kind !== "動作") continue;
+    for (let r = seg.start; r <= seg.end; r++) {
+      const kindCell = wsMain.getCell(r, 2).value;
+      if ((kindCell ?? "").toString().trim() !== "動作") continue;
 
-  try {
-    const url = new URL(req.url, "http://localhost");
-    const op = url.searchParams.get("op") || "";
-
-    // GET: 選択リスト
-    if (req.method === "GET") {
-      if (op !== "select_options") {
-        return res.status(400).json({ error: "BadRequest", detail: "op が不正" });
+      // タイトル判定：aiPickedの isTitle を反映できないので、
+      // 「動作」挿入ブロック内でタイトル行にだけフラグ列を使うと理想だが、
+      // 今回は簡易に「太字になっているもの」を解除する方式にする。
+      const cellC = wsMain.getCell(r, 3);
+      const f = cellC.font || {};
+      if (f.bold || f.underline) {
+        cellC.font = { ...f, bold: false, underline: false };
       }
-      const templateBuf = await downloadTemplateExcelBuffer();
-      const wb = new ExcelJS.Workbook();
-      await wb.xlsx.load(templateBuf);
-
-      const wsList = wb.getWorksheet("検品項目リスト");
-      if (!wsList) throw new Error("SheetError: 検品項目リスト が見つかりません");
-
-      const options = extractSelectOptions(wsList);
-      return res.status(200).json({ options });
     }
+  }
+}
 
-    if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
-
-    const ct = String(req.headers["content-type"] || "");
-    if (!ct.includes("application/pdf")) {
-      return res.status(400).json({ error: "BadRequest", detail: "Content-Type は application/pdf" });
-    }
-
-    const pdfBuffer = await readRawBody(req);
-    const pdfFilename = req.headers["x-filename"]
-      ? decodeURIComponent(String(req.headers["x-filename"]))
-      : "manual.pdf";
-
-    // POST: 抽出
-    if (op === "extract") {
-      const payload = await extractFromPdfToPayload({
-        filename: pdfFilename,
-        pdfBuffer,
-      });
-      return res.status(200).json(payload);
-    }
-
-    // POST: 生成
-    if (op !== "generate" && op !== "") {
-      return res.status(400).json({ error: "BadRequest", detail: "op が不正" });
-    }
-
-    const hdrLabels = req.headers["x-selected-labels"];
-    const selectedLabels = hdrLabels
-      ? normalizeStringArray(JSON.parse(decodeURIComponent(String(hdrLabels))))
-      : [];
-
-    const hdrAi = req.headers["x-ai-picked"];
-    const aiPicked = hdrAi ? JSON.parse(decodeURIComponent(String(hdrAi))) : [];
-    const { specRows, opRows, accRows } = splitAiPicked(Array.isArray(aiPicked) ? aiPicked : []);
-
-    const model = safeFilePart(decodeURIComponent(String(req.headers["x-model"] || "")));
-    const product = safeFilePart(decodeURIComponent(String(req.headers["x-product"] || "")));
-
+async function generateExcelFromHeadersOnly(req, res, textModePayload) {
+  // textModePayload: { filename, selectedLabels, aiPicked, model, product }
+  try {
     const warnings = [];
 
     const templateBuf = await downloadTemplateExcelBuffer();
@@ -496,7 +466,12 @@ export default async function handler(req, res) {
 
     const STYLE_COLS = 11;
 
-    // 下から処理（行ズレ防止）
+    const selectedLabels = Array.isArray(textModePayload.selectedLabels) ? textModePayload.selectedLabels : [];
+    const aiPicked = Array.isArray(textModePayload.aiPicked) ? textModePayload.aiPicked : [];
+
+    const { spec, op, acc } = splitAiPicked(aiPicked);
+
+    // 置換は下から（行ズレ回避）
     const tasks = [
       { row: mSel, type: "select" },
       { row: mAcc, type: "acc" },
@@ -504,67 +479,78 @@ export default async function handler(req, res) {
       { row: mSpec, type: "spec" },
     ].sort((a, b) => b.row - a.row);
 
+    const insertedRanges = []; // タイトル装飾解除のため
+
     for (const t of tasks) {
       const r = t.row;
       const styleSnap = cloneRowStyle(wsMain.getRow(r));
 
       if (t.type === "spec") {
-        const rows = buildExcerptRows("仕様", specRows);
-        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
-
-        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
-        for (let i = 0; i < rows.length; i++) {
-          applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
-          // ② タイトル太字はしない（何もしない）
+        const rows = buildExcerptRows("仕様", spec);
+        if (rows.length === 0) {
+          wsMain.spliceRows(r, 1);
+          continue;
         }
+        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
+        for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+        insertedRanges.push({ kind: "仕様", start: r, end: r + rows.length - 1 });
         continue;
       }
 
       if (t.type === "op") {
-        const rows = buildExcerptRows("動作", opRows);
-        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
-
-        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
-        for (let i = 0; i < rows.length; i++) {
-          applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
-          // ② タイトル太字はしない（何もしない）
+        const rows = buildExcerptRows("動作", op);
+        if (rows.length === 0) {
+          wsMain.spliceRows(r, 1);
+          continue;
         }
+        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
+        for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+        insertedRanges.push({ kind: "動作", start: r, end: r + rows.length - 1 });
         continue;
       }
 
       if (t.type === "acc") {
-        const rows = buildExcerptRows("付属品", accRows);
-        if (rows.length === 0) { wsMain.spliceRows(r, 1); continue; }
-
-        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
-        for (let i = 0; i < rows.length; i++) {
-          applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
-          // ② タイトル太字はしない（何もしない）
+        // 付属品は「取扱説明書」を候補として必ず含める（未チェックでも候補にいるだけ）
+        // ただし aiPicked にはチェックされたものだけが来る想定なので、ここで自動追加はしない
+        const rows = buildExcerptRows("付属品", acc);
+        if (rows.length === 0) {
+          wsMain.spliceRows(r, 1);
+          continue;
         }
+        wsMain.spliceRows(r, 1, ...rows.map((x) => x.values));
+        for (let i = 0; i < rows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+        insertedRanges.push({ kind: "付属品", start: r, end: r + rows.length - 1 });
         continue;
       }
 
       if (t.type === "select") {
-        const picked = buildSelectedRows(wsList, selectedLabels, warnings);
-        if (picked.length === 0) { wsMain.spliceRows(r, 1); continue; }
-        wsMain.spliceRows(r, 1, ...picked);
-        for (let i = 0; i < picked.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+        const pickedRows = buildSelectedRows(wsList, selectedLabels, warnings);
+        if (pickedRows.length === 0) {
+          wsMain.spliceRows(r, 1);
+          continue;
+        }
+        wsMain.spliceRows(r, 1, ...pickedRows);
+        for (let i = 0; i < pickedRows.length; i++) applyRowStyle(wsMain, r + i, styleSnap, STYLE_COLS);
+        insertedRanges.push({ kind: "select", start: r, end: r + pickedRows.length - 1 });
       }
     }
 
-    // ③ G列センター揃えを強制
+    // G列センター（14行目以降のみ）
     forceCenterAlignColumnG(wsMain);
 
-    // ④ 不要シート削除
+    // 動作タイトルの太字/下線をExcelでは解除
+    clearBoldUnderlineForOperationTitles(wsMain, insertedRanges);
+
+    // 必要シートのみ
     keepOnlySheets(wb);
 
-    // ⑤ 全シートのフォント統一
+    // フォント統一
     applyGlobalFont(wb);
 
     const outBuf = await wb.xlsx.writeBuffer();
 
-    const fnModel = model || "型番未入力";
-    const fnProduct = product || "製品名未入力";
+    const fnModel = safeFilePart(textModePayload.model || "型番未入力");
+    const fnProduct = safeFilePart(textModePayload.product || "製品名未入力");
     const outName = `検品リスト_${fnModel}_${fnProduct}.xlsx`;
 
     res.setHeader(
@@ -572,7 +558,88 @@ export default async function handler(req, res) {
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
     res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(outName)}`);
+    res.setHeader("x-warnings", encodeURIComponent(JSON.stringify(warnings)));
+
     return res.status(200).send(Buffer.from(outBuf));
+  } catch (e) {
+    console.error("[inspection generate_text] error", e);
+    return res.status(500).json({
+      error: "InspectionError",
+      detail: e?.message ? String(e.message) : "UnknownError",
+    });
+  }
+}
+
+// ===== Handler =====
+export default async function handler(req, res) {
+  // CORS（既存ツールと同型）
+  res.setHeader("Access-Control-Allow-Credentials", true);
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version"
+  );
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  try {
+    const op = (req.query?.op ?? "").toString();
+
+    if (req.method === "GET") {
+      if (op === "select_options") {
+        const options = await getSelectOptionsFromTemplate();
+        return res.status(200).json({ options });
+      }
+      return res.status(400).json({ error: "BadRequest", detail: "Unknown op" });
+    }
+
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "MethodNotAllowed" });
+    }
+
+    // ===== extract_text =====
+    if (op === "extract_text") {
+      const bodyBuf = await readRawBody(req);
+      const body = JSON.parse(bodyBuf.toString("utf-8"));
+
+      const filename = (body.filename ?? "manual.pdf").toString();
+      const text = (body.text ?? "").toString();
+
+      if (!text.trim()) {
+        return res.status(400).json({ error: "BadRequest", detail: "text が空です" });
+      }
+
+      const payload = await extractFromTextToPayload({ filename, text });
+      return res.status(200).json(payload);
+    }
+
+    // ===== generate_text =====
+    if (op === "generate_text") {
+      const bodyBuf = await readRawBody(req);
+      const body = JSON.parse(bodyBuf.toString("utf-8"));
+
+      const filename = (body.filename ?? "manual.pdf").toString();
+      const text = (body.text ?? "").toString(); // ここでは使用しない（将来拡張用）
+      const selectedLabels = Array.isArray(body.selectedLabels) ? body.selectedLabels : [];
+      const aiPicked = Array.isArray(body.aiPicked) ? body.aiPicked : [];
+      const model = (body.model ?? "").toString();
+      const product = (body.product ?? "").toString();
+
+      if (!text.trim()) {
+        return res.status(400).json({ error: "BadRequest", detail: "text が空です" });
+      }
+
+      return await generateExcelFromHeadersOnly(req, res, {
+        filename,
+        selectedLabels,
+        aiPicked,
+        model,
+        product,
+      });
+    }
+
+    return res.status(400).json({ error: "BadRequest", detail: "Unknown op" });
   } catch (e) {
     console.error("[inspection] error", e);
     return res.status(500).json({
