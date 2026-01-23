@@ -14,6 +14,7 @@ const INSPECTION_VERBOSITY = process.env.INSPECTION_VERBOSITY || "low";
 const OUTPUT_KEEP_SHEETS = new Set([
   "検品リスト",
   "検品用画像",
+  "検品ルールブック",
   "検品外観基準",
 ]);
 
@@ -48,12 +49,7 @@ function cellToText(v) {
     if (v instanceof Date) return v.toISOString();
   }
 
-  try {
-    if (v && typeof v === "object") return JSON.stringify(v);
-    return String(v);
-  } catch {
-    return "";
-  }
+  try { return String(v); } catch { return ""; }
 }
 
 function normalizeStringArray(v) {
@@ -228,61 +224,47 @@ function keepOnlySheets(workbook) {
 }
 
 // ===== OpenAI: PDF→抽出 =====
-// ===== OpenAI: PDF/テキスト → 抽出 =====
-async function extractFromSource({ filename, pdfBuffer, pdfText }) {
-  let uploaded = null;
+async function extractFromPdfToArrays({ filename, pdfBuffer }) {
+  const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
 
+  let uploaded = null;
   try {
+    uploaded = await client.files.create({ file: fileObj, purpose: "assistants" });
+
     const sys =
       "あなたは日本語の技術文書から検品リスト用の抜粋を作る担当です。\n" +
-      "次の3区分の検品項目（短文）を抽出してください。\n" +
+      "PDFを読み、次の3区分の検品項目（短文）を抽出してください。\n" +
       "- 仕様\n- 動作\n- 付属品\n\n" +
-      "【動作の禁止ルール】\n" +
-      "- 安全・注意・禁止・中止・危険回避（例：〜しないでください、使用を中止、警告、危険、感電、火災防止 等）は「動作」に入れない。\n" +
-      "  それらは warnings に入れる。\n\n" +
       "【重要】\n" +
       "- 推測しない。根拠があるものだけ。\n" +
       "- 1行は短く。重複は統合。\n" +
       "- 型番/数値/単位は原文どおり。\n" +
       "- 出力はJSONのみ。";
 
-    const content = [
-      { type: "input_text", text: sys + "\n\nJSONで返してください。" },
-    ];
-
-    if (pdfBuffer) {
-      const fileObj = new File([pdfBuffer], filename, { type: "application/pdf" });
-      uploaded = await client.files.create({ file: fileObj, purpose: "assistants" });
-      content.push({ type: "input_file", file_id: uploaded.id });
-    } else {
-      if (!pdfText || !pdfText.trim()) {
-        throw new Error("BadRequest: pdfText is required");
-      }
-      content.push({
-        type: "input_text",
-        text: "以下はPDFから抽出したテキストです。\n\n" + pdfText,
-      });
-    }
-
-    content.push({
-      type: "input_text",
-      text:
-        "出力JSONスキーマ:\n" +
-        "{\n" +
-        '  \"model\": string,\n' +
-        '  \"product\": string,\n' +
-        '  \"specText\": string[],\n' +
-        '  \"opText\": string[],\n' +
-        '  \"accText\": string[],\n' +
-        '  \"warnings\": string[]\n' +
-        "}\n",
-    });
-
     const response = await client.responses.create({
       model: INSPECTION_MODEL,
       reasoning: { effort: INSPECTION_REASONING },
       text: { verbosity: INSPECTION_VERBOSITY },
-      input: [{ role: "user", content }],
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: sys + "\n\nJSONで返してください。" },
+            { type: "input_file", file_id: uploaded.id },
+            {
+              type: "input_text",
+              text:
+                "出力JSONスキーマ:\n" +
+                "{\n" +
+                '  "specText": string[],\n' +
+                '  "opText": string[],\n' +
+                '  "accText": string[],\n' +
+                '  "warnings": string[]\n' +
+                "}\n",
+            },
+          ],
+        },
+      ],
     });
 
     const text = (response.output_text || "").trim();
@@ -294,36 +276,35 @@ async function extractFromSource({ filename, pdfBuffer, pdfText }) {
       const first = text.indexOf("{");
       const last = text.lastIndexOf("}");
       if (first >= 0 && last > first) obj = JSON.parse(text.slice(first, last + 1));
-      else throw new Error("AIResponseError: JSONの解析に失敗しました");
+      else throw new Error("AIParseError: JSON解析に失敗");
     }
 
-    const model = typeof obj.model === "string" ? obj.model.trim() : "";
-    const product = typeof obj.product === "string" ? obj.product.trim() : "";
-
-    const specText = Array.isArray(obj.specText) ? obj.specText.map((x) => String(x).trim()).filter(Boolean) : [];
-    let opText = Array.isArray(obj.opText) ? obj.opText.map((x) => String(x).trim()).filter(Boolean) : [];
-    let accText = Array.isArray(obj.accText) ? obj.accText.map((x) => String(x).trim()).filter(Boolean) : [];
-
-    // 動作から安全系を除外（保険：モデルが混ぜた場合）
-    const safetyRe = /(しないでください|使用を中止|警告|危険|感電|火災|やけど|発煙|発熱|禁止|注意|誤飲|けが|事故|破損|乳幼児)/;
-    opText = opText.filter((s) => !safetyRe.test(s));
-
-    // 付属品：取扱説明書は必ず候補に出す
-    if (!accText.some((s) => s.includes("取扱説明書"))) {
-      accText.unshift("取扱説明書");
-    }
-
-    const warnings = Array.isArray(obj.warnings) ? obj.warnings.map((x) => String(x).trim()).filter(Boolean) : [];
-
-    return { model, product, specText, opText, accText, warnings };
+    return {
+      specText: normalizeStringArray(obj.specText),
+      opText: normalizeStringArray(obj.opText),
+      accText: normalizeStringArray(obj.accText),
+    };
   } finally {
-    if (uploaded?.id) {
-      // best-effort cleanup（失敗しても無視）
-      try { await client.files.del(uploaded.id); } catch {}
-    }
+    try { if (uploaded?.id) await client.files.del(uploaded.id); } catch {}
   }
 }
-async function handler(req, res) {
+
+function splitAiPicked(aiPicked) {
+  const spec = [];
+  const op = [];
+  const acc = [];
+  for (const it of aiPicked) {
+    const kind = (it?.kind ?? "").toString().trim();
+    const text = (it?.text ?? "").toString().trim();
+    if (!text) continue;
+    if (kind === "仕様") spec.push(text);
+    else if (kind === "動作") op.push(text);
+    else if (kind === "付属品") acc.push(text);
+  }
+  return { specText: spec, opText: op, accText: acc };
+}
+
+export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST");
@@ -357,38 +338,18 @@ async function handler(req, res) {
     if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
 
     const ct = String(req.headers["content-type"] || "");
-    const isPdf = ct.includes("application/pdf");
-    const isJson = ct.includes("application/json");
-    if (!isPdf && !isJson) {
-      return res.status(400).json({ error: "BadRequest", detail: "Content-Type は application/pdf または application/json" });
+    if (!ct.includes("application/pdf")) {
+      return res.status(400).json({ error: "BadRequest", detail: "Content-Type は application/pdf" });
     }
 
-    const rawBody = await readRawBody(req);
-    let pdfBuffer = null;
-    let pdfText = "";
-    let pdfFilename = "manual.pdf";
-
-    if (isJson) {
-      try {
-        const j = JSON.parse(rawBody.toString("utf-8") || "{}");
-        pdfText = typeof j.pdfText === "string" ? j.pdfText : "";
-        if (typeof j.filename === "string" && j.filename.trim()) pdfFilename = j.filename.trim();
-      } catch {
-        return res.status(400).json({ error: "BadRequest", detail: "JSONが不正です" });
-      }
-      if (!pdfText.trim()) {
-        return res.status(400).json({ error: "BadRequest", detail: "pdfText is required" });
-      }
-    } else {
-      pdfBuffer = rawBody;
-      pdfFilename = req.headers["x-filename"]
-        ? decodeURIComponent(String(req.headers["x-filename"]))
-        : "manual.pdf";
-    }
+    const pdfBuffer = await readRawBody(req);
+    const pdfFilename = req.headers["x-filename"]
+      ? decodeURIComponent(String(req.headers["x-filename"]))
+      : "manual.pdf";
 
     // POST: 抽出
     if (op === "extract") {
-      const { specText, opText, accText } = await extractFromSource({
+      const { specText, opText, accText } = await extractFromPdfToArrays({
         filename: pdfFilename,
         pdfBuffer,
       });
