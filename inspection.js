@@ -1,5 +1,5 @@
 // inspection.js（全文）
-console.log("[inspection] front version: v7");
+console.log("[inspection] front version: v8");
 
 let pdfFile = null;
 let busy = false;
@@ -105,7 +105,7 @@ function setPdf(file) {
   if (genBtn) genBtn.disabled = !pdfFile || busy;
 }
 
-async function loadSelectOptions() {
+async async function loadSelectOptions() {
   const box = $("selectListBox");
   if (!box) return;
 
