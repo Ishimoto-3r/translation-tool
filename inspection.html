@@ -139,13 +139,13 @@
         </div>
       </div>
 
-      <!-- AI抽出（PDF読み取り + 型番/製品名入力欄をここへ移動） -->
+      <!-- AI抽出 -->
       <div class="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div class="text-sm font-bold text-slate-800">PDF読み取り（AI抽出）</div>
             <div class="mt-1 text-xs text-slate-600">
-              抽出結果を確認し、必要なものだけチェックして検品リストに反映します（初期は未チェック）。
+              抽出結果を確認し、必要なものだけチェックして検品リストに反映します。
             </div>
           </div>
 
@@ -156,7 +156,7 @@
           </button>
         </div>
 
-        <!-- ★ 型番/製品名（未入力ならPDF抽出で自動入力） -->
+        <!-- 型番/製品名（未入力ならPDF抽出で自動入力） -->
         <div class="mt-4 grid gap-4 md:grid-cols-2">
           <label class="block">
             <div class="text-sm font-semibold text-slate-700">型番（未入力ならPDFから自動取得）</div>
@@ -183,7 +183,7 @@
           </div>
 
           <div class="rounded-xl border border-slate-200 bg-white p-4">
-            <div class="text-sm font-semibold text-slate-700">付属品</div>
+            <div class="text-sm font-semibold text-slate-700">付属品（初期は全チェック）</div>
             <div id="aiAccBox" class="mt-2 text-sm"></div>
           </div>
         </div>
