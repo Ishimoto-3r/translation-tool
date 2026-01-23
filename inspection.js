@@ -1,5 +1,6 @@
 // inspection.js（全文置き換え）
 let pdfFile = null;
+const MAX_DD_BYTES = 4 * 1024 * 1024; // 4MB（D&D推奨上限）
 
 let selectionItems = []; // SharePointの「選択リスト」C列（表示用）
 let extracted = {
@@ -34,7 +35,7 @@ function setBusy(on, title = "処理中", step = "", msg = "処理していま�
 
   // 入力をまとめて無効化（二重押し防止）
   const disableIds = [
-    "pdfInput","dropzone","btnExtract","btnGenerate",
+    "pdfInput","dropzone","pdfUrlInput","btnExtract","btnGenerate",
     "lblLiion","lblLegal","modelInput","productInput"
   ];
   for (const id of disableIds) {
@@ -116,10 +117,31 @@ async function ensurePdfJsReady() {
   throw lastErr || new Error("PDF.js load failed");
 }
 
-async function extractPdfTextByPdfJs(file) {
+async function extractPdfTextByPdfJsData(arrayBuffer) {
   await ensurePdfJsReady();
 
-  const buf = await file.arrayBuffer();
+  const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const pdf = await loadingTask.promise;
+
+  const pageMax = pdf.numPages || 1;
+  const parts = [];
+  for (let p = 1; p <= pageMax; p++) {
+    const stepEl = document.getElementById("overlayStep");
+    if (stepEl) stepEl.textContent = `PDF解析 ${p}/${pageMax}`;
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent({ normalizeWhitespace: true });
+    const line = (tc.items || [])
+      .map((it) => (it && it.str ? it.str : ""))
+      .filter(Boolean)
+      .join(" ");
+    if (line) parts.push(line);
+  }
+  return parts.join("\n");
+}
+
+async function extractPdfTextFromArrayBuffer(buf) {
+  await ensurePdfJsReady();
+
   const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(buf) });
   const pdf = await loadingTask.promise;
 
@@ -138,16 +160,30 @@ async function extractPdfTextByPdfJs(file) {
   }
   return parts.join("\n");
 }
+
+async function extractPdfTextByPdfJs(file) {
+  const buf = await file.arrayBuffer();
+  return await extractPdfTextFromArrayBuffer(buf);
+}
 // --- /PDF.js ---
 
 function setPdfStatus() {
-  if (!pdfFile) {
-    $("pdfStatus").textContent = "未選択";
-    $("pdfNameHint").textContent = "※PDFをAI抽出に使用します";
+  const url = ($("pdfUrlInput") && $("pdfUrlInput").value ? $("pdfUrlInput").value.trim() : "");
+
+  if (pdfFile) {
+    $("pdfStatus").textContent = `選択中: ${pdfFile.name} (${Math.round(pdfFile.size/1024)} KB)`;
+    $("pdfNameHint").textContent = pdfFile.name;
     return;
   }
-  $("pdfStatus").textContent = `選択中: ${pdfFile.name} (${Math.round(pdfFile.size/1024)} KB)`;
-  $("pdfNameHint").textContent = pdfFile.name;
+
+  if (url) {
+    $("pdfStatus").textContent = `URL指定: ${url}`;
+    $("pdfNameHint").textContent = "※URLのPDFをAI抽出に使用します";
+    return;
+  }
+
+  $("pdfStatus").textContent = "未選択";
+  $("pdfNameHint").textContent = "※PDFをAI抽出に使用します";
 }
 
 function renderCheckboxList(containerId, items, { defaultChecked = false, dataAttr = {} } = {}) {
@@ -400,30 +436,66 @@ async function loadMeta() {
   }
 }
 
+
 async function runExtract() {
   clearError();
-  if (!pdfFile) {
-    showError("PDFが未選択です。");
+
+  const url = ($("pdfUrlInput") && $("pdfUrlInput").value ? $("pdfUrlInput").value.trim() : "");
+
+  // D&Dのファイルが大きすぎる場合は、処理を止めてURL案内
+  if (pdfFile && pdfFile.size > MAX_DD_BYTES) {
+    pdfFile = null;
+    $("pdfInput").value = "";
+    setPdfStatus();
+    showError('このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください');
+    $("pdfUrlInput").focus();
+    return;
+  }
+
+  if (!pdfFile && !url) {
+    showError("PDFが未選択です。（4MB超のPDFはURL欄に貼り付けてください）");
     return;
   }
 
   try {
     setBusy(true, "AI抽出中", "準備", "PDFから仕様/動作/付属品/型番/製品名を抽出しています。", "PDF解析→AI抽出の順で実行します。");
-    $("overlayBar").style.width = "25%";
+    $("overlayBar").style.width = "20%";
 
-    // ブラウザでPDFテキスト抽出（413回避）
-    $("overlayStep").textContent = "PDF解析 0/0";
-    const pdfText = await extractPdfTextInBrowser(pdfFile);
+    let pdfText = "";
+    let fileName = "";
+
+    if (pdfFile) {
+      // ブラウザでPDFテキスト抽出（413回避）
+      $("overlayStep").textContent = "PDF解析";
+      const buf = await pdfFile.arrayBuffer();
+      pdfText = await extractPdfTextFromArrayBuffer(buf);
+      fileName = pdfFile.name;
+    } else {
+      // URLからPDF取得 → テキスト抽出
+      $("overlayStep").textContent = "URL取得";
+      const res = await fetch(url, { method: "GET" });
+      if (!res.ok) throw new Error(`URL取得に失敗しました: HTTP ${res.status}`);
+
+      const ct = (res.headers.get("content-type") || "").toLowerCase();
+      if (!ct.includes("pdf")) {
+        throw new Error(`Content-TypeがPDFではありません: ${ct || "(unknown)"}`);
+      }
+
+      const buf = await res.arrayBuffer();
+      $("overlayStep").textContent = "PDF解析";
+      pdfText = await extractPdfTextFromArrayBuffer(buf);
+      fileName = (url.split("?")[0].split("#")[0].split("/").pop() || "from_url.pdf");
+    }
+
     $("overlayBar").style.width = "55%";
 
-    // 未入力ならPDF抽出結果で埋める（API側でも補完するが、ここで明示）
     const model = $("modelInput").value.trim();
     const productName = $("productInput").value.trim();
 
     $("overlayStep").textContent = "AI抽出";
     const r = await api("extract", {
       pdfText,
-      fileName: pdfFile.name,
+      fileName,
       modelHint: model || "",
       productHint: productName || ""
     });
@@ -515,6 +587,19 @@ async function runGenerate() {
 function initPdfDrop() {
   const dz = $("dropzone");
   const input = $("pdfInput");
+  const urlInput = $("pdfUrlInput");
+
+  if (urlInput) {
+    urlInput.addEventListener("input", () => {
+      const v = urlInput.value.trim();
+      if (v) {
+        // URLが入ったらファイル選択は解除
+        pdfFile = null;
+        input.value = "";
+      }
+      setPdfStatus();
+    });
+  }
 
   dz.addEventListener("click", () => input.click());
 
@@ -528,7 +613,20 @@ function initPdfDrop() {
     dz.classList.remove("border-blue-400");
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (f && f.type === "application/pdf") {
+      // 容量が大きい場合は止めてURL案内（要件）
+      if (f.size > MAX_DD_BYTES) {
+        pdfFile = null;
+        input.value = "";
+        setPdfStatus();
+        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
+        const u = $("pdfUrlInput");
+        if (u) u.focus();
+        return;
+      }
       pdfFile = f;
+      // PDF選択時はURLをクリア（混在防止）
+      const u = $("pdfUrlInput");
+      if (u) u.value = "";
       setPdfStatus();
     } else {
       showError("PDFファイルを指定してください。");
@@ -538,7 +636,18 @@ function initPdfDrop() {
   input.addEventListener("change", () => {
     const f = input.files && input.files[0];
     if (f && f.type === "application/pdf") {
+      if (f.size > MAX_DD_BYTES) {
+        pdfFile = null;
+        input.value = "";
+        setPdfStatus();
+        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
+        const u = $("pdfUrlInput");
+        if (u) u.focus();
+        return;
+      }
       pdfFile = f;
+      const u = $("pdfUrlInput");
+      if (u) u.value = "";
       setPdfStatus();
     } else if (f) {
       showError("PDFファイルを指定してください。");
@@ -559,4 +668,3 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   await loadMeta();
 });
-
