@@ -5,10 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>検品リスト作成</title>
 
-  <!-- 既存と同じ：Tailwind CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- 他ツールと同じナビ（見た目統一） -->
   <style>
     body{
       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
@@ -16,7 +14,7 @@
       padding:0;
     }
 
-    /* ===== Top Nav ===== */
+    /* ===== Top Nav（他ツール風） ===== */
     .tool-nav{
       position: sticky;
       top: 0;
@@ -59,6 +57,7 @@
       gap: 8px;
       align-items:center;
       flex-wrap: wrap;
+      justify-content:center;
     }
     .tool-nav a{
       color:#f3f4f6;
@@ -76,7 +75,7 @@
     .tool-nav a:hover{ background: rgba(255,255,255,.12); }
     .tool-nav a:active{ transform: translateY(1px); }
     .tool-nav a.active{ background:#172554; color:#fff; }
-    .tool-nav .nav-heading::before{ content: "⭐"; opacity: .9; margin:0; }
+    .tool-nav .nav-heading::before{ content: "⭐"; opacity: .9; }
 
     /* 内部スクロール禁止（全体スクロールのみ） */
     .no-inner-scroll{ overflow: visible !important; max-height: none !important; }
@@ -88,7 +87,7 @@
 
 <body class="bg-slate-100">
 
-  <!-- ===== NAV（他ツールと同じ構造） ===== -->
+  <!-- ===== NAV ===== -->
   <nav class="tool-nav">
     <div class="nav-groupbox">
       <div class="nav-heading">翻訳</div>
@@ -105,24 +104,22 @@
       <div class="nav-heading">その他</div>
       <div class="nav-links">
         <a href="/report.html">修理レポート</a>
+        <a href="/kensho.html">検証項目作成</a>
         <a href="/manual.html">原稿作成（AIチェック）</a>
         <a href="/prompt.html">単発プロンプト</a>
-        <a href="/kensho.html">検証項目作成</a>
-
-        <!-- ★ 検品リスト作成（このページを active） -->
         <a href="/inspection.html" class="active">検品リスト作成</a>
       </div>
     </div>
   </nav>
 
   <main class="max-w-5xl mx-auto px-4 py-6">
-    <div class="bg-white rounded-2xl shadow p-6 space-y-6">
+    <div class="bg-white rounded-2xl shadow p-6 space-y-8">
 
       <div class="flex items-center justify-between gap-4 flex-wrap">
         <h1 class="text-xl font-bold">検品リスト作成ツール</h1>
       </div>
 
-      <!-- ===== PDF選択（D&D + クリック） ===== -->
+      <!-- ===== PDF選択 ===== -->
       <section class="space-y-3">
         <div class="text-sm font-semibold">PDF（ドラッグ＆ドロップ / クリック選択）</div>
 
@@ -135,22 +132,40 @@
             <div id="fileName" class="text-xs text-slate-500">未選択</div>
           </div>
 
-          <!-- inputは hidden（label クリックで開く） -->
           <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
         </label>
-
-        <div class="text-xs text-slate-500">
-          ※ PDFを読み取って「仕様/動作/付属品」を抽出し、必要な項目のみチェックしてExcelに反映します。
-        </div>
       </section>
 
-      <!-- ===== PDF読み取り（AI抽出）＋ 型番/製品名（ここに配置） ===== -->
+      <!-- ===== ラベル選択（復活） ===== -->
+      <section class="space-y-3">
+        <div class="text-sm font-semibold">ラベル選択</div>
+
+        <div class="flex flex-wrap gap-6 text-sm">
+          <label class="flex items-center gap-2">
+            <input id="lblLiion" type="checkbox" class="h-4 w-4" checked />
+            リチウムイオン電池
+          </label>
+          <label class="flex items-center gap-2">
+            <input id="lblLegal" type="checkbox" class="h-4 w-4" checked />
+            法的対象(PSE/無線)
+          </label>
+        </div>
+
+        <div class="text-xs text-slate-600">
+          ※ 選択リストは「検品項目リスト」シートのA列が「選択リスト」の行のC列を表示します。不要なものだけチェックを外します（初期は全チェック）。
+        </div>
+
+        <!-- 選択リスト表示（内部スクロールなし） -->
+        <div id="selectList" class="no-inner-scroll space-y-2"></div>
+      </section>
+
+      <!-- ===== PDF読み取り（AI抽出） ===== -->
       <section class="space-y-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div class="text-sm font-semibold">PDF読み取り（AI抽出）</div>
             <div class="text-xs text-slate-600 mt-1">
-              抽出結果は初期未チェックです。必要なものだけチェックしてください。
+              抽出結果は初期未チェックです。必要なものだけチェックしてExcelに反映します。
             </div>
           </div>
 
@@ -163,6 +178,7 @@
           </button>
         </div>
 
+        <!-- 型番/製品名（ここに配置） -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="space-y-1">
             <label class="text-sm font-semibold">型番（未入力ならPDFから自動取得）</label>
@@ -203,14 +219,13 @@
           検品リストExcel生成
         </button>
 
-        <!-- 進捗表示（inspection.js側で表示/非表示してOK） -->
         <div id="progress" class="text-sm text-slate-600 hidden">処理中…</div>
       </section>
 
     </div>
   </main>
 
-  <!-- ===== D&Dを確実に動かす（HTML側で最低限実装） ===== -->
+  <!-- ===== D&Dを確実に動かす（HTML側で実装） ===== -->
   <script>
     (function(){
       const dz = document.getElementById('dropZone');
@@ -218,15 +233,15 @@
       const fileName = document.getElementById('fileName');
 
       function setName(file){
-        fileName.textContent = file ? `${file.name} (${Math.round(file.size/1024)} KB)` : '未選択';
+        fileName.textContent = file
+          ? `${file.name} (${Math.round(file.size/1024)} KB)`
+          : '未選択';
       }
 
-      // クリック選択
       input.addEventListener('change', () => {
         setName(input.files && input.files[0]);
       });
 
-      // D&D
       ['dragenter','dragover'].forEach(evt => {
         dz.addEventListener(evt, (e) => {
           e.preventDefault();
@@ -258,7 +273,7 @@
     })();
   </script>
 
-  <!-- ✅ pdf.js は cdnjs を使わない（inspection.js 内で ESM import） -->
+  <!-- ✅ pdf.js は inspection.js 内で ESM import（cdnjsは禁止） -->
   <script type="module" src="/inspection.js"></script>
 </body>
 </html>
