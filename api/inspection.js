@@ -144,16 +144,18 @@ function applyGlobalFont(workbook) {
   }
 }
 
-// ③ G列をセンター揃えに強制（途中崩れ対策）
 function forceCenterAlignColumnG(ws) {
   const col = 7; // G
   const max = ws.rowCount || 0;
-  for (let r = 1; r <= max; r++) {
+
+  // 14行目以降のみセンター強制（13行目まで＝ヘッダー/基本情報は元のまま）
+  for (let r = 14; r <= max; r++) {
     const cell = ws.getCell(r, col);
     const cur = cell.alignment || {};
     cell.alignment = { ...cur, horizontal: "center", vertical: "middle" };
   }
 }
+
 
 // ④ 必要シート以外削除
 function keepOnlySheets(workbook) {
