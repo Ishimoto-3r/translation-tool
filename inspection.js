@@ -1,9 +1,9 @@
 /* =========================================================
    inspection.js（全文）
-   - pdf.js は ESM import（cdnjs 不使用）
-   - 起動時に SharePoint由来の「選択リスト」を取得して表示（全チェック）
-   - PDF抽出（仕様/動作/付属品）は未チェック、付属品は全チェック
-   - 進捗表示 + 二重押し防止（ロック）
+   - 選択リスト：/api/inspection?op=select_options から取得して表示（全チェック）
+   - [object Object] 防止：返り値が string / object 混在でも必ず文字列化して描画
+   - pdf.js：ESM import（cdnjs 不使用）
+   - 進捗表示 + 二重押し防止（UIロック）
    ========================================================= */
 
 /* ===== pdf.js (ESM) loader ===== */
@@ -32,6 +32,7 @@ const $ = (id) => document.getElementById(id);
 
 const pdfInput = $("pdfInput");
 const fileName = $("fileName");
+
 const btnExtract = $("btnExtract");
 const btnGenerate = $("btnGenerate");
 const progress = $("progress");
@@ -55,25 +56,17 @@ let isBusy = false;
 function setBusy(on, msg = "") {
   isBusy = on;
 
-  // 画面操作禁止（最低限）
   pdfInput.disabled = on;
   btnExtract.disabled = on;
   btnGenerate.disabled = on;
+
   if (lblLiion) lblLiion.disabled = on;
   if (lblLegal) lblLegal.disabled = on;
 
-  // 選択リストのチェック操作禁止
-  if (selectListBox) {
-    selectListBox.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      cb.disabled = on;
-    });
-  }
-  // 抽出結果のチェック操作禁止
-  [specBox, opBox, accBox].forEach((box) => {
+  // リスト操作も禁止
+  [selectListBox, specBox, opBox, accBox].forEach((box) => {
     if (!box) return;
-    box.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      cb.disabled = on;
-    });
+    box.querySelectorAll("input[type=checkbox]").forEach((cb) => (cb.disabled = on));
   });
 
   if (!progress) return;
@@ -86,12 +79,10 @@ function setBusy(on, msg = "") {
   }
 }
 
-/* ===== File select ===== */
-pdfInput?.addEventListener("change", () => {
+/* ===== file select ===== */
+pdfInput.addEventListener("change", () => {
   currentPdfFile = pdfInput.files && pdfInput.files[0] ? pdfInput.files[0] : null;
-  if (fileName) {
-    fileName.textContent = currentPdfFile ? currentPdfFile.name : "未選択";
-  }
+  if (fileName) fileName.textContent = currentPdfFile ? currentPdfFile.name : "未選択";
 });
 
 /* ===== PDF text extraction ===== */
@@ -100,8 +91,7 @@ async function extractPdfTextInBrowser(file) {
   const pdfjsLib = await ensurePdfjs();
 
   const buffer = await file.arrayBuffer();
-  const loadingTask = pdfjsLib.getDocument({ data: buffer });
-  const pdf = await loadingTask.promise;
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
 
   let text = "";
   for (let p = 1; p <= pdf.numPages; p++) {
@@ -112,19 +102,46 @@ async function extractPdfTextInBrowser(file) {
   return text;
 }
 
-/* ===== rendering helpers ===== */
+/* ===== normalize to string (★ここが [object Object] 根絶) ===== */
+function optionToText(x) {
+  if (x == null) return "";
+  if (typeof x === "string") return x.trim();
+  if (typeof x === "number" || typeof x === "boolean") return String(x);
+
+  // よくあるキー候補を優先
+  const candidates = ["text", "label", "name", "value", "title", "item"];
+  for (const k of candidates) {
+    if (x && typeof x[k] === "string" && x[k].trim()) return x[k].trim();
+  }
+  // {c:"xxx"} のようなケース
+  if (x && typeof x.c === "string" && x.c.trim()) return x.c.trim();
+
+  // 最後の保険：JSON化（ただし表示用なので短く）
+  try {
+    const s = JSON.stringify(x);
+    return s && s !== "{}" ? s : "";
+  } catch {
+    return "";
+  }
+}
+
+/* ===== rendering ===== */
 function clearBox(el) {
   if (el) el.innerHTML = "";
 }
 
-function renderCheckboxList(container, items, defaultChecked) {
+function renderCheckboxList(container, rawItems, defaultChecked) {
   clearBox(container);
   if (!container) return;
 
-  const arr = Array.isArray(items) ? items : [];
-  arr.forEach((labelText) => {
-    const text = (labelText ?? "").toString().trim();
-    if (!text) return;
+  const items = Array.isArray(rawItems) ? rawItems : [];
+  const seen = new Set();
+
+  for (const raw of items) {
+    const text = optionToText(raw);
+    if (!text) continue;
+    if (seen.has(text)) continue;
+    seen.add(text);
 
     const label = document.createElement("label");
     label.className = "flex items-start gap-2 text-sm";
@@ -139,9 +156,12 @@ function renderCheckboxList(container, items, defaultChecked) {
 
     label.appendChild(cb);
     label.appendChild(span);
-
     container.appendChild(label);
-  });
+  }
+
+  if (container.children.length === 0) {
+    container.innerHTML = '<div class="text-sm text-slate-500">（表示対象なし）</div>';
+  }
 }
 
 function collectCheckedTexts(container) {
@@ -149,38 +169,37 @@ function collectCheckedTexts(container) {
   const out = [];
   container.querySelectorAll("label").forEach((label) => {
     const cb = label.querySelector("input[type=checkbox]");
-    if (!cb) return;
-    if (!cb.checked) return;
-    const text = label.textContent.trim();
+    if (!cb || !cb.checked) return;
+
+    // span のみを拾う（label.textContent だと余計な空白が混ざる）
+    const span = label.querySelector("span");
+    const text = (span?.textContent || "").trim();
     if (text) out.push(text);
   });
   return out;
 }
 
-/* ===== SharePoint由来：選択リストの取得/描画 ===== */
+/* ===== select options load (SharePoint) ===== */
 async function loadSelectOptions() {
   if (!selectListBox) return;
 
-  // placeholder
-  selectListBox.innerHTML =
-    '<div class="text-sm text-slate-500">選択リストを読み込み中…</div>';
+  selectListBox.innerHTML = '<div class="text-sm text-slate-500">選択リストを読み込み中…</div>';
 
   const res = await fetch("/api/inspection?op=select_options", { method: "GET" });
   if (!res.ok) {
-    selectListBox.innerHTML =
-      '<div class="text-sm text-red-600">選択リストの取得に失敗しました</div>';
+    selectListBox.innerHTML = '<div class="text-sm text-red-600">選択リストの取得に失敗しました</div>';
     return;
   }
 
   const data = await res.json();
   const options = Array.isArray(data.options) ? data.options : [];
 
-  // 全チェック（ユーザー要件）
+  // 初期は全チェック
   renderCheckboxList(selectListBox, options, true);
 }
 
-/* ===== Extract button ===== */
-btnExtract?.addEventListener("click", async () => {
+/* ===== Extract ===== */
+btnExtract.addEventListener("click", async () => {
   if (isBusy) return;
 
   try {
@@ -193,31 +212,27 @@ btnExtract?.addEventListener("click", async () => {
 
     setBusy(true, "AIで抽出中…");
 
-    // 413回避：PDFファイルは送らない。抽出済みテキストのみ送る
     const r = await fetch("/api/inspection?op=extract_text", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        filename: currentPdfFile.name,
-        text: pdfText
-      })
+      body: JSON.stringify({ filename: currentPdfFile.name, text: pdfText }),
     });
 
     if (!r.ok) {
       const t = await r.text().catch(() => "");
-      throw new Error(`AI抽出に失敗しました ${t ? "(" + t + ")" : ""}`);
+      throw new Error(`AI抽出に失敗しました${t ? " (" + t + ")" : ""}`);
     }
 
     const obj = await r.json();
 
-    // 型番/製品名：未入力なら自動反映（ユーザー要件）
+    // 型番/製品名：未入力なら自動反映
     if (modelInput && !modelInput.value.trim() && obj.model) modelInput.value = obj.model;
     if (productInput && !productInput.value.trim() && obj.product) productInput.value = obj.product;
 
-    // 抽出結果
-    renderCheckboxList(specBox, obj.specText || [], false); // 初期未チェック
-    renderCheckboxList(opBox, obj.opText || [], false);     // 初期未チェック
-    renderCheckboxList(accBox, obj.accText || [], true);    // 付属品は全チェック（要件）
+    // 抽出結果：仕様/動作は未チェック、付属品は全チェック
+    renderCheckboxList(specBox, obj.specText || [], false);
+    renderCheckboxList(opBox, obj.opText || [], false);
+    renderCheckboxList(accBox, obj.accText || [], true);
   } catch (e) {
     console.error(e);
     alert(e.message || "AI抽出に失敗しました");
@@ -226,8 +241,8 @@ btnExtract?.addEventListener("click", async () => {
   }
 });
 
-/* ===== Generate button ===== */
-btnGenerate?.addEventListener("click", async () => {
+/* ===== Generate ===== */
+btnGenerate.addEventListener("click", async () => {
   if (isBusy) return;
 
   try {
@@ -236,19 +251,18 @@ btnGenerate?.addEventListener("click", async () => {
     currentPdfFile = pdfInput.files && pdfInput.files[0] ? pdfInput.files[0] : currentPdfFile;
     if (!currentPdfFile) throw new Error("PDFを選択してください");
 
-    // generate_text の仕様上 text が必須（バックエンドがチェックしているため）
+    // サーバ側が text 必須（413回避のためPDF本体は送らず、ブラウザ抽出テキストを送る）
     const pdfText = await extractPdfTextInBrowser(currentPdfFile);
 
-    // ラベル2種（固定）
+    // 固定ラベル
     const selectedLabels = [];
     if (lblLiion?.checked) selectedLabels.push("リチウムイオン電池");
     if (lblLegal?.checked) selectedLabels.push("法的対象(PSE/無線)");
 
-    // SharePoint由来「選択リスト」（全チェック→不要のみ外す）
-    const selectPicked = collectCheckedTexts(selectListBox);
-    selectedLabels.push(...selectPicked);
+    // SharePoint由来の選択リスト（チェックされたもののみ）
+    selectedLabels.push(...collectCheckedTexts(selectListBox));
 
-    // 抽出結果（チェックされたものだけ）
+    // 抽出結果（チェックされたもののみ）
     const aiPicked = [
       ...collectCheckedTexts(specBox).map((t) => ({ kind: "仕様", text: t, isTitle: false })),
       ...collectCheckedTexts(opBox).map((t) => ({ kind: "動作", text: t, isTitle: false })),
@@ -261,29 +275,25 @@ btnGenerate?.addEventListener("click", async () => {
       selectedLabels,
       aiPicked,
       model: modelInput?.value || "",
-      product: productInput?.value || ""
+      product: productInput?.value || "",
     };
 
     const r = await fetch("/api/inspection?op=generate_text", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(payload),
     });
 
     if (!r.ok) {
       const t = await r.text().catch(() => "");
-      throw new Error(`生成に失敗しました ${t ? "(" + t + ")" : ""}`);
+      throw new Error(`生成に失敗しました${t ? " (" + t + ")" : ""}`);
     }
 
     const blob = await r.blob();
-
-    // ファイル名はサーバ側で Content-Disposition が付く想定
-    // ただし付かない場合の保険
-    const fallback = "inspection.xlsx";
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = fallback;
+    a.download = "inspection.xlsx"; // Content-Disposition が効く想定。保険で付与。
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -303,8 +313,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   } catch (e) {
     console.error(e);
     if (selectListBox) {
-      selectListBox.innerHTML =
-        '<div class="text-sm text-red-600">選択リストの取得に失敗しました</div>';
+      selectListBox.innerHTML = '<div class="text-sm text-red-600">選択リストの取得に失敗しました</div>';
     }
   }
 });
