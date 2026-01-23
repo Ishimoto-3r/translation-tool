@@ -136,7 +136,7 @@
         </label>
       </section>
 
-      <!-- ===== ラベル選択（復活） ===== -->
+      <!-- ===== ラベル選択 ===== -->
       <section class="space-y-3">
         <div class="text-sm font-semibold">ラベル選択</div>
 
@@ -152,20 +152,20 @@
         </div>
 
         <div class="text-xs text-slate-600">
-          ※ 選択リストは「検品項目リスト」シートのA列が「選択リスト」の行のC列を表示します。不要なものだけチェックを外します（初期は全チェック）。
+          ※ 下の選択リストは SharePoint（テンプレExcel）から取得します。不要なものだけチェックを外します（初期は全チェック）。
         </div>
 
-        <!-- 選択リスト表示（内部スクロールなし） -->
-        <div id="selectList" class="no-inner-scroll space-y-2"></div>
+        <!-- ✅ 枠を復活 -->
+        <div id="selectList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-slate-50 p-4"></div>
       </section>
 
       <!-- ===== PDF読み取り（AI抽出） ===== -->
-      <section class="space-y-4 bg-slate-50 border border-slate-200 rounded-xl p-4">
+      <section class="space-y-4 border border-slate-200 rounded-xl p-4 bg-slate-50">
         <div class="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div class="text-sm font-semibold">PDF読み取り（AI抽出）</div>
             <div class="text-xs text-slate-600 mt-1">
-              抽出結果は初期未チェックです。必要なものだけチェックしてExcelに反映します。
+              抽出結果は初期未チェックです。必要なものだけチェックしてExcelに反映します。付属品は初期全チェックです。
             </div>
           </div>
 
@@ -178,7 +178,6 @@
           </button>
         </div>
 
-        <!-- 型番/製品名（ここに配置） -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="space-y-1">
             <label class="text-sm font-semibold">型番（未入力ならPDFから自動取得）</label>
@@ -190,21 +189,21 @@
           </div>
         </div>
 
-        <!-- 抽出結果（1列・内部スクロールなし） -->
+        <!-- ✅ 各リストに枠を付ける -->
         <div class="space-y-6">
           <div class="space-y-2">
             <div class="text-sm font-semibold">仕様</div>
-            <div id="specList" class="no-inner-scroll space-y-2"></div>
+            <div id="specList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-white p-4"></div>
           </div>
 
           <div class="space-y-2">
             <div class="text-sm font-semibold">動作</div>
-            <div id="opList" class="no-inner-scroll space-y-2"></div>
+            <div id="opList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-white p-4"></div>
           </div>
 
           <div class="space-y-2">
             <div class="text-sm font-semibold">付属品</div>
-            <div id="accList" class="no-inner-scroll space-y-2"></div>
+            <div id="accList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-white p-4"></div>
           </div>
         </div>
       </section>
@@ -225,7 +224,7 @@
     </div>
   </main>
 
-  <!-- ===== D&Dを確実に動かす（HTML側で実装） ===== -->
+  <!-- ===== D&D（確実に動く版） ===== -->
   <script>
     (function(){
       const dz = document.getElementById('dropZone');
@@ -238,9 +237,7 @@
           : '未選択';
       }
 
-      input.addEventListener('change', () => {
-        setName(input.files && input.files[0]);
-      });
+      input.addEventListener('change', () => setName(input.files && input.files[0]));
 
       ['dragenter','dragover'].forEach(evt => {
         dz.addEventListener(evt, (e) => {
@@ -249,7 +246,6 @@
           dz.classList.add('dz-over');
         });
       });
-
       ['dragleave','drop'].forEach(evt => {
         dz.addEventListener(evt, (e) => {
           e.preventDefault();
@@ -273,7 +269,7 @@
     })();
   </script>
 
-  <!-- ✅ pdf.js は inspection.js 内で ESM import（cdnjsは禁止） -->
+  <!-- pdf.js は inspection.js 内で ESM import（cdnjs 禁止） -->
   <script type="module" src="/inspection.js"></script>
 </body>
 </html>
