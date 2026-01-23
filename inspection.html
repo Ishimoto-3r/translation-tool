@@ -1,3 +1,4 @@
+<!-- inspection.html（全文置き換え） -->
 <!doctype html>
 <html lang="ja">
 <head>
@@ -5,69 +6,76 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>検品リスト作成</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.min.js"></script>
-  <script>
-    // pdf.js worker
-    if (window.pdfjsLib) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.min.js";
-    }
-  </script>
-  <script src="/inspection.js?v=ins-v9" defer></script>
+  <script src="/inspection.js" defer></script>
 
   <style>
     body{
       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
-      margin:0; padding:0; background:#f3f4f6;
+      margin:0;padding:0;
     }
+
+    /* ===== Top Nav (kensho.html と同一系) ===== */
     .tool-nav{
-      position: sticky; top:0; z-index:100;
-      background:#374151; padding:10px 16px;
-      box-shadow:0 2px 4px rgba(0,0,0,.12);
-      display:flex; justify-content:center; gap:14px; flex-wrap:wrap;
+      position: sticky; top: 0; z-index: 100;
+      background:#374151; padding: 10px 16px;
+      box-shadow: 0 2px 4px rgba(0,0,0,.12);
+      display:flex; justify-content:center; gap: 14px;
+      align-items:center; flex-wrap: wrap;
     }
-    .nav-groupbox{ background:#4b5563; border-radius:10px; padding:10px 12px; min-width:320px; }
-    .nav-heading{ color:#e5e7eb; font-weight:700; font-size:12px; margin-bottom:6px; }
-    .nav-links{ display:flex; flex-wrap:wrap; gap:8px; }
-    .nav-links a{
-      color:#e5e7eb; text-decoration:none; font-size:12px;
-      background:rgba(255,255,255,.10);
-      padding:6px 10px; border-radius:999px;
-      border:1px solid rgba(255,255,255,.15);
+    .tool-nav .nav-groupbox{
+      display:flex; flex-direction:column; align-items:center; gap: 6px;
+      padding: 8px 10px;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 10px;
+      background: rgba(255,255,255,.04);
     }
-    .nav-links a:hover{ background:rgba(255,255,255,.16); }
-    .nav-links a.active{
-      background:#111827;
-      border-color:rgba(255,255,255,.25);
-      font-weight:700;
+    .tool-nav .nav-heading{
+      display:flex; align-items:center; justify-content:center; gap:6px;
+      width:100%;
+      font-size: 12px; font-weight: 700; letter-spacing: .08em;
+      color: rgba(243,244,246,.75);
+      line-height: 1; user-select: none;
     }
+    .tool-nav .nav-links{
+      display:flex; gap: 8px; align-items:center; flex-wrap: wrap;
+    }
+    .tool-nav a{
+      color:#f3f4f6; text-decoration:none; font-weight: 600; font-size: 14px;
+      padding: 8px 12px; border-radius: 999px;
+      background: rgba(255,255,255,.06);
+      transition: background-color .15s, transform .05s;
+      display:inline-flex; align-items:center; gap: 6px;
+    }
+    .tool-nav a:hover{ background: rgba(255,255,255,.12); }
+    .tool-nav a:active{ transform: translateY(1px); }
+    .tool-nav a.active{ background:#172554; color:#fff; }
+
+    /* overlay */
     .overlay{
-      position:fixed; inset:0; z-index:9999;
-      background:rgba(15,23,42,.55);
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(17,24,39,.45);
       display:none;
       align-items:center; justify-content:center;
-      padding:24px;
+      padding: 16px;
     }
     .overlay.show{ display:flex; }
     .overlay-card{
-      background:#fff; border-radius:16px; padding:18px 18px;
-      width:min(520px, 92vw);
-      box-shadow:0 10px 30px rgba(0,0,0,.25);
-      border:1px solid #e2e8f0;
+      width:min(560px, 100%);
+      background:#111827;
+      color:#fff;
+      border-radius: 14px;
+      padding: 18px 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.12);
     }
-    .spinner{
-      width:18px; height:18px; border-radius:999px;
-      border:3px solid #cbd5e1;
-      border-top-color:#0f172a;
-      animation:spin 0.9s linear infinite;
-    }
-    @keyframes spin{ to{ transform:rotate(360deg);} }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
   </style>
 </head>
 
-<body>
+<body class="bg-gray-100 text-gray-800">
   <nav class="tool-nav">
     <div class="nav-groupbox">
-      <div class="nav-heading">翻訳</div>
+      <div class="nav-heading">⭐翻訳</div>
       <div class="nav-links">
         <a href="/index.html">翻訳ツール</a>
         <a href="/verify.html">検証結果翻訳</a>
@@ -78,7 +86,7 @@
     </div>
 
     <div class="nav-groupbox">
-      <div class="nav-heading">その他</div>
+      <div class="nav-heading">⭐その他</div>
       <div class="nav-links">
         <a href="/report.html">修理レポート</a>
         <a href="/kensho.html">検証項目作成</a>
@@ -89,121 +97,129 @@
     </div>
   </nav>
 
-  <!-- 進捗オーバーレイ（操作不可） -->
+  <!-- overlay -->
   <div id="overlay" class="overlay" aria-hidden="true">
     <div class="overlay-card">
-      <div class="flex items-center gap-3">
-        <div class="spinner"></div>
-        <div class="font-bold text-slate-800">処理中…</div>
+      <div class="flex items-center justify-between gap-3">
+        <div class="font-bold text-lg" id="overlayTitle">処理中</div>
+        <div class="text-xs text-gray-300 mono" id="overlayStep">...</div>
       </div>
-      <div id="overlayMsg" class="mt-2 text-sm text-slate-600"></div>
-      <div class="mt-3 text-xs text-slate-500">
-        ※処理中は画面操作できません（多重実行防止）
+      <div class="mt-3 text-sm text-gray-200 leading-relaxed" id="overlayMsg">処理しています。画面は操作できません。</div>
+      <div class="mt-4 w-full bg-gray-700/60 rounded-full h-2 overflow-hidden">
+        <div id="overlayBar" class="h-2 bg-blue-400 w-1/3 rounded-full"></div>
       </div>
+      <div class="mt-3 text-xs text-gray-300 mono" id="overlayHint"></div>
     </div>
   </div>
 
-  <main class="mx-auto max-w-5xl px-4 py-8">
-    <div class="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 md:p-8">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-800">検品リスト作成ツール</h1>
+  <main class="max-w-5xl mx-auto px-4 py-8">
+    <div class="bg-white rounded-2xl shadow p-6 border border-gray-200">
+      <h1 class="text-2xl font-bold">検品リスト作成ツール</h1>
 
       <!-- PDF -->
-      <div class="mt-7">
-        <div class="text-sm font-semibold text-slate-700">PDF（ドラッグ＆ドロップ / クリックで選択）</div>
-
-        <div id="pdfDrop"
-             class="mt-2 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center cursor-pointer select-none
-                    hover:bg-slate-100 transition">
-          <div class="text-slate-600 font-semibold">ここにPDFをドロップ（またはクリックして選択）</div>
-          <div id="pdfName" class="mt-2 text-xs text-slate-500"></div>
+      <section class="mt-6">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-lg font-bold">PDF（ドラッグ＆ドロップ / クリック選択）</h2>
+          <div class="text-sm text-gray-500" id="pdfStatus">未選択</div>
         </div>
 
-        <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
-      </div>
-
-      <!-- 固定ラベル -->
-      <div class="mt-7">
-        <div class="text-sm font-semibold text-slate-700">ラベル選択</div>
-        <div class="mt-2 flex flex-wrap gap-6 text-sm">
-          <label class="inline-flex items-center gap-2">
-            <input type="checkbox" name="labels" value="リチウムイオン電池" class="h-4 w-4" />
-            <span>リチウムイオン電池</span>
-          </label>
-
-          <label class="inline-flex items-center gap-2">
-            <input type="checkbox" name="labels" value="法的対象(PSE/無線)" class="h-4 w-4" />
-            <span>法的対象(PSE/無線)</span>
-          </label>
+        <div id="dropzone"
+             class="mt-3 border-2 border-dashed border-gray-300 rounded-xl p-6 bg-gray-50 hover:bg-gray-100 transition cursor-pointer">
+          <div class="text-center">
+            <div class="font-semibold">ここにPDFをドロップ（またはクリックで選択）</div>
+            <div class="mt-2 text-xs text-gray-500" id="pdfNameHint">※PDFをAI抽出に使用します</div>
+          </div>
+          <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
         </div>
-      </div>
 
-      <!-- 選択リスト（内スクロールなし） -->
-      <div class="mt-7">
-        <div class="text-sm font-semibold text-slate-700">選択リスト（不要なものだけチェックを外す）</div>
-        <div id="selectListBox"
-             class="mt-2 rounded-2xl border border-slate-300 bg-white p-4 text-sm leading-relaxed">
-          読み込み中…
-        </div>
-      </div>
+        <!-- AI抽出ブロック（ここに型番・製品名も配置） -->
+        <div class="mt-5 bg-white border border-gray-200 rounded-2xl p-5">
+          <div class="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div class="font-bold">PDF読み取り（AI抽出）</div>
+              <div class="text-sm text-gray-500 mt-1">
+                抽出結果を確認し、必要なものだけチェックして検品リストに反映します（初期は未チェック）。
+              </div>
+            </div>
+            <button id="btnExtract"
+                    class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700">
+              PDFをAIに読み取らせる
+            </button>
+          </div>
 
-      <!-- AI抽出（PDF読み取り + 型番/製品名入力欄をここへ移動） -->
-      <div class="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div class="text-sm font-bold text-slate-800">PDF読み取り（AI抽出）</div>
-            <div class="mt-1 text-xs text-slate-600">
-              抽出結果を確認し、必要なものだけチェックして検品リストに反映します（初期は未チェック）。
+          <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-bold mb-1">型番（未入力ならPDFから自動取得）</label>
+              <input id="modelInput" type="text"
+                     class="w-full border border-gray-300 rounded-xl px-3 py-2"
+                     placeholder="未入力ならPDFから自動取得" />
+            </div>
+            <div>
+              <label class="block text-sm font-bold mb-1">製品名（未入力ならPDFから自動取得）</label>
+              <input id="productInput" type="text"
+                     class="w-full border border-gray-300 rounded-xl px-3 py-2"
+                     placeholder="未入力ならPDFから自動取得" />
             </div>
           </div>
 
-          <button id="extractBtn"
-                  class="rounded-xl bg-white border border-slate-300 px-4 py-2.5 text-slate-800 font-semibold
-                         hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">
-            PDFをAIに読み取らせる
-          </button>
-        </div>
+          <!-- 抽出結果：1列・スクロール無し（全体スクロールのみ） -->
+          <div class="mt-5 space-y-4">
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="font-bold">仕様（AI抽出）</div>
+              <div id="specList" class="mt-2 space-y-2 text-sm text-gray-700">（抽出なし）</div>
+            </div>
 
-        <!-- ★ 型番/製品名（未入力ならPDF抽出で自動入力） -->
-        <div class="mt-4 grid gap-4 md:grid-cols-2">
-          <label class="block">
-            <div class="text-sm font-semibold text-slate-700">型番（未入力ならPDFから自動取得）</div>
-            <input id="modelInput"
-                   class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-300" />
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="font-bold">動作（AI抽出）</div>
+              <div id="opList" class="mt-2 space-y-2 text-sm text-gray-700">（抽出なし）</div>
+            </div>
+
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="font-bold">付属品（AI抽出）</div>
+              <div class="text-xs text-gray-500">※取扱説明書はPDFに記載が無くても候補に出します（表記ブレ吸収）。</div>
+              <div id="accList" class="mt-2 space-y-2 text-sm text-gray-700">（抽出なし）</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ラベル選択 -->
+      <section class="mt-6">
+        <h2 class="text-lg font-bold">ラベル選択</h2>
+        <div class="mt-2 flex flex-wrap gap-6 text-sm">
+          <label class="inline-flex items-center gap-2">
+            <input id="lblLiion" type="checkbox" class="h-4 w-4" />
+            リチウムイオン電池
           </label>
-
-          <label class="block">
-            <div class="text-sm font-semibold text-slate-700">製品名（未入力ならPDFから自動取得）</div>
-            <input id="productInput"
-                   class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-300" />
+          <label class="inline-flex items-center gap-2">
+            <input id="lblLegal" type="checkbox" class="h-4 w-4" />
+            法的対象(PSE/無線)
           </label>
         </div>
+      </section>
 
-        <div class="mt-4 space-y-4">
-          <div class="rounded-xl border border-slate-200 bg-white p-4">
-            <div class="text-sm font-semibold text-slate-700">仕様</div>
-            <div id="aiSpecBox" class="mt-2 text-sm"></div>
-          </div>
-
-          <div class="rounded-xl border border-slate-200 bg-white p-4">
-            <div class="text-sm font-semibold text-slate-700">動作</div>
-            <div id="aiOpBox" class="mt-2 text-sm"></div>
-          </div>
-
-          <div class="rounded-xl border border-slate-200 bg-white p-4">
-            <div class="text-sm font-semibold text-slate-700">付属品</div>
-            <div id="aiAccBox" class="mt-2 text-sm"></div>
-          </div>
+      <!-- 選択リスト（SharePointの検品項目リスト: A列=選択リスト の C列を表示） -->
+      <section class="mt-6">
+        <h2 class="text-lg font-bold">選択リスト（不要なものだけチェックを外す）</h2>
+        <div class="mt-2 text-xs text-gray-500">※「検品項目リスト」シートの A列=「選択リスト」の C列を表示しています。</div>
+        <div class="mt-3 bg-gray-50 border border-gray-200 rounded-2xl p-4">
+          <div id="selectList" class="mt-2 space-y-2 text-sm text-gray-700">読み込み中...</div>
         </div>
-      </div>
+      </section>
 
       <!-- 実行 -->
-      <div class="mt-8 flex flex-wrap items-center gap-4">
-        <button id="generateBtn"
-                class="rounded-xl bg-slate-800 px-5 py-3 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+      <section class="mt-8 flex items-center gap-3 flex-wrap">
+        <button id="btnGenerate"
+                class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold hover:bg-black">
           検品リストExcel生成
         </button>
-        <div id="statusText" class="text-sm text-slate-600"></div>
-      </div>
+        <div class="text-sm text-gray-500" id="genHint"></div>
+      </section>
+
+      <!-- エラー表示（警告/AI抽出欄は不要なので削除済み。ここは最低限のエラーのみ） -->
+      <section class="mt-4">
+        <div id="errorBox" class="hidden border border-red-200 bg-red-50 text-red-800 rounded-xl p-3 text-sm"></div>
+      </section>
     </div>
   </main>
 </body>
