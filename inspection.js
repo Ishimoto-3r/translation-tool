@@ -1,521 +1,180 @@
-// inspection.js（全文）
+/* =========================================================
+   inspection.js
+   PDF抽出＋検品リスト生成（pdf.js ESM 安定版）
+   ========================================================= */
 
-let pdfFile = null;
-let busy = false;
+/* ===== pdf.js (ESM) loader ===== */
+const PDFJS_VERSION = "4.10.38";
+const PDFJS_LIB_URL =
+  `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.mjs`;
+const PDFJS_WORKER_URL =
+  `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
 
-let extractedPdfText = ""; // ← pdf.jsで抽出したテキスト（413回避用）
+let _pdfjs = null;
 
-let aiExtract = {
-  specText: [],
-  opText: [],
-  accText: [],
-  opGroups: null, // [{title, items}]
+async function ensurePdfjs() {
+  if (_pdfjs) return _pdfjs;
+  try {
+    const mod = await import(PDFJS_LIB_URL);
+    mod.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    _pdfjs = mod;
+    return _pdfjs;
+  } catch (e) {
+    console.error("pdf.js import failed:", e);
+    throw new Error("pdfjs が読み込まれていません");
+  }
+}
+
+/* ===== DOM ===== */
+const pdfInput = document.getElementById("pdfInput");
+const btnExtract = document.getElementById("btnExtract");
+const btnGenerate = document.getElementById("btnGenerate");
+
+const modelInput = document.getElementById("modelInput");
+const productInput = document.getElementById("productInput");
+
+const specBox = document.getElementById("specList");
+const opBox = document.getElementById("opList");
+const accBox = document.getElementById("accList");
+
+/* ===== 状態 ===== */
+let currentPdfFile = null;
+let extracted = {
+  spec: [],
+  op: [],
+  acc: []
 };
 
-const $ = (id) => document.getElementById(id);
+/* ===== PDF選択 ===== */
+pdfInput.addEventListener("change", (e) => {
+  currentPdfFile = e.target.files[0] || null;
+});
 
-function toText(v) {
-  if (v == null) return "";
-  if (typeof v === "string") return v;
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  try {
-    if (typeof v.text === "string") return v.text;
-    return JSON.stringify(v);
-  } catch {
-    return String(v);
+/* ===== PDFテキスト抽出 ===== */
+async function extractPdfTextInBrowser(file) {
+  if (!file) throw new Error("PDFが選択されていません");
+
+  const pdfjsLib = await ensurePdfjs();
+
+  const buffer = await file.arrayBuffer();
+  const loadingTask = pdfjsLib.getDocument({ data: buffer });
+  const pdf = await loadingTask.promise;
+
+  let text = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(it => it.str).join(" ") + "\n";
   }
+  return text;
 }
 
-function setBusy(on, msg) {
-  busy = !!on;
-
-  const overlay = $("overlay");
-  const overlayMsg = $("overlayMsg");
-  if (overlay) overlay.classList.toggle("show", busy);
-  if (overlayMsg) overlayMsg.textContent = msg || "";
-
-  const ids = [
-    "modelInput", "productInput", "pdfDrop", "pdfInput",
-    "extractBtn", "generateBtn",
-    "selectListBox", "aiSpecBox", "aiOpBox", "aiAccBox"
-  ];
-  for (const id of ids) {
-    const el = $(id);
-    if (!el) continue;
-    if (el.tagName === "INPUT" || el.tagName === "BUTTON") el.disabled = busy;
-
-    if (id === "selectListBox" || id.startsWith("ai")) {
-      el.querySelectorAll("input[type=checkbox]").forEach((cb) => (cb.disabled = busy));
-    }
-    if (id === "pdfDrop") {
-      el.style.pointerEvents = busy ? "none" : "auto";
-      el.style.opacity = busy ? "0.65" : "1";
-    }
-  }
-
-  document.querySelectorAll('input[type="checkbox"][name="labels"]').forEach((cb) => {
-    cb.disabled = busy;
-  });
-}
-
-function showStatus(msg) {
-  const el = $("statusText");
-  if (el) el.textContent = msg || "";
-}
-
-function setPdf(file) {
-  pdfFile = file;
-  extractedPdfText = ""; // ← PDF変えたらテキスト抽出は無効化
-
-  const nameEl = $("pdfName");
-  if (nameEl) nameEl.textContent = file ? `${file.name} (${Math.round(file.size / 1024)} KB)` : "";
-
-  const extractBtn = $("extractBtn");
-  if (extractBtn) extractBtn.disabled = !pdfFile || busy;
-
-  const genBtn = $("generateBtn");
-  if (genBtn) genBtn.disabled = !pdfFile || busy;
-}
-
-async function loadSelectOptions() {
-  const box = $("selectListBox");
-  if (!box) return;
-
-  box.textContent = "読み込み中…";
-
+/* ===== 抽出ボタン ===== */
+btnExtract.addEventListener("click", async () => {
   try {
-    const res = await fetch("/api/inspection?op=select_options");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const options = Array.isArray(data.options) ? data.options : [];
+    lockUI(true, "PDFを解析中…");
 
-    if (options.length === 0) {
-      box.textContent = "（選択肢がありません）";
+    if (!currentPdfFile) {
+      alert("PDFを選択してください");
       return;
     }
 
-    box.innerHTML = "";
-    for (const raw of options) {
-      const text = toText(raw).trim();
-      if (!text) continue;
+    const pdfText = await extractPdfTextInBrowser(currentPdfFile);
 
-      const row = document.createElement("label");
-      row.className = "flex items-start gap-2 py-1";
+    const res = await fetch("/api/inspection?op=extract", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pdfText })
+    });
 
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = true;
-      cb.dataset.value = text;
-      cb.className = "mt-1";
+    if (!res.ok) throw new Error("AI抽出に失敗しました");
 
-      const span = document.createElement("span");
-      span.textContent = text;
+    extracted = await res.json();
 
-      row.appendChild(cb);
-      row.appendChild(span);
-      box.appendChild(row);
-    }
+    renderList(specBox, extracted.spec, false);
+    renderList(opBox, extracted.op, false);
+    renderList(accBox, extracted.acc, true); // 付属品はデフォルトON
   } catch (e) {
     console.error(e);
-    box.textContent = "選択肢の取得に失敗しました";
+    alert(`AI抽出に失敗しました。\n${e.message}`);
+  } finally {
+    lockUI(false);
   }
-}
+});
 
-function collectSelectedLabels() {
-  const labels = [];
+/* ===== 生成ボタン ===== */
+btnGenerate.addEventListener("click", async () => {
+  try {
+    lockUI(true, "Excel生成中…");
 
-  document.querySelectorAll('input[type="checkbox"][name="labels"]:checked')
-    .forEach((cb) => { if (cb.value) labels.push(cb.value); });
+    const payload = {
+      model: modelInput.value,
+      product: productInput.value,
+      specText: collectChecked(specBox),
+      opText: collectChecked(opBox),
+      accText: collectChecked(accBox)
+    };
 
-  document.querySelectorAll('#selectListBox input[type="checkbox"]')
-    .forEach((cb) => { if (cb.checked && cb.dataset.value) labels.push(cb.dataset.value); });
+    const res = await fetch("/api/inspection?op=generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
 
-  const seen = new Set();
-  return labels.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
-}
+    if (!res.ok) throw new Error("生成に失敗しました");
 
-// 動作の不要抽出（安全注意/禁止/中止）を弾く（表示側の二重保険）
-function isOperationNoise(s) {
-  const t = (s || "").toString().trim();
-  if (!t) return true;
-  if (/^(安全|注意|警告|禁止|中止|危険)/.test(t)) return true;
-  if (/(使用しない|使用を中止|しないでください|禁止|分解|改造|修理しない|感電|火災|高温|濡れた手|水にかけない)/.test(t)) return true;
-  if (/安全.*取扱.*注意/.test(t)) return true;
-  return false;
-}
-
-function renderSimpleList(boxId, kind, lines, defaultChecked) {
-  const box = $(boxId);
-  if (!box) return;
-  box.innerHTML = "";
-
-  const arr = (lines || [])
-    .map((x) => toText(x).trim())
-    .filter((x) => x.length > 0);
-
-  const filtered =
-    kind === "動作"
-      ? arr.filter((x) => !isOperationNoise(x))
-      : arr;
-
-  if (filtered.length === 0) {
-    box.innerHTML = `<div class="text-xs text-slate-500">（抽出なし）</div>`;
-    return;
+    const blob = await res.blob();
+    downloadBlob(blob, "inspection.xlsx");
+  } catch (e) {
+    console.error(e);
+    alert(e.message);
+  } finally {
+    lockUI(false);
   }
+});
 
-  for (const line of filtered) {
-    const row = document.createElement("label");
-    row.className = "flex items-start gap-2 py-1";
+/* ===== UI補助 ===== */
+function renderList(container, items, defaultChecked) {
+  container.innerHTML = "";
+  items.forEach(item => {
+    const label = document.createElement("label");
+    label.style.display = "block";
 
     const cb = document.createElement("input");
     cb.type = "checkbox";
     cb.checked = !!defaultChecked;
-    cb.dataset.kind = kind;
-    cb.dataset.text = line;
-    cb.dataset.isTitle = "0";
-    cb.className = "mt-1";
 
-    const span = document.createElement("span");
-    span.textContent = line;
-
-    row.appendChild(cb);
-    row.appendChild(span);
-    box.appendChild(row);
-  }
-}
-
-// 動作：グループ（タイトル＋items）表示（タイトルは太字＋下線、チェックあり）
-function renderOpGrouped(opGroups) {
-  const box = $("aiOpBox");
-  if (!box) return;
-  box.innerHTML = "";
-
-  const groups = Array.isArray(opGroups) ? opGroups : [];
-  const normalized = [];
-
-  for (const g of groups) {
-    const title = toText(g?.title).trim();
-    const items = (Array.isArray(g?.items) ? g.items : [])
-      .map((x) => toText(x).trim())
-      .filter((x) => x.length > 0)
-      .filter((x) => !isOperationNoise(x));
-
-    const okTitle = title && !isOperationNoise(title) ? title : "";
-    if (!okTitle && items.length === 0) continue;
-    normalized.push({ title: okTitle, items });
-  }
-
-  if (normalized.length === 0) {
-    box.innerHTML = `<div class="text-xs text-slate-500">（抽出なし）</div>`;
-    return;
-  }
-
-  for (const g of normalized) {
-    if (g.title) {
-      const rowT = document.createElement("label");
-      rowT.className = "flex items-start gap-2 py-1";
-
-      const cbT = document.createElement("input");
-      cbT.type = "checkbox";
-      cbT.checked = false; // 動作は初期未チェック
-      cbT.dataset.kind = "動作";
-      cbT.dataset.text = g.title;
-      cbT.dataset.isTitle = "1";
-      cbT.className = "mt-1";
-
-      const spanT = document.createElement("span");
-      spanT.textContent = g.title;
-      spanT.className = "font-bold underline decoration-slate-400 underline-offset-4";
-
-      rowT.appendChild(cbT);
-      rowT.appendChild(spanT);
-      box.appendChild(rowT);
-    }
-
-    for (const line of g.items) {
-      const row = document.createElement("label");
-      row.className = "flex items-start gap-2 py-1";
-
-      const cb = document.createElement("input");
-      cb.type = "checkbox";
-      cb.checked = false;
-      cb.dataset.kind = "動作";
-      cb.dataset.text = line;
-      cb.dataset.isTitle = "0";
-      cb.className = "mt-1";
-
-      const span = document.createElement("span");
-      span.textContent = line;
-
-      row.appendChild(cb);
-      row.appendChild(span);
-      box.appendChild(row);
-    }
-  }
-}
-
-function collectAiSelected() {
-  const picked = [];
-  ["aiSpecBox", "aiOpBox", "aiAccBox"].forEach((id) => {
-    const box = $(id);
-    if (!box) return;
-    box.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      if (cb.checked && cb.dataset.kind && cb.dataset.text) {
-        picked.push({
-          kind: cb.dataset.kind,
-          text: cb.dataset.text,
-          isTitle: cb.dataset.isTitle === "1",
-        });
-      }
-    });
-  });
-  return picked;
-}
-
-function setIfEmpty(inputId, newVal) {
-  const el = $(inputId);
-  if (!el) return;
-  const cur = (el.value || "").trim();
-  const next = (newVal || "").toString().trim();
-  if (!cur && next) el.value = next;
-}
-
-// ===== 413回避：pdf.jsでテキスト抽出 =====
-async function extractPdfTextInBrowser(file) {
-  if (!window.pdfjsLib) throw new Error("pdf.js が読み込まれていません");
-
-  const ab = await file.arrayBuffer();
-  const loadingTask = window.pdfjsLib.getDocument({ data: ab });
-  const pdf = await loadingTask.promise;
-
-  let out = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const txt = await page.getTextContent();
-    const line = txt.items.map((it) => it.str).join(" ");
-    out += line + "\n";
-  }
-  return out.trim();
-}
-
-async function callExtractTextApi(filename, text) {
-  const res = await fetch("/api/inspection?op=extract_text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename, text }),
-  });
-  if (!res.ok) {
-    const j = await res.json().catch(() => null);
-    const msg = j?.detail ? String(j.detail) : `HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-  return await res.json();
-}
-
-async function runExtract() {
-  if (!pdfFile) {
-    alert("PDFを選択してください。");
-    return;
-  }
-
-  setBusy(true, "PDFを解析しています（AI抽出）…");
-  showStatus("AI抽出中…");
-
-  try {
-    // 1) まずブラウザでPDF→テキスト抽出（サイズ依存で413回避）
-    setBusy(true, "PDFからテキストを抽出しています…");
-    const text = await extractPdfTextInBrowser(pdfFile);
-    extractedPdfText = text;
-
-    // 2) 抽出テキストをAPIへ（JSON）
-    setBusy(true, "抽出テキストをAIに解析させています…");
-    const data = await callExtractTextApi(pdfFile.name || "manual.pdf", extractedPdfText);
-
-    aiExtract = {
-      specText: Array.isArray(data.specText) ? data.specText : [],
-      opText: Array.isArray(data.opText) ? data.opText : [],
-      accText: Array.isArray(data.accText) ? data.accText : [],
-      opGroups: Array.isArray(data.opGroups) ? data.opGroups : null,
-    };
-
-    renderSimpleList("aiSpecBox", "仕様", aiExtract.specText, false);
-
-    if (aiExtract.opGroups && aiExtract.opGroups.length > 0) {
-      renderOpGrouped(aiExtract.opGroups);
-    } else {
-      renderSimpleList("aiOpBox", "動作", aiExtract.opText, false);
-    }
-
-    renderSimpleList("aiAccBox", "付属品", aiExtract.accText, true);
-
-    setIfEmpty("modelInput", data.model);
-    setIfEmpty("productInput", data.product);
-
-    showStatus("AI抽出が完了しました（必要な項目だけチェックしてください）");
-  } catch (e) {
-    console.error(e);
-    showStatus("AI抽出に失敗しました");
-    alert("AI抽出に失敗しました。\n" + (e?.message || String(e)));
-  } finally {
-    setBusy(false, "");
-    const extractBtn = $("extractBtn");
-    if (extractBtn) extractBtn.disabled = !pdfFile;
-  }
-}
-
-function setupPdfPicker() {
-  const drop = $("pdfDrop");
-  const input = $("pdfInput");
-  if (!drop || !input) return;
-
-  drop.addEventListener("click", () => {
-    if (busy) return;
-    input.click();
-  });
-
-  input.addEventListener("change", (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
-      alert("PDFを選択してください。");
-      return;
-    }
-    setPdf(file);
-
-    renderSimpleList("aiSpecBox", "仕様", [], false);
-    renderSimpleList("aiOpBox", "動作", [], false);
-    renderSimpleList("aiAccBox", "付属品", [], true);
-
-    showStatus("PDFを選択しました。必要なら「PDFをAIに読み取らせる」を押してください。");
-  });
-
-  drop.addEventListener("dragover", (e) => {
-    if (busy) return;
-    e.preventDefault();
-    drop.classList.add("bg-slate-100");
-  });
-
-  drop.addEventListener("dragleave", () => {
-    drop.classList.remove("bg-slate-100");
-  });
-
-  drop.addEventListener("drop", (e) => {
-    if (busy) return;
-    e.preventDefault();
-    drop.classList.remove("bg-slate-100");
-
-    const file = e.dataTransfer?.files?.[0];
-    if (!file) return;
-    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
-      alert("PDFをドロップしてください。");
-      return;
-    }
-    setPdf(file);
-
-    renderSimpleList("aiSpecBox", "仕様", [], false);
-    renderSimpleList("aiOpBox", "動作", [], false);
-    renderSimpleList("aiAccBox", "付属品", [], true);
-
-    showStatus("PDFをドロップしました。必要なら「PDFをAIに読み取らせる」を押してください。");
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(" " + item));
+    container.appendChild(label);
   });
 }
 
-async function runGenerate() {
-  if (!pdfFile) {
-    alert("PDFを選択してください。");
-    return;
-  }
+function collectChecked(container) {
+  return [...container.querySelectorAll("label")]
+    .filter(l => l.querySelector("input").checked)
+    .map(l => l.textContent.trim());
+}
 
-  setBusy(true, "検品リストExcelを生成しています…");
-  showStatus("生成中…");
+function lockUI(lock, message = "") {
+  btnExtract.disabled = lock;
+  btnGenerate.disabled = lock;
+  pdfInput.disabled = lock;
 
-  try {
-    const model = $("modelInput")?.value || "";
-    const product = $("productInput")?.value || "";
-    const selectedLabels = collectSelectedLabels();
-    const aiPicked = collectAiSelected();
-
-    // 生成も413回避：テキストがあるならJSONで送る
-    const useTextMode = !!extractedPdfText;
-
-    let res;
-    if (useTextMode) {
-      res = await fetch("/api/inspection?op=generate_text", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: pdfFile.name || "manual.pdf",
-          text: extractedPdfText,
-          selectedLabels,
-          aiPicked,
-          model,
-          product,
-        }),
-      });
-    } else {
-      // 旧方式（万一の保険）
-      const ab = await pdfFile.arrayBuffer();
-      res = await fetch("/api/inspection?op=generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/pdf",
-          "x-filename": encodeURIComponent(pdfFile.name || "manual.pdf"),
-          "x-selected-labels": encodeURIComponent(JSON.stringify(selectedLabels)),
-          "x-ai-picked": encodeURIComponent(JSON.stringify(aiPicked)),
-          "x-model": encodeURIComponent(model),
-          "x-product": encodeURIComponent(product),
-        },
-        body: ab,
-      });
-    }
-
-    if (!res.ok) {
-      const j = await res.json().catch(() => null);
-      const msg = j?.detail ? String(j.detail) : `HTTP ${res.status}`;
-      throw new Error(msg);
-    }
-
-    const blob = await res.blob();
-    const cd = res.headers.get("content-disposition") || "";
-    const m = cd.match(/filename\*\=UTF-8''([^;]+)/i);
-    const filename = m?.[1] ? decodeURIComponent(m[1]) : "検品リスト.xlsx";
-
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(a.href);
-
-    showStatus("完了しました");
-  } catch (e) {
-    console.error(e);
-    showStatus("生成に失敗しました");
-    alert("生成に失敗しました。\n" + (e?.message || String(e)));
-  } finally {
-    setBusy(false, "");
-    setPdf(pdfFile);
+  if (lock) {
+    btnGenerate.textContent = message || "処理中…";
+  } else {
+    btnGenerate.textContent = "検品リストExcel生成";
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-  setupPdfPicker();
-  loadSelectOptions();
-
-  const extractBtn = $("extractBtn");
-  if (extractBtn) {
-    extractBtn.disabled = true;
-    extractBtn.addEventListener("click", runExtract);
-  }
-
-  const genBtn = $("generateBtn");
-  if (genBtn) {
-    genBtn.disabled = true;
-    genBtn.addEventListener("click", runGenerate);
-  }
-
-  renderSimpleList("aiSpecBox", "仕様", [], false);
-  renderSimpleList("aiOpBox", "動作", [], false);
-  renderSimpleList("aiAccBox", "付属品", [], true);
-});
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
