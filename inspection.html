@@ -4,202 +4,139 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>検品リスト作成</title>
+
+  <!-- 既存と同じ方針：Tailwind CDN（警告は出ますが動作には無関係） -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <script src="/inspection.js" defer></script>
 
   <style>
-    body{
-      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
-      margin:0; padding:0; background:#f3f4f6;
-    }
-    .tool-nav{
-      position: sticky; top:0; z-index:100;
-      background:#374151; padding:10px 16px;
-      box-shadow:0 2px 4px rgba(0,0,0,.12);
-      display:flex; justify-content:center; gap:14px; flex-wrap:wrap;
-    }
-    .nav-groupbox{ background:#4b5563; border-radius:10px; padding:10px 12px; min-width:320px; }
-    .nav-heading{ color:#e5e7eb; font-weight:700; font-size:12px; margin-bottom:6px; }
-    .nav-links{ display:flex; flex-wrap:wrap; gap:8px; }
-    .nav-links a{
-      color:#e5e7eb; text-decoration:none; font-size:12px;
-      background:rgba(255,255,255,.10);
-      padding:6px 10px; border-radius:999px;
-      border:1px solid rgba(255,255,255,.15);
-    }
-    .nav-links a:hover{ background:rgba(255,255,255,.16); }
-    .nav-links a.active{
-      background:#111827;
-      border-color:rgba(255,255,255,.25);
-      font-weight:700;
-    }
-    .overlay{
-      position:fixed; inset:0; z-index:9999;
-      background:rgba(15,23,42,.55);
-      display:none;
-      align-items:center; justify-content:center;
-      padding:24px;
-    }
-    .overlay.show{ display:flex; }
-    .overlay-card{
-      background:#fff; border-radius:16px; padding:18px 18px;
-      width:min(520px, 92vw);
-      box-shadow:0 10px 30px rgba(0,0,0,.25);
-      border:1px solid #e2e8f0;
-    }
-    .spinner{
-      width:18px; height:18px; border-radius:999px;
-      border:3px solid #cbd5e1;
-      border-top-color:#0f172a;
-      animation:spin 0.9s linear infinite;
-    }
-    @keyframes spin{ to{ transform:rotate(360deg);} }
+    /* リスト内スクロール禁止：全体スクロールのみ */
+    .no-inner-scroll { overflow: visible !important; max-height: none !important; }
   </style>
-
 </head>
 
-<body>
-  <nav class="tool-nav">
-    <div class="nav-groupbox">
-      <div class="nav-heading">翻訳</div>
-      <div class="nav-links">
-        <a href="/index.html">翻訳ツール</a>
-        <a href="/verify.html">検証結果翻訳</a>
-        <a href="/column-translate.html">列指定翻訳</a>
-        <a href="/sheet-translate.html">シート翻訳</a>
-        <a href="/word-translate.html">Word翻訳</a>
-      </div>
-    </div>
-
-    <div class="nav-groupbox">
-      <div class="nav-heading">その他</div>
-      <div class="nav-links">
-        <a href="/report.html">修理レポート</a>
-        <a href="/kensho.html">検証項目作成</a>
-        <a href="/manual.html">原稿作成（AIチェック）</a>
-        <a href="/prompt.html">単発プロンプト</a>
-        <a href="/inspection.html" class="active">検品リスト作成</a>
-      </div>
-    </div>
+<body class="bg-gray-50 text-gray-900">
+  <!-- ===== NAV（既存プロジェクトに合わせて必要なら差し替え） ===== -->
+  <nav class="tool-nav px-4 pt-4">
+    <!-- ※ここは既存プロジェクトの nav をそのまま流用してください（必要なら） -->
   </nav>
 
-  <!-- 進捗オーバーレイ（操作不可） -->
-  <div id="overlay" class="overlay" aria-hidden="true">
-    <div class="overlay-card">
-      <div class="flex items-center gap-3">
-        <div class="spinner"></div>
-        <div class="font-bold text-slate-800">処理中…</div>
-      </div>
-      <div id="overlayMsg" class="mt-2 text-sm text-slate-600"></div>
-      <div class="mt-3 text-xs text-slate-500">
-        ※処理中は画面操作できません（多重実行防止）
-      </div>
-    </div>
-  </div>
+  <main class="max-w-5xl mx-auto px-4 py-6">
+    <div class="bg-white rounded-xl shadow p-6 space-y-6">
+      <h1 class="text-xl font-bold">検品リスト作成ツール</h1>
 
-  <main class="mx-auto max-w-5xl px-4 py-8">
-    <div class="rounded-2xl bg-white shadow-sm border border-slate-200 p-6 md:p-8">
-      <h1 class="text-xl md:text-2xl font-bold text-slate-800">検品リスト作成ツール</h1>
+      <!-- ===== PDF（D&D + クリック） ===== -->
+      <section class="space-y-3">
+        <div class="text-sm font-semibold">PDF（ドラッグ&ドロップ / クリック選択）</div>
 
-      <!-- PDF -->
-      <div class="mt-7">
-        <div class="text-sm font-semibold text-slate-700">PDF（ドラッグ＆ドロップ / クリックで選択）</div>
+        <label
+          id="dropZone"
+          class="block border-2 border-dashed rounded-lg p-6 bg-gray-50 cursor-pointer hover:bg-gray-100 transition"
+        >
+          <div class="text-center space-y-2">
+            <div class="text-gray-700">ここにPDFをドロップ（またはクリックで選択）</div>
+            <div id="fileName" class="text-xs text-gray-500">未選択</div>
+          </div>
+          <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
+        </label>
 
-        <div id="pdfDrop"
-             class="mt-2 rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center cursor-pointer select-none
-                    hover:bg-slate-100 transition">
-          <div class="text-slate-600 font-semibold">ここにPDFをドロップ（またはクリックして選択）</div>
-          <div id="pdfName" class="mt-2 text-xs text-slate-500"></div>
-        </div>
+        <!-- PDF読み取り（AI抽出）エリア：ここに型番/製品名の入力欄を配置 -->
+        <div class="bg-gray-50 border rounded-lg p-4 space-y-4">
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div class="space-y-1">
+              <div class="text-sm font-semibold">PDF読み取り（AI抽出）</div>
+              <div class="text-xs text-gray-600">
+                抽出結果を確認し、必要なものだけチェックして検品リストに反映します（初期は未チェック）。
+              </div>
+            </div>
 
-        <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
-      </div>
+            <button
+              id="btnExtract"
+              type="button"
+              class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+            >
+              PDFをAIに読み取らせる
+            </button>
+          </div>
 
-      <!-- 固定ラベル -->
-      <div class="mt-7">
-        <div class="text-sm font-semibold text-slate-700">ラベル選択</div>
-        <div class="mt-2 flex flex-wrap gap-6 text-sm">
-          <label class="inline-flex items-center gap-2">
-            <input type="checkbox" name="labels" value="リチウムイオン電池" class="h-4 w-4" />
-            <span>リチウムイオン電池</span>
-          </label>
-
-          <label class="inline-flex items-center gap-2">
-            <input type="checkbox" name="labels" value="法的対象(PSE/無線)" class="h-4 w-4" />
-            <span>法的対象(PSE/無線)</span>
-          </label>
-        </div>
-      </div>
-
-      <!-- 選択リスト（内スクロールなし） -->
-      <div class="mt-7">
-        <div class="text-sm font-semibold text-slate-700">選択リスト（不要なものだけチェックを外す）</div>
-        <div id="selectListBox"
-             class="mt-2 rounded-2xl border border-slate-300 bg-white p-4 text-sm leading-relaxed">
-          読み込み中…
-        </div>
-      </div>
-
-      <!-- AI抽出 -->
-      <div class="mt-8 rounded-2xl border border-slate-200 bg-slate-50 p-5">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <div class="text-sm font-bold text-slate-800">PDF読み取り（AI抽出）</div>
-            <div class="mt-1 text-xs text-slate-600">
-              抽出結果を確認し、必要なものだけチェックして検品リストに反映します。
+          <!-- 型番 / 製品名（未入力ならPDFから自動反映される運用） -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="space-y-1">
+              <label class="text-sm font-semibold">型番（未入力ならPDFから自動取得）</label>
+              <input
+                id="modelInput"
+                type="text"
+                class="w-full border rounded-lg px-3 py-2 bg-white"
+              />
+            </div>
+            <div class="space-y-1">
+              <label class="text-sm font-semibold">製品名（未入力ならPDFから自動取得）</label>
+              <input
+                id="productInput"
+                type="text"
+                class="w-full border rounded-lg px-3 py-2 bg-white"
+              />
             </div>
           </div>
 
-          <button id="extractBtn"
-                  class="rounded-xl bg-white border border-slate-300 px-4 py-2.5 text-slate-800 font-semibold
-                         hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed">
-            PDFをAIに読み取らせる
-          </button>
-        </div>
+          <!-- 抽出結果：1列（縦並び）＋各リスト内部スクロール禁止 -->
+          <div class="space-y-6">
+            <div class="space-y-2">
+              <div class="text-sm font-semibold">仕様</div>
+              <div id="specList" class="no-inner-scroll space-y-2"></div>
+            </div>
 
-        <!-- 型番/製品名（未入力ならPDF抽出で自動入力） -->
-        <div class="mt-4 grid gap-4 md:grid-cols-2">
-          <label class="block">
-            <div class="text-sm font-semibold text-slate-700">型番（未入力ならPDFから自動取得）</div>
-            <input id="modelInput"
-                   class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-300" />
+            <div class="space-y-2">
+              <div class="text-sm font-semibold">動作</div>
+              <div id="opList" class="no-inner-scroll space-y-2"></div>
+            </div>
+
+            <div class="space-y-2">
+              <div class="text-sm font-semibold">付属品</div>
+              <div id="accList" class="no-inner-scroll space-y-2"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== ラベル選択（選択リスト） ===== -->
+      <section class="space-y-3">
+        <div class="text-sm font-semibold">ラベル選択</div>
+        <div class="flex flex-wrap gap-6 text-sm">
+          <label class="flex items-center gap-2">
+            <input id="lblLiion" type="checkbox" class="h-4 w-4" checked />
+            リチウムイオン電池
           </label>
-
-          <label class="block">
-            <div class="text-sm font-semibold text-slate-700">製品名（未入力ならPDFから自動取得）</div>
-            <input id="productInput"
-                   class="mt-2 w-full rounded-xl border border-slate-300 px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-slate-300" />
+          <label class="flex items-center gap-2">
+            <input id="lblLegal" type="checkbox" class="h-4 w-4" checked />
+            法的対象(PSE/無線)
           </label>
         </div>
 
-        <div class="mt-4 space-y-4">
-          <div class="rounded-xl border border-slate-200 bg-white p-4">
-            <div class="text-sm font-semibold text-slate-700">仕様</div>
-            <div id="aiSpecBox" class="mt-2 text-sm"></div>
-          </div>
-
-          <div class="rounded-xl border border-slate-200 bg-white p-4">
-            <div class="text-sm font-semibold text-slate-700">動作</div>
-            <div id="aiOpBox" class="mt-2 text-sm"></div>
-          </div>
-
-          <div class="rounded-xl border border-slate-200 bg-white p-4">
-            <div class="text-sm font-semibold text-slate-700">付属品（初期は全チェック）</div>
-            <div id="aiAccBox" class="mt-2 text-sm"></div>
-          </div>
+        <div class="text-xs text-gray-600">
+          ※ 選択リストは「検品項目リスト」シートのA列が「選択リスト」の行のC列を表示しています（不要なものだけチェックを外す）。
         </div>
-      </div>
 
-      <!-- 実行 -->
-      <div class="mt-8 flex flex-wrap items-center gap-4">
-        <button id="generateBtn"
-                class="rounded-xl bg-slate-800 px-5 py-3 text-white font-semibold disabled:opacity-40 disabled:cursor-not-allowed">
+        <div id="selectList" class="no-inner-scroll space-y-2"></div>
+      </section>
+
+      <!-- ===== 生成 ===== -->
+      <section class="space-y-3">
+        <button
+          id="btnGenerate"
+          type="button"
+          class="w-full md:w-auto px-5 py-3 rounded-lg bg-gray-900 text-white hover:bg-black disabled:opacity-60"
+        >
           検品リストExcel生成
         </button>
-        <div id="statusText" class="text-sm text-slate-600"></div>
-      </div>
+
+        <!-- 進捗表示（最低限：動いていることがわかる） -->
+        <div id="progress" class="text-sm text-gray-600 hidden">処理中…</div>
+      </section>
     </div>
   </main>
+
+  <!-- ✅ cdnjsのpdf.jsは削除（MIME不一致でブロックされる原因） -->
+  <!-- ✅ inspection.js は module で読む -->
   <script type="module" src="/inspection.js"></script>
 </body>
 </html>
