@@ -442,13 +442,14 @@ async function runExtract() {
 
   const url = ($("pdfUrlInput") && $("pdfUrlInput").value ? $("pdfUrlInput").value.trim() : "");
 
-  // D&Dのファイルが大きすぎる場合は、処理を止めてURL案内
+  // 容量が大きいPDFはD&Dでは処理しない（選択していても止めてURL案内）
   if (pdfFile && pdfFile.size > MAX_DD_BYTES) {
+    const mb = (pdfFile.size / (1024 * 1024)).toFixed(2);
     pdfFile = null;
     $("pdfInput").value = "";
-    setPdfStatus();
-    showError('このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください');
-    $("pdfUrlInput").focus();
+    setPdfStatus(`容量超過（${mb}MB）`);
+    showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
+    if ($("pdfUrlInput")) $("pdfUrlInput").focus();
     return;
   }
 
@@ -458,48 +459,31 @@ async function runExtract() {
   }
 
   try {
-    setBusy(true, "AI抽出中", "準備", "PDFから仕様/動作/付属品/型番/製品名を抽出しています。", "PDF解析→AI抽出の順で実行します。");
+    setBusy(true, "AI抽出中", "準備", "PDFから仕様/動作/付属品/型番/製品名を抽出しています。", "PDF解析はサーバー側で実施します。");
     $("overlayBar").style.width = "20%";
 
-    let pdfText = "";
-    let fileName = "";
+    const modelHint = $("modelInput").value.trim();
+    const productHint = $("productInput").value.trim();
+
+    let payload = {
+      modelHint: modelHint || "",
+      productHint: productHint || ""
+    };
 
     if (pdfFile) {
-      // ブラウザでPDFテキスト抽出（413回避）
-      $("overlayStep").textContent = "PDF解析";
-      const buf = await pdfFile.arrayBuffer();
-      pdfText = await extractPdfTextFromArrayBuffer(buf);
-      fileName = pdfFile.name;
+      $("overlayStep").textContent = "PDF読込";
+      const b64 = await fileToBase64(pdfFile);
+      payload.pdfBase64 = b64;
+      payload.fileName = pdfFile.name || "upload.pdf";
     } else {
-      // URLからPDF取得 → テキスト抽出
-      $("overlayStep").textContent = "URL取得";
-      const res = await fetch(url, { method: "GET" });
-      if (!res.ok) throw new Error(`URL取得に失敗しました: HTTP ${res.status}`);
-
-      const ct = (res.headers.get("content-type") || "").toLowerCase();
-      if (!ct.includes("pdf")) {
-        throw new Error(`Content-TypeがPDFではありません: ${ct || "(unknown)"}`);
-      }
-
-      const buf = await res.arrayBuffer();
-      $("overlayStep").textContent = "PDF解析";
-      pdfText = await extractPdfTextFromArrayBuffer(buf);
-      fileName = (url.split("?")[0].split("#")[0].split("/").pop() || "from_url.pdf");
+      $("overlayStep").textContent = "URL準備";
+      payload.pdfUrl = url;
+      payload.fileName = (url.split("?")[0].split("#")[0].split("/").pop() || "from_url.pdf");
     }
 
     $("overlayBar").style.width = "55%";
-
-    const model = $("modelInput").value.trim();
-    const productName = $("productInput").value.trim();
-
     $("overlayStep").textContent = "AI抽出";
-    const r = await api("extract", {
-      pdfText,
-      fileName,
-      modelHint: model || "",
-      productHint: productName || ""
-    });
-
+    const r = await api("extract", payload);
     $("overlayBar").style.width = "85%";
 
     extracted.model = normalizeText(r.model || "").trim();
@@ -512,10 +496,10 @@ async function runExtract() {
     if (!$("modelInput").value.trim() && extracted.model) $("modelInput").value = extracted.model;
     if (!$("productInput").value.trim() && extracted.productName) $("productInput").value = extracted.productName;
 
-    // 仕様/付属品：初期未チェック
+    // 仕様：初期未チェック
     renderCheckboxList("specList", extracted.specs, { defaultChecked: false });
 
-    // 動作：タイトル+アイテム。初期未チェック（タイトル連動あり）
+    // 動作：初期未チェック（タイトル連動あり）
     renderOpGroups("opList", extracted.ops);
 
     // 付属品：初期全チェック（要件）
@@ -615,9 +599,10 @@ function initPdfDrop() {
     if (f && f.type === "application/pdf") {
       // 容量が大きい場合は止めてURL案内（要件）
       if (f.size > MAX_DD_BYTES) {
+        const mb = (f.size / (1024 * 1024)).toFixed(2);
         pdfFile = null;
         input.value = "";
-        setPdfStatus();
+        setPdfStatus(`容量超過（${mb}MB）`);
         showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
         const u = $("pdfUrlInput");
         if (u) u.focus();
@@ -637,9 +622,10 @@ function initPdfDrop() {
     const f = input.files && input.files[0];
     if (f && f.type === "application/pdf") {
       if (f.size > MAX_DD_BYTES) {
+        const mb = (f.size / (1024 * 1024)).toFixed(2);
         pdfFile = null;
         input.value = "";
-        setPdfStatus();
+        setPdfStatus(`容量超過（${mb}MB）`);
         showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
         const u = $("pdfUrlInput");
         if (u) u.focus();
