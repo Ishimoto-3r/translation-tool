@@ -3,6 +3,8 @@
 let pdfFile = null;
 let busy = false;
 
+let extractedPdfText = ""; // ← pdf.jsで抽出したテキスト（413回避用）
+
 let aiExtract = {
   specText: [],
   opText: [],
@@ -40,9 +42,8 @@ function setBusy(on, msg) {
   for (const id of ids) {
     const el = $(id);
     if (!el) continue;
-    if (el.tagName === "INPUT" || el.tagName === "BUTTON") {
-      el.disabled = busy;
-    }
+    if (el.tagName === "INPUT" || el.tagName === "BUTTON") el.disabled = busy;
+
     if (id === "selectListBox" || id.startsWith("ai")) {
       el.querySelectorAll("input[type=checkbox]").forEach((cb) => (cb.disabled = busy));
     }
@@ -64,6 +65,7 @@ function showStatus(msg) {
 
 function setPdf(file) {
   pdfFile = file;
+  extractedPdfText = ""; // ← PDF変えたらテキスト抽出は無効化
 
   const nameEl = $("pdfName");
   if (nameEl) nameEl.textContent = file ? `${file.name} (${Math.round(file.size / 1024)} KB)` : "";
@@ -136,10 +138,8 @@ function collectSelectedLabels() {
 function isOperationNoise(s) {
   const t = (s || "").toString().trim();
   if (!t) return true;
-  // 見出しや注意喚起
   if (/^(安全|注意|警告|禁止|中止|危険)/.test(t)) return true;
   if (/(使用しない|使用を中止|しないでください|禁止|分解|改造|修理しない|感電|火災|高温|濡れた手|水にかけない)/.test(t)) return true;
-  // 「安全・取扱注意（…）」系の括弧見出し
   if (/安全.*取扱.*注意/.test(t)) return true;
   return false;
 }
@@ -184,7 +184,7 @@ function renderSimpleList(boxId, kind, lines, defaultChecked) {
   }
 }
 
-// 動作：グループ（タイトル＋items）表示（タイトルは太字＋下線）
+// 動作：グループ（タイトル＋items）表示（タイトルは太字＋下線、チェックあり）
 function renderOpGrouped(opGroups) {
   const box = $("aiOpBox");
   if (!box) return;
@@ -200,9 +200,7 @@ function renderOpGrouped(opGroups) {
       .filter((x) => x.length > 0)
       .filter((x) => !isOperationNoise(x));
 
-    // タイトル自体もノイズなら捨てる
     const okTitle = title && !isOperationNoise(title) ? title : "";
-
     if (!okTitle && items.length === 0) continue;
     normalized.push({ title: okTitle, items });
   }
@@ -213,22 +211,20 @@ function renderOpGrouped(opGroups) {
   }
 
   for (const g of normalized) {
-    const title = g.title;
-
-    if (title) {
+    if (g.title) {
       const rowT = document.createElement("label");
       rowT.className = "flex items-start gap-2 py-1";
 
       const cbT = document.createElement("input");
       cbT.type = "checkbox";
-      cbT.checked = false; // 動作は初期未チェック（タイトルも同様）
+      cbT.checked = false; // 動作は初期未チェック
       cbT.dataset.kind = "動作";
-      cbT.dataset.text = title;
+      cbT.dataset.text = g.title;
       cbT.dataset.isTitle = "1";
       cbT.className = "mt-1";
 
       const spanT = document.createElement("span");
-      spanT.textContent = title;
+      spanT.textContent = g.title;
       spanT.className = "font-bold underline decoration-slate-400 underline-offset-4";
 
       rowT.appendChild(cbT);
@@ -242,7 +238,7 @@ function renderOpGrouped(opGroups) {
 
       const cb = document.createElement("input");
       cb.type = "checkbox";
-      cb.checked = false; // 動作は初期未チェック
+      cb.checked = false;
       cb.dataset.kind = "動作";
       cb.dataset.text = line;
       cb.dataset.isTitle = "0";
@@ -284,6 +280,38 @@ function setIfEmpty(inputId, newVal) {
   if (!cur && next) el.value = next;
 }
 
+// ===== 413回避：pdf.jsでテキスト抽出 =====
+async function extractPdfTextInBrowser(file) {
+  if (!window.pdfjsLib) throw new Error("pdf.js が読み込まれていません");
+
+  const ab = await file.arrayBuffer();
+  const loadingTask = window.pdfjsLib.getDocument({ data: ab });
+  const pdf = await loadingTask.promise;
+
+  let out = "";
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const txt = await page.getTextContent();
+    const line = txt.items.map((it) => it.str).join(" ");
+    out += line + "\n";
+  }
+  return out.trim();
+}
+
+async function callExtractTextApi(filename, text) {
+  const res = await fetch("/api/inspection?op=extract_text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, text }),
+  });
+  if (!res.ok) {
+    const j = await res.json().catch(() => null);
+    const msg = j?.detail ? String(j.detail) : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return await res.json();
+}
+
 async function runExtract() {
   if (!pdfFile) {
     alert("PDFを選択してください。");
@@ -294,24 +322,14 @@ async function runExtract() {
   showStatus("AI抽出中…");
 
   try {
-    const ab = await pdfFile.arrayBuffer();
+    // 1) まずブラウザでPDF→テキスト抽出（サイズ依存で413回避）
+    setBusy(true, "PDFからテキストを抽出しています…");
+    const text = await extractPdfTextInBrowser(pdfFile);
+    extractedPdfText = text;
 
-    const res = await fetch("/api/inspection?op=extract", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/pdf",
-        "x-filename": encodeURIComponent(pdfFile.name || "manual.pdf"),
-      },
-      body: ab,
-    });
-
-    if (!res.ok) {
-      const j = await res.json().catch(() => null);
-      const msg = j?.detail ? String(j.detail) : `HTTP ${res.status}`;
-      throw new Error(msg);
-    }
-
-    const data = await res.json();
+    // 2) 抽出テキストをAPIへ（JSON）
+    setBusy(true, "抽出テキストをAIに解析させています…");
+    const data = await callExtractTextApi(pdfFile.name || "manual.pdf", extractedPdfText);
 
     aiExtract = {
       specText: Array.isArray(data.specText) ? data.specText : [],
@@ -320,20 +338,16 @@ async function runExtract() {
       opGroups: Array.isArray(data.opGroups) ? data.opGroups : null,
     };
 
-    // 仕様：初期未チェック
     renderSimpleList("aiSpecBox", "仕様", aiExtract.specText, false);
 
-    // 動作：opGroupsがあればタイトル＋itemsで描画（タイトルは下線）
     if (aiExtract.opGroups && aiExtract.opGroups.length > 0) {
       renderOpGrouped(aiExtract.opGroups);
     } else {
       renderSimpleList("aiOpBox", "動作", aiExtract.opText, false);
     }
 
-    // 付属品：初期全チェック
     renderSimpleList("aiAccBox", "付属品", aiExtract.accText, true);
 
-    // 型番・製品名を自動入力（未入力時のみ）
     setIfEmpty("modelInput", data.model);
     setIfEmpty("productInput", data.product);
 
@@ -368,7 +382,6 @@ function setupPdfPicker() {
     }
     setPdf(file);
 
-    // 表示クリア
     renderSimpleList("aiSpecBox", "仕様", [], false);
     renderSimpleList("aiOpBox", "動作", [], false);
     renderSimpleList("aiAccBox", "付属品", [], true);
@@ -399,7 +412,6 @@ function setupPdfPicker() {
     }
     setPdf(file);
 
-    // 表示クリア
     renderSimpleList("aiSpecBox", "仕様", [], false);
     renderSimpleList("aiOpBox", "動作", [], false);
     renderSimpleList("aiAccBox", "付属品", [], true);
@@ -420,24 +432,42 @@ async function runGenerate() {
   try {
     const model = $("modelInput")?.value || "";
     const product = $("productInput")?.value || "";
-
     const selectedLabels = collectSelectedLabels();
     const aiPicked = collectAiSelected();
 
-    const ab = await pdfFile.arrayBuffer();
+    // 生成も413回避：テキストがあるならJSONで送る
+    const useTextMode = !!extractedPdfText;
 
-    const res = await fetch("/api/inspection?op=generate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/pdf",
-        "x-filename": encodeURIComponent(pdfFile.name || "manual.pdf"),
-        "x-selected-labels": encodeURIComponent(JSON.stringify(selectedLabels)),
-        "x-ai-picked": encodeURIComponent(JSON.stringify(aiPicked)),
-        "x-model": encodeURIComponent(model),
-        "x-product": encodeURIComponent(product),
-      },
-      body: ab,
-    });
+    let res;
+    if (useTextMode) {
+      res = await fetch("/api/inspection?op=generate_text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filename: pdfFile.name || "manual.pdf",
+          text: extractedPdfText,
+          selectedLabels,
+          aiPicked,
+          model,
+          product,
+        }),
+      });
+    } else {
+      // 旧方式（万一の保険）
+      const ab = await pdfFile.arrayBuffer();
+      res = await fetch("/api/inspection?op=generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/pdf",
+          "x-filename": encodeURIComponent(pdfFile.name || "manual.pdf"),
+          "x-selected-labels": encodeURIComponent(JSON.stringify(selectedLabels)),
+          "x-ai-picked": encodeURIComponent(JSON.stringify(aiPicked)),
+          "x-model": encodeURIComponent(model),
+          "x-product": encodeURIComponent(product),
+        },
+        body: ab,
+      });
+    }
 
     if (!res.ok) {
       const j = await res.json().catch(() => null);
