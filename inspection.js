@@ -1,381 +1,503 @@
-/* =========================================================
-   inspection.js（全文・前の状態へ復帰）
-   - [object Object] 根絶（深掘り文字列抽出）
-   - オーバーレイ復活 + 二重押し防止 + 進捗表示復活
-   - 抽出API：extract_text → extract にフォールバック（前に動いていたopへ戻す）
-   ========================================================= */
+// inspection.js（全文置き換え）
+let pdfFile = null;
 
-/* ===== pdf.js (ESM) loader ===== */
-const PDFJS_VERSION = "4.10.38";
-const PDFJS_LIB_URL =
-  `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.min.mjs`;
-const PDFJS_WORKER_URL =
-  `https://cdn.jsdelivr.net/npm/pdfjs-dist@${PDFJS_VERSION}/build/pdf.worker.min.mjs`;
+let selectionItems = []; // SharePointの「選択リスト」C列（表示用）
+let extracted = {
+  model: "",
+  productName: "",
+  specs: [],     // string[]
+  ops: [],       // { title: string, items: string[] }[]
+  accs: []       // string[]
+};
 
-let _pdfjs = null;
-async function ensurePdfjs() {
-  if (_pdfjs) return _pdfjs;
-  try {
-    const mod = await import(PDFJS_LIB_URL);
-    mod.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
-    _pdfjs = mod;
-    return _pdfjs;
-  } catch (e) {
-    console.error("pdf.js import failed:", e);
-    throw new Error("pdfjs が読み込まれていません");
-  }
-}
-
-/* ===== DOM ===== */
 const $ = (id) => document.getElementById(id);
 
-const overlay = $("overlay");
-const overlayMsg = $("overlayMsg");
+function showError(msg) {
+  const box = $("errorBox");
+  box.textContent = msg;
+  box.classList.remove("hidden");
+}
 
-const pdfInput = $("pdfInput");
-const fileName = $("fileName");
+function clearError() {
+  const box = $("errorBox");
+  box.textContent = "";
+  box.classList.add("hidden");
+}
 
-const btnExtract = $("btnExtract");
-const btnGenerate = $("btnGenerate");
-const progress = $("progress");
+function setBusy(on, title = "処理中", step = "", msg = "処理しています。画面は操作できません。", hint = "") {
+  const ov = $("overlay");
+  $("overlayTitle").textContent = title;
+  $("overlayStep").textContent = step || "";
+  $("overlayMsg").textContent = msg || "";
+  $("overlayHint").textContent = hint || "";
+  ov.classList.toggle("show", !!on);
 
-const modelInput = $("modelInput");
-const productInput = $("productInput");
-
-const specBox = $("specList");
-const opBox = $("opList");
-const accBox = $("accList");
-
-const selectListBox = $("selectList");
-const lblLiion = $("lblLiion");
-const lblLegal = $("lblLegal");
-
-let currentPdfFile = null;
-let isBusy = false;
-
-/* ===== Busy / Overlay ===== */
-function setBusy(on, msg) {
-  isBusy = on;
-
-  // overlay
-  if (overlay) {
-    if (on) overlay.classList.add("show");
-    else overlay.classList.remove("show");
-  }
-  if (overlayMsg && msg) overlayMsg.textContent = msg;
-
-  // progress
-  if (progress) {
-    if (on) {
-      progress.textContent = msg || "処理中…";
-      progress.classList.remove("hidden");
+  // 入力をまとめて無効化（二重押し防止）
+  const disableIds = [
+    "pdfInput","dropzone","btnExtract","btnGenerate",
+    "lblLiion","lblLegal","modelInput","productInput"
+  ];
+  for (const id of disableIds) {
+    const el = $(id);
+    if (!el) continue;
+    if (id === "dropzone") {
+      el.style.pointerEvents = on ? "none" : "auto";
+      el.style.opacity = on ? "0.7" : "1";
     } else {
-      progress.classList.add("hidden");
-      progress.textContent = "";
+      el.disabled = !!on;
     }
   }
 
-  // lock inputs
-  pdfInput.disabled = on;
-  btnExtract.disabled = on;
-  btnGenerate.disabled = on;
-  if (lblLiion) lblLiion.disabled = on;
-  if (lblLegal) lblLegal.disabled = on;
-  if (modelInput) modelInput.disabled = on;
-  if (productInput) productInput.disabled = on;
-
-  // lock checkboxes
-  [selectListBox, specBox, opBox, accBox].forEach((box) => {
-    if (!box) return;
-    box.querySelectorAll("input[type=checkbox]").forEach((cb) => (cb.disabled = on));
+  // 選択リストも無効化
+  document.querySelectorAll('input[data-select-item="1"]').forEach((cb) => {
+    cb.disabled = !!on;
+  });
+  // 抽出リストも無効化
+  document.querySelectorAll('input[data-extract="1"]').forEach((cb) => {
+    cb.disabled = !!on;
   });
 }
 
-/* ===== File select ===== */
-pdfInput?.addEventListener("change", () => {
-  currentPdfFile = pdfInput.files && pdfInput.files[0] ? pdfInput.files[0] : null;
-  if (fileName) fileName.textContent = currentPdfFile ? currentPdfFile.name : "未選択";
-});
-
-/* ===== PDF text extraction ===== */
-async function extractPdfTextInBrowser(file) {
-  if (!file) throw new Error("PDFが選択されていません");
-  const pdfjsLib = await ensurePdfjs();
-
-  const buffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-
-  let text = "";
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    text += content.items.map((it) => it.str).join(" ") + "\n";
-  }
-  return text;
+function normalizeText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  // [object Object] 対策：絶対にオブジェクトをそのまま表示しない
+  try { return JSON.stringify(v); } catch { return String(v); }
 }
 
-/* ===== [object Object] 根絶：深掘りで「最初の文字列」を拾う ===== */
-function findFirstStringDeep(x, depth = 0) {
-  if (x == null) return "";
-  if (typeof x === "string") return x.trim();
-  if (typeof x === "number" || typeof x === "boolean") return String(x);
-  if (depth > 6) return ""; // これ以上掘らない
-
-  if (Array.isArray(x)) {
-    for (const v of x) {
-      const s = findFirstStringDeep(v, depth + 1);
-      if (s) return s;
-    }
-    return "";
+function setPdfStatus() {
+  if (!pdfFile) {
+    $("pdfStatus").textContent = "未選択";
+    $("pdfNameHint").textContent = "※PDFをAI抽出に使用します";
+    return;
   }
-
-  if (typeof x === "object") {
-    // よくあるキー候補を先に見る（Excel/セル系もここで拾える）
-    const keysFirst = ["text", "label", "name", "value", "title", "item", "v", "w", "c"];
-    for (const k of keysFirst) {
-      if (k in x) {
-        const s = findFirstStringDeep(x[k], depth + 1);
-        if (s) return s;
-      }
-    }
-    // その他のキーも総当たり
-    for (const k of Object.keys(x)) {
-      const s = findFirstStringDeep(x[k], depth + 1);
-      if (s) return s;
-    }
-  }
-  return "";
+  $("pdfStatus").textContent = `選択中: ${pdfFile.name} (${Math.round(pdfFile.size/1024)} KB)`;
+  $("pdfNameHint").textContent = pdfFile.name;
 }
 
-function normalizeText(x) {
-  const s = findFirstStringDeep(x);
-  return (s || "").trim();
-}
+function renderCheckboxList(containerId, items, { defaultChecked = false, dataAttr = {} } = {}) {
+  const wrap = $(containerId);
+  wrap.innerHTML = "";
 
-/* ===== Render ===== */
-function clearBox(el) { if (el) el.innerHTML = ""; }
-
-function renderCheckboxList(container, rawItems, defaultChecked) {
-  clearBox(container);
-  if (!container) return;
-
-  const items = Array.isArray(rawItems) ? rawItems : [];
-  const seen = new Set();
-  let count = 0;
-
-  for (const raw of items) {
-    const text = normalizeText(raw);
-    if (!text) continue;
-
-    // [object Object] という「文字列」自体も消す（事故防止）
-    if (text === "[object Object]") continue;
-
-    if (seen.has(text)) continue;
-    seen.add(text);
-    count++;
-
-    const label = document.createElement("label");
-    label.className = "flex items-start gap-2 text-sm";
-
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = !!defaultChecked;
-    cb.className = "mt-1 h-4 w-4";
-
-    const span = document.createElement("span");
-    span.textContent = text;
-
-    label.appendChild(cb);
-    label.appendChild(span);
-    container.appendChild(label);
-  }
-
-  if (count === 0) {
-    container.innerHTML = '<div class="text-sm text-slate-500">（表示対象なし）</div>';
-  }
-}
-
-function collectCheckedTexts(container) {
-  if (!container) return [];
-  const out = [];
-  container.querySelectorAll("label").forEach((label) => {
-    const cb = label.querySelector("input[type=checkbox]");
-    if (!cb || !cb.checked) return;
-    const span = label.querySelector("span");
-    const text = (span?.textContent || "").trim();
-    if (text) out.push(text);
-  });
-  return out;
-}
-
-/* ===== SharePoint由来：選択リスト ===== */
-async function loadSelectOptions() {
-  if (!selectListBox) return;
-
-  selectListBox.innerHTML = '<div class="text-sm text-slate-500">選択リストを読み込み中…</div>';
-
-  const res = await fetch("/api/inspection?op=select_options", { method: "GET" });
-  if (!res.ok) {
-    selectListBox.innerHTML = '<div class="text-sm text-red-600">選択リストの取得に失敗しました</div>';
+  if (!items || items.length === 0) {
+    wrap.textContent = "（抽出なし）";
     return;
   }
 
-  const data = await res.json();
-  const rawOptions = Array.isArray(data.options) ? data.options : [];
+  const frag = document.createDocumentFragment();
 
-  // 初期は全チェック（要件どおり）
-  renderCheckboxList(selectListBox, rawOptions, true);
+  for (let i = 0; i < items.length; i++) {
+    const txt = normalizeText(items[i]).trim();
+    if (!txt) continue;
+
+    const label = document.createElement("label");
+    label.className = "flex items-start gap-2";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "h-4 w-4 mt-0.5";
+    cb.checked = !!defaultChecked;
+
+    // data attributes
+    for (const [k, v] of Object.entries(dataAttr)) {
+      cb.dataset[k] = v;
+    }
+    cb.dataset.value = txt;
+    cb.dataset.extract = "1";
+
+    const span = document.createElement("span");
+    span.textContent = txt;
+
+    label.appendChild(cb);
+    label.appendChild(span);
+    frag.appendChild(label);
+  }
+
+  wrap.appendChild(frag);
 }
 
-/* ===== 抽出API（op名フォールバック） ===== */
-async function callExtractAPI(payload) {
-  // まず新しいop
-  let r = await fetch("/api/inspection?op=extract_text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+function renderOpGroups(containerId, groups) {
+  const wrap = $(containerId);
+  wrap.innerHTML = "";
+
+  if (!groups || groups.length === 0) {
+    wrap.textContent = "（抽出なし）";
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+
+  for (let gi = 0; gi < groups.length; gi++) {
+    const g = groups[gi] || {};
+    const title = normalizeText(g.title).trim();
+    const items = Array.isArray(g.items) ? g.items : [];
+
+    // title（チェックあり・太字・下線） ※Excel投入時は太字/下線しない（API側で解除）
+    if (title) {
+      const titleRow = document.createElement("label");
+      titleRow.className = "flex items-start gap-2 mt-2";
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "h-4 w-4 mt-0.5";
+      cb.checked = false; // 初期は未チェック
+      cb.dataset.extract = "1";
+      cb.dataset.kind = "opTitle";
+      cb.dataset.group = String(gi);
+      cb.dataset.value = title;
+
+      const span = document.createElement("span");
+      span.innerHTML = `<span style="font-weight:700;text-decoration:underline;">${escapeHtml(title)}</span>`;
+
+      titleRow.appendChild(cb);
+      titleRow.appendChild(span);
+      frag.appendChild(titleRow);
+    }
+
+    // items
+    for (let ii = 0; ii < items.length; ii++) {
+      const it = normalizeText(items[ii]).trim();
+      if (!it) continue;
+
+      const row = document.createElement("label");
+      row.className = "flex items-start gap-2 ml-5";
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "h-4 w-4 mt-0.5";
+      cb.checked = false; // 初期は未チェック
+      cb.dataset.extract = "1";
+      cb.dataset.kind = "opItem";
+      cb.dataset.group = String(gi);
+      cb.dataset.value = it;
+
+      const span = document.createElement("span");
+      span.textContent = it;
+
+      row.appendChild(cb);
+      row.appendChild(span);
+      frag.appendChild(row);
+    }
+  }
+
+  wrap.appendChild(frag);
+
+  // タイトルチェック＝配下を全ON/OFF（視認性と操作性）
+  wrap.querySelectorAll('input[data-kind="opTitle"]').forEach((tcb) => {
+    tcb.addEventListener("change", () => {
+      const g = tcb.dataset.group;
+      wrap.querySelectorAll(`input[data-kind="opItem"][data-group="${g}"]`).forEach((icb) => {
+        icb.checked = tcb.checked;
+      });
+    });
   });
 
-  // 動いていた前のopへ戻す（ここが重要）
-  if (!r.ok) {
-    r = await fetch("/api/inspection?op=extract", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+  // 配下が1つでもONならタイトルもON（Excelにタイトルも入れる要件対応）
+  wrap.querySelectorAll('input[data-kind="opItem"]').forEach((icb) => {
+    icb.addEventListener("change", () => {
+      const g = icb.dataset.group;
+      const items = Array.from(wrap.querySelectorAll(`input[data-kind="opItem"][data-group="${g}"]`));
+      const anyOn = items.some(x => x.checked);
+      const t = wrap.querySelector(`input[data-kind="opTitle"][data-group="${g}"]`);
+      if (t) t.checked = anyOn;
     });
-  }
-
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`AI抽出に失敗しました${t ? " (" + t + ")" : ""}`);
-  }
-  return await r.json();
+  });
 }
 
-/* ===== Extract ===== */
-btnExtract?.addEventListener("click", async () => {
-  if (isBusy) return;
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+async function api(op, payload) {
+  const res = await fetch(`/api/inspection?op=${encodeURIComponent(op)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {})
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status} ${txt}`);
+  }
+  return res.json();
+}
+
+// pdf.js (unpkg) を module で読み込み、ブラウザでテキスト抽出する（PDF丸投げしない＝413回避）
+async function extractPdfTextInBrowser(file) {
+  const ab = await file.arrayBuffer();
+
+  // dynamic import
+  const pdfjsLib = await import("https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.mjs");
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
+
+  const loadingTask = pdfjsLib.getDocument({ data: ab });
+  const pdf = await loadingTask.promise;
+
+  // 全ページからテキスト抽出（重いPDFもあるので上限を設ける：まずは最大30p）
+  const maxPages = Math.min(pdf.numPages, 30);
+  let out = [];
+  for (let p = 1; p <= maxPages; p++) {
+    $("overlayStep").textContent = `PDF解析 ${p}/${maxPages}`;
+    const page = await pdf.getPage(p);
+    const tc = await page.getTextContent();
+    const strings = tc.items.map((it) => (it && it.str ? it.str : "")).filter(Boolean);
+    const text = strings.join(" ");
+    if (text.trim()) {
+      out.push(`--- page ${p} ---\n${text}`);
+    }
+  }
+  return out.join("\n\n");
+}
+
+function getSelectedLabels() {
+  const labels = [];
+  if ($("lblLiion").checked) labels.push("リチウムイオン電池");
+  if ($("lblLegal").checked) labels.push("法的対象(PSE/無線)");
+  return labels;
+}
+
+function renderSelectionList() {
+  const wrap = $("selectList");
+  wrap.innerHTML = "";
+
+  if (!selectionItems || selectionItems.length === 0) {
+    wrap.textContent = "（選択リストなし）";
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  for (const txt0 of selectionItems) {
+    const txt = normalizeText(txt0).trim();
+    if (!txt) continue;
+
+    const label = document.createElement("label");
+    label.className = "flex items-start gap-2";
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "h-4 w-4 mt-0.5";
+    cb.checked = true; // 選択リストは「不要なものだけ外す」運用
+    cb.dataset.selectItem = "1";
+    cb.dataset.value = txt;
+
+    const span = document.createElement("span");
+    span.textContent = txt;
+
+    label.appendChild(cb);
+    label.appendChild(span);
+    frag.appendChild(label);
+  }
+  wrap.appendChild(frag);
+}
+
+function getSelectedSelectionItems() {
+  return Array.from(document.querySelectorAll('input[data-select-item="1"]'))
+    .filter(cb => cb.checked)
+    .map(cb => cb.dataset.value)
+    .filter(Boolean);
+}
+
+function getCheckedExtracted() {
+  const spec = [];
+  const acc = [];
+  const opTitles = [];
+  const opItems = [];
+
+  document.querySelectorAll('input[data-extract="1"]').forEach((cb) => {
+    if (!cb.checked) return;
+    const kind = cb.dataset.kind || "";
+    const v = (cb.dataset.value || "").trim();
+    if (!v) return;
+
+    if (kind === "opTitle") opTitles.push(v);
+    else if (kind === "opItem") opItems.push(v);
+    else {
+      // specs/accs は containerごとに区別したいので、親のIDで判定
+      const parent = cb.closest("#specList, #accList");
+      if (parent && parent.id === "specList") spec.push(v);
+      else if (parent && parent.id === "accList") acc.push(v);
+      else {
+        // 保険：入らないなら spec に寄せる
+        spec.push(v);
+      }
+    }
+  });
+
+  return { spec, opTitles, opItems, acc };
+}
+
+async function loadMeta() {
+  clearError();
+  try {
+    const r = await api("meta", {});
+    selectionItems = Array.isArray(r.selectionItems) ? r.selectionItems : [];
+    renderSelectionList();
+  } catch (e) {
+    showError("初期化に失敗しました: " + e.message);
+    $("selectList").textContent = "読み込み失敗";
+  }
+}
+
+async function runExtract() {
+  clearError();
+  if (!pdfFile) {
+    showError("PDFが未選択です。");
+    return;
+  }
 
   try {
-    setBusy(true, "PDFを解析中…");
+    setBusy(true, "AI抽出中", "準備", "PDFから仕様/動作/付属品/型番/製品名を抽出しています。", "PDF解析→AI抽出の順で実行します。");
+    $("overlayBar").style.width = "25%";
 
-    currentPdfFile = pdfInput.files && pdfInput.files[0] ? pdfInput.files[0] : currentPdfFile;
-    if (!currentPdfFile) throw new Error("PDFを選択してください");
+    // ブラウザでPDFテキスト抽出（413回避）
+    $("overlayStep").textContent = "PDF解析 0/0";
+    const pdfText = await extractPdfTextInBrowser(pdfFile);
+    $("overlayBar").style.width = "55%";
 
-    const pdfText = await extractPdfTextInBrowser(currentPdfFile);
+    // 未入力ならPDF抽出結果で埋める（API側でも補完するが、ここで明示）
+    const model = $("modelInput").value.trim();
+    const productName = $("productInput").value.trim();
 
-    setBusy(true, "AIで抽出中…");
+    $("overlayStep").textContent = "AI抽出";
+    const r = await api("extract", {
+      pdfText,
+      fileName: pdfFile.name,
+      modelHint: model || "",
+      productHint: productName || ""
+    });
 
-    const obj = await callExtractAPI({ filename: currentPdfFile.name, text: pdfText });
+    $("overlayBar").style.width = "85%";
 
-    // 型番/製品名：未入力なら自動反映
-    if (modelInput && !modelInput.value.trim() && obj.model) modelInput.value = obj.model;
-    if (productInput && !productInput.value.trim() && obj.product) productInput.value = obj.product;
+    extracted.model = normalizeText(r.model || "").trim();
+    extracted.productName = normalizeText(r.productName || "").trim();
+    extracted.specs = Array.isArray(r.specs) ? r.specs.map(normalizeText) : [];
+    extracted.ops = Array.isArray(r.ops) ? r.ops : [];
+    extracted.accs = Array.isArray(r.accs) ? r.accs.map(normalizeText) : [];
 
-    // 抽出結果：仕様/動作は未チェック、付属品は全チェック（前の状態）
-    renderCheckboxList(specBox, obj.specText || obj.spec || [], false);
-    renderCheckboxList(opBox, obj.opText || obj.op || [], false);
+    // フォーム自動反映（未入力時のみ）
+    if (!$("modelInput").value.trim() && extracted.model) $("modelInput").value = extracted.model;
+    if (!$("productInput").value.trim() && extracted.productName) $("productInput").value = extracted.productName;
 
-    // 付属品：取扱説明書しか出ない問題 → サーバ返り値のキー揺れも吸収
-    // accText/acc/accessories のどれでも拾う
-    const acc = obj.accText || obj.acc || obj.accessories || [];
-    renderCheckboxList(accBox, acc, true);
+    // 仕様/付属品：初期未チェック
+    renderCheckboxList("specList", extracted.specs, { defaultChecked: false });
+
+    // 動作：タイトル+アイテム。初期未チェック（タイトル連動あり）
+    renderOpGroups("opList", extracted.ops);
+
+    // 付属品：初期全チェック（要件）
+    renderCheckboxList("accList", extracted.accs, { defaultChecked: true });
+
+    $("overlayBar").style.width = "100%";
   } catch (e) {
-    console.error(e);
-    alert(e.message || "AI抽出に失敗しました");
+    showError("AI抽出に失敗しました: " + e.message);
   } finally {
     setBusy(false);
   }
-});
-
-/* ===== 生成API（op名フォールバック） ===== */
-async function callGenerateAPI(payload) {
-  // まず generate_text
-  let r = await fetch("/api/inspection?op=generate_text", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-
-  // 前に動いていた可能性があるopへ
-  if (!r.ok) {
-    r = await fetch("/api/inspection?op=generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-  }
-
-  if (!r.ok) {
-    const t = await r.text().catch(() => "");
-    throw new Error(`生成に失敗しました${t ? " (" + t + ")" : ""}`);
-  }
-  return r;
 }
 
-/* ===== Generate ===== */
-btnGenerate?.addEventListener("click", async () => {
-  if (isBusy) return;
+async function runGenerate() {
+  clearError();
+
+  const model = $("modelInput").value.trim();
+  const productName = $("productInput").value.trim();
+
+  if (!model || !productName) {
+    showError("型番と製品名を入力してください（未入力なら先に「PDFをAIに読み取らせる」を実行してください）。");
+    return;
+  }
+
+  const selectedLabels = getSelectedLabels();
+  const selectedSelectionItems = getSelectedSelectionItems();
+  const checked = getCheckedExtracted();
 
   try {
-    setBusy(true, "Excel生成中…");
+    setBusy(true, "Excel生成中", "準備", "テンプレートに差し込み、Excelを生成しています。", "SharePointテンプレ取得→差し込み→書式調整→DL");
+    $("overlayBar").style.width = "25%";
 
-    currentPdfFile = pdfInput.files && pdfInput.files[0] ? pdfInput.files[0] : currentPdfFile;
-    if (!currentPdfFile) throw new Error("PDFを選択してください");
-
-    // サーバ側が text 必須の作りでも通るように送る
-    const pdfText = await extractPdfTextInBrowser(currentPdfFile);
-
-    const selectedLabels = [];
-    if (lblLiion?.checked) selectedLabels.push("リチウムイオン電池");
-    if (lblLegal?.checked) selectedLabels.push("法的対象(PSE/無線)");
-
-    // SharePoint選択リスト（チェックされたもののみ）
-    selectedLabels.push(...collectCheckedTexts(selectListBox));
-
-    // 抽出結果（チェックされたもののみ）
-    const aiPicked = [
-      ...collectCheckedTexts(specBox).map((t) => ({ kind: "仕様", text: t })),
-      ...collectCheckedTexts(opBox).map((t) => ({ kind: "動作", text: t })),
-      ...collectCheckedTexts(accBox).map((t) => ({ kind: "付属品", text: t })),
-    ];
-
-    const payload = {
-      filename: currentPdfFile.name,
-      text: pdfText,
+    const r = await api("generate", {
+      model,
+      productName,
       selectedLabels,
-      aiPicked,
-      model: modelInput?.value || "",
-      product: productInput?.value || "",
-    };
+      selectedSelectionItems,
+      specText: checked.spec,
+      opTitles: checked.opTitles,
+      opItems: checked.opItems,
+      accText: checked.acc
+    });
 
-    const r = await callGenerateAPI(payload);
-    const blob = await r.blob();
+    $("overlayBar").style.width = "90%";
 
-    const url = URL.createObjectURL(blob);
+    if (!r || !r.fileBase64) {
+      throw new Error("生成結果が不正です。");
+    }
+
+    const bin = Uint8Array.from(atob(r.fileBase64), c => c.charCodeAt(0));
+    const blob = new Blob([bin], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+
     const a = document.createElement("a");
-    a.href = url;
-    a.download = "inspection.xlsx"; // サーバが Content-Disposition を付けるなら上書きされます
+    a.href = URL.createObjectURL(blob);
+    a.download = r.fileName || `検品リスト_${model}_${productName}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(a.href);
+
+    $("overlayBar").style.width = "100%";
   } catch (e) {
-    console.error(e);
-    alert(e.message || "生成に失敗しました");
+    showError("Excel生成に失敗しました: " + e.message);
   } finally {
     setBusy(false);
   }
-});
+}
 
-/* ===== init ===== */
-document.addEventListener("DOMContentLoaded", async () => {
-  try {
-    await loadSelectOptions();
-  } catch (e) {
-    console.error(e);
-    if (selectListBox) {
-      selectListBox.innerHTML = '<div class="text-sm text-red-600">選択リストの取得に失敗しました</div>';
+function initPdfDrop() {
+  const dz = $("dropzone");
+  const input = $("pdfInput");
+
+  dz.addEventListener("click", () => input.click());
+
+  dz.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    dz.classList.add("border-blue-400");
+  });
+  dz.addEventListener("dragleave", () => dz.classList.remove("border-blue-400"));
+  dz.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dz.classList.remove("border-blue-400");
+    const f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f && f.type === "application/pdf") {
+      pdfFile = f;
+      setPdfStatus();
+    } else {
+      showError("PDFファイルを指定してください。");
     }
-  }
+  });
+
+  input.addEventListener("change", () => {
+    const f = input.files && input.files[0];
+    if (f && f.type === "application/pdf") {
+      pdfFile = f;
+      setPdfStatus();
+    } else if (f) {
+      showError("PDFファイルを指定してください。");
+    }
+  });
+
+  // ラベルはデフォルトOFF（要件：両方ONになってしまう不具合対策）
+  $("lblLiion").checked = false;
+  $("lblLegal").checked = false;
+}
+
+window.addEventListener("DOMContentLoaded", async () => {
+  initPdfDrop();
+  setPdfStatus();
+
+  $("btnExtract").addEventListener("click", runExtract);
+  $("btnGenerate").addEventListener("click", runGenerate);
+
+  await loadMeta();
 });
