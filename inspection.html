@@ -1,11 +1,12 @@
+<!-- inspection.html（全文置き換え） -->
 <!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>検品リスト作成</title>
-
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/inspection.js" defer></script>
 
   <style>
     body{
@@ -13,28 +14,35 @@
       margin:0;padding:0;
     }
 
-    /* ===== NAV（他ツール風） ===== */
+    /* ===== Top Nav (kensho.html と同一系) ===== */
     .tool-nav{
       position: sticky; top: 0; z-index: 100;
       background:#374151; padding: 10px 16px;
       box-shadow: 0 2px 4px rgba(0,0,0,.12);
-      display:flex; justify-content:center; gap: 14px; align-items:center; flex-wrap: wrap;
+      display:flex; justify-content:center; gap: 14px;
+      align-items:center; flex-wrap: wrap;
     }
     .tool-nav .nav-groupbox{
       display:flex; flex-direction:column; align-items:center; gap: 6px;
-      padding: 8px 10px; border: 1px solid rgba(255,255,255,.14);
-      border-radius: 10px; background: rgba(255,255,255,.04);
+      padding: 8px 10px;
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 10px;
+      background: rgba(255,255,255,.04);
     }
     .tool-nav .nav-heading{
-      display:flex; align-items:center; justify-content:center; gap:6px; width:100%;
+      display:flex; align-items:center; justify-content:center; gap:6px;
+      width:100%;
       font-size: 12px; font-weight: 700; letter-spacing: .08em;
-      color: rgba(243,244,246,.75); line-height: 1; user-select: none;
+      color: rgba(243,244,246,.75);
+      line-height: 1; user-select: none;
     }
-    .tool-nav .nav-heading::before{ content:"⭐"; opacity:.9; }
-    .tool-nav .nav-links{ display:flex; gap: 8px; align-items:center; flex-wrap: wrap; justify-content:center; }
+    .tool-nav .nav-links{
+      display:flex; gap: 8px; align-items:center; flex-wrap: wrap;
+    }
     .tool-nav a{
       color:#f3f4f6; text-decoration:none; font-weight: 600; font-size: 14px;
-      padding: 8px 12px; border-radius: 999px; background: rgba(255,255,255,.06);
+      padding: 8px 12px; border-radius: 999px;
+      background: rgba(255,255,255,.06);
       transition: background-color .15s, transform .05s;
       display:inline-flex; align-items:center; gap: 6px;
     }
@@ -42,29 +50,32 @@
     .tool-nav a:active{ transform: translateY(1px); }
     .tool-nav a.active{ background:#172554; color:#fff; }
 
-    /* 内部スクロール禁止（全体スクロールのみ） */
-    .no-inner-scroll{ overflow: visible !important; max-height: none !important; }
-
-    /* Dropzone 強調 */
-    .dz-over{ border-color:#2563eb !important; background:#eff6ff !important; }
-
-    /* ===== オーバーレイ（復活） ===== */
-    .overlay {
-      position: fixed; inset: 0; z-index: 9999;
-      background: rgba(15,23,42,.55);
-      display: none;
-      align-items: center; justify-content: center;
-      padding: 24px;
+    /* overlay */
+    .overlay{
+      position: fixed; inset: 0; z-index: 2000;
+      background: rgba(17,24,39,.45);
+      display:none;
+      align-items:center; justify-content:center;
+      padding: 16px;
     }
-    .overlay.show { display: flex; }
+    .overlay.show{ display:flex; }
+    .overlay-card{
+      width:min(560px, 100%);
+      background:#111827;
+      color:#fff;
+      border-radius: 14px;
+      padding: 18px 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35);
+      border: 1px solid rgba(255,255,255,.12);
+    }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
   </style>
 </head>
 
-<body class="bg-slate-100">
-
+<body class="bg-gray-100 text-gray-800">
   <nav class="tool-nav">
     <div class="nav-groupbox">
-      <div class="nav-heading">翻訳</div>
+      <div class="nav-heading">⭐翻訳</div>
       <div class="nav-links">
         <a href="/index.html">翻訳ツール</a>
         <a href="/verify.html">検証結果翻訳</a>
@@ -73,8 +84,9 @@
         <a href="/word-translate.html">Word翻訳</a>
       </div>
     </div>
+
     <div class="nav-groupbox">
-      <div class="nav-heading">その他</div>
+      <div class="nav-heading">⭐その他</div>
       <div class="nav-links">
         <a href="/report.html">修理レポート</a>
         <a href="/kensho.html">検証項目作成</a>
@@ -85,166 +97,128 @@
     </div>
   </nav>
 
-  <!-- ===== オーバーレイ（処理中） ===== -->
+  <!-- overlay -->
   <div id="overlay" class="overlay" aria-hidden="true">
-    <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md space-y-3">
-      <div class="text-sm font-semibold">処理中</div>
-      <div id="overlayMsg" class="text-sm text-slate-700">処理を開始しました…</div>
-      <div class="text-xs text-slate-500">完了まで画面操作はできません。</div>
+    <div class="overlay-card">
+      <div class="flex items-center justify-between gap-3">
+        <div class="font-bold text-lg" id="overlayTitle">処理中</div>
+        <div class="text-xs text-gray-300 mono" id="overlayStep">...</div>
+      </div>
+      <div class="mt-3 text-sm text-gray-200 leading-relaxed" id="overlayMsg">処理しています。画面は操作できません。</div>
+      <div class="mt-4 w-full bg-gray-700/60 rounded-full h-2 overflow-hidden">
+        <div id="overlayBar" class="h-2 bg-blue-400 w-1/3 rounded-full"></div>
+      </div>
+      <div class="mt-3 text-xs text-gray-300 mono" id="overlayHint"></div>
     </div>
   </div>
 
-  <main class="max-w-5xl mx-auto px-4 py-6">
-    <div class="bg-white rounded-2xl shadow p-6 space-y-8">
-
-      <h1 class="text-xl font-bold">検品リスト作成ツール</h1>
+  <main class="max-w-5xl mx-auto px-4 py-8">
+    <div class="bg-white rounded-2xl shadow p-6 border border-gray-200">
+      <h1 class="text-2xl font-bold">検品リスト作成ツール</h1>
 
       <!-- PDF -->
-      <section class="space-y-3">
-        <div class="text-sm font-semibold">PDF（ドラッグ＆ドロップ / クリック選択）</div>
+      <section class="mt-6">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-lg font-bold">PDF（ドラッグ＆ドロップ / クリック選択）</h2>
+          <div class="text-sm text-gray-500" id="pdfStatus">未選択</div>
+        </div>
 
-        <label
-          id="dropZone"
-          class="block border-2 border-dashed border-slate-300 rounded-xl p-6 bg-slate-50 cursor-pointer hover:bg-slate-100 transition"
-        >
-          <div class="text-center space-y-2">
-            <div class="text-slate-700">ここにPDFをドロップ（またはクリックで選択）</div>
-            <div id="fileName" class="text-xs text-slate-500">未選択</div>
+        <div id="dropzone"
+             class="mt-3 border-2 border-dashed border-gray-300 rounded-xl p-6 bg-gray-50 hover:bg-gray-100 transition cursor-pointer">
+          <div class="text-center">
+            <div class="font-semibold">ここにPDFをドロップ（またはクリックで選択）</div>
+            <div class="mt-2 text-xs text-gray-500" id="pdfNameHint">※PDFをAI抽出に使用します</div>
           </div>
           <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
-        </label>
+        </div>
+
+        <!-- AI抽出ブロック（ここに型番・製品名も配置） -->
+        <div class="mt-5 bg-white border border-gray-200 rounded-2xl p-5">
+          <div class="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div class="font-bold">PDF読み取り（AI抽出）</div>
+              <div class="text-sm text-gray-500 mt-1">
+                抽出結果を確認し、必要なものだけチェックして検品リストに反映します（初期は未チェック）。
+              </div>
+            </div>
+            <button id="btnExtract"
+                    class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700">
+              PDFをAIに読み取らせる
+            </button>
+          </div>
+
+          <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-bold mb-1">型番（未入力ならPDFから自動取得）</label>
+              <input id="modelInput" type="text"
+                     class="w-full border border-gray-300 rounded-xl px-3 py-2"
+                     placeholder="未入力ならPDFから自動取得" />
+            </div>
+            <div>
+              <label class="block text-sm font-bold mb-1">製品名（未入力ならPDFから自動取得）</label>
+              <input id="productInput" type="text"
+                     class="w-full border border-gray-300 rounded-xl px-3 py-2"
+                     placeholder="未入力ならPDFから自動取得" />
+            </div>
+          </div>
+
+          <!-- 抽出結果：1列・スクロール無し（全体スクロールのみ） -->
+          <div class="mt-5 space-y-4">
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="font-bold">仕様（AI抽出）</div>
+              <div id="specList" class="mt-2 space-y-2 text-sm text-gray-700">（抽出なし）</div>
+            </div>
+
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="font-bold">動作（AI抽出）</div>
+              <div id="opList" class="mt-2 space-y-2 text-sm text-gray-700">（抽出なし）</div>
+            </div>
+
+            <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
+              <div class="font-bold">付属品（AI抽出）</div>
+              <div class="text-xs text-gray-500">※取扱説明書はPDFに記載が無くても候補に出します（表記ブレ吸収）。</div>
+              <div id="accList" class="mt-2 space-y-2 text-sm text-gray-700">（抽出なし）</div>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <!-- ラベル選択（デフォルト OFF に戻す） -->
-      <section class="space-y-3">
-        <div class="text-sm font-semibold">ラベル選択</div>
-
-        <div class="flex flex-wrap gap-6 text-sm">
-          <label class="flex items-center gap-2">
+      <!-- ラベル選択 -->
+      <section class="mt-6">
+        <h2 class="text-lg font-bold">ラベル選択</h2>
+        <div class="mt-2 flex flex-wrap gap-6 text-sm">
+          <label class="inline-flex items-center gap-2">
             <input id="lblLiion" type="checkbox" class="h-4 w-4" />
             リチウムイオン電池
           </label>
-          <label class="flex items-center gap-2">
+          <label class="inline-flex items-center gap-2">
             <input id="lblLegal" type="checkbox" class="h-4 w-4" />
             法的対象(PSE/無線)
           </label>
         </div>
-
-        <div class="text-xs text-slate-600">
-          ※ 下の選択リストは SharePoint（テンプレExcel）から取得します。不要なものだけチェックを外します（初期は全チェック）。
-        </div>
-
-        <div id="selectList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-slate-50 p-4"></div>
       </section>
 
-      <!-- PDF読み取り -->
-      <section class="space-y-4 border border-slate-200 rounded-xl p-4 bg-slate-50">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <div class="text-sm font-semibold">PDF読み取り（AI抽出）</div>
-            <div class="text-xs text-slate-600 mt-1">
-              抽出結果は初期未チェックです。必要なものだけチェックしてExcelに反映します。付属品は初期全チェックです。
-            </div>
-          </div>
-
-          <button
-            id="btnExtract"
-            type="button"
-            class="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-          >
-            PDFをAIに読み取らせる
-          </button>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="space-y-1">
-            <label class="text-sm font-semibold">型番（未入力ならPDFから自動取得）</label>
-            <input id="modelInput" type="text" class="w-full border rounded-lg px-3 py-2 bg-white" />
-          </div>
-          <div class="space-y-1">
-            <label class="text-sm font-semibold">製品名（未入力ならPDFから自動取得）</label>
-            <input id="productInput" type="text" class="w-full border rounded-lg px-3 py-2 bg-white" />
-          </div>
-        </div>
-
-        <div class="space-y-6">
-          <div class="space-y-2">
-            <div class="text-sm font-semibold">仕様</div>
-            <div id="specList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-white p-4"></div>
-          </div>
-
-          <div class="space-y-2">
-            <div class="text-sm font-semibold">動作</div>
-            <div id="opList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-white p-4"></div>
-          </div>
-
-          <div class="space-y-2">
-            <div class="text-sm font-semibold">付属品</div>
-            <div id="accList" class="no-inner-scroll space-y-2 border border-slate-200 rounded-xl bg-white p-4"></div>
-          </div>
-        </div>
+      <!-- 選択リスト（SharePointの検品項目リスト: A列=選択リスト の C列を表示） -->
+      <section class="mt-6">
+        <h2 class="text-lg font-bold">選択リスト（不要なものだけチェックを外す）</h2>
+        <div class="mt-2 text-xs text-gray-500">※「検品項目リスト」シートの A列=「選択リスト」の C列を表示しています。</div>
+        <div id="selectList" class="mt-3 space-y-2 text-sm text-gray-700">読み込み中...</div>
       </section>
 
-      <!-- 生成 -->
-      <section class="space-y-3">
-        <button
-          id="btnGenerate"
-          type="button"
-          class="w-full md:w-auto px-5 py-3 rounded-xl bg-slate-900 text-white hover:bg-black disabled:opacity-60"
-        >
+      <!-- 実行 -->
+      <section class="mt-8 flex items-center gap-3 flex-wrap">
+        <button id="btnGenerate"
+                class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold hover:bg-black">
           検品リストExcel生成
         </button>
-
-        <div id="progress" class="text-sm text-slate-600 hidden">処理中…</div>
+        <div class="text-sm text-gray-500" id="genHint"></div>
       </section>
 
+      <!-- エラー表示（警告/AI抽出欄は不要なので削除済み。ここは最低限のエラーのみ） -->
+      <section class="mt-4">
+        <div id="errorBox" class="hidden border border-red-200 bg-red-50 text-red-800 rounded-xl p-3 text-sm"></div>
+      </section>
     </div>
   </main>
-
-  <!-- D&D -->
-  <script>
-    (function(){
-      const dz = document.getElementById('dropZone');
-      const input = document.getElementById('pdfInput');
-      const fileName = document.getElementById('fileName');
-
-      function setName(file){
-        fileName.textContent = file
-          ? `${file.name} (${Math.round(file.size/1024)} KB)`
-          : '未選択';
-      }
-
-      input.addEventListener('change', () => setName(input.files && input.files[0]));
-
-      ['dragenter','dragover'].forEach(evt => {
-        dz.addEventListener(evt, (e) => {
-          e.preventDefault(); e.stopPropagation();
-          dz.classList.add('dz-over');
-        });
-      });
-      ['dragleave','drop'].forEach(evt => {
-        dz.addEventListener(evt, (e) => {
-          e.preventDefault(); e.stopPropagation();
-          dz.classList.remove('dz-over');
-        });
-      });
-
-      dz.addEventListener('drop', (e) => {
-        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-        if (!f) return;
-        if (f.type !== 'application/pdf' && !f.name.toLowerCase().endsWith('.pdf')) {
-          alert('PDFファイルを選択してください');
-          return;
-        }
-        const dt = new DataTransfer();
-        dt.items.add(f);
-        input.files = dt.files;
-        setName(f);
-      });
-    })();
-  </script>
-
-  <!-- pdf.js は inspection.js 内で ESM import -->
-  <script type="module" src="/inspection.js"></script>
 </body>
 </html>
