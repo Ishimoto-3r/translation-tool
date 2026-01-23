@@ -1,39 +1,10 @@
 // inspection.js（全文）
+console.log("[inspection] front version: v6");
 
 let pdfFile = null;
 let busy = false;
 
 let aiExtract = { specText: [], opText: [], accText: [] };
-
-// pdf.js setup（大きいPDFはテキスト抽出して送る：Vercel 413 回避）
-let cachedPdfText = "";
-function hasPdfJs() {
-  return typeof window !== "undefined" && window.pdfjsLib;
-}
-async function extractPdfTextWithPdfJs(file, maxChars = 120000) {
-  if (!hasPdfJs()) throw new Error("pdf.js が読み込めていません");
-  const arrayBuf = await file.arrayBuffer();
-  const pdfjsLib = window.pdfjsLib;
-  // workerSrc を明示（CDN）
-  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
-  }
-
-  const loadingTask = pdfjsLib.getDocument({ data: arrayBuf });
-  const pdf = await loadingTask.promise;
-
-  let out = "";
-  for (let p = 1; p <= pdf.numPages; p++) {
-    const page = await pdf.getPage(p);
-    const content = await page.getTextContent();
-    const s = content.items.map((it) => (it.str || "")).join(" ");
-    if (s) out += s + "\n";
-    if (out.length >= maxChars) break;
-  }
-  return out.slice(0, maxChars);
-}
-
 
 const $ = (id) => document.getElementById(id);
 
@@ -89,7 +60,6 @@ function showStatus(msg) {
 
 function setPdf(file) {
   pdfFile = file;
-  cachedPdfText = "";
 
   const nameEl = $("pdfName");
   if (nameEl) nameEl.textContent = file ? `${file.name} (${Math.round(file.size / 1024)} KB)` : "";
@@ -223,33 +193,16 @@ async function runExtract() {
   showStatus("AI抽出中…");
 
   try {
-    let res;
+    const ab = await pdfFile.arrayBuffer();
 
-    // 大きいPDFは Vercel 413 回避のため pdf.js でテキスト抽出して送信
-    const LARGE_PDF_BYTES = 3_500_000; // 目安（約3.5MB）
-    if (pdfFile.size >= LARGE_PDF_BYTES) {
-      if (!cachedPdfText) {
-        cachedPdfText = await extractPdfTextWithPdfJs(pdfFile);
-      }
-      res = await fetch("/api/inspection?op=extract", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pdfText: cachedPdfText,
-          filename: pdfFile.name || "manual.pdf",
-        }),
-      });
-    } else {
-      const ab = await pdfFile.arrayBuffer();
-      res = await fetch("/api/inspection?op=extract", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/pdf",
-          "x-filename": encodeURIComponent(pdfFile.name || "manual.pdf"),
-        },
-        body: ab,
-      });
-    }
+    const res = await fetch("/api/inspection?op=extract", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/pdf",
+        "x-filename": encodeURIComponent(pdfFile.name || "manual.pdf"),
+      },
+      body: ab,
+    });
 
     if (!res.ok) {
       const j = await res.json().catch(() => null);
@@ -277,14 +230,71 @@ async function runExtract() {
   } catch (e) {
     console.error(e);
     showStatus("AI抽出に失敗しました");
-    alert(
-      "AI抽出に失敗しました。\n\n" +
-        (e?.message ? String(e.message) : String(e))
-    );
+    alert("AI抽出に失敗しました。\n" + (e?.message || String(e)));
   } finally {
-    setBusy(false);
-    updateButtons();
+    setBusy(false, "");
+    const extractBtn = $("extractBtn");
+    if (extractBtn) extractBtn.disabled = !pdfFile;
   }
+}
+
+function setupPdfPicker() {
+  const drop = $("pdfDrop");
+  const input = $("pdfInput");
+  if (!drop || !input) return;
+
+  drop.addEventListener("click", () => {
+    if (busy) return;
+    input.click();
+  });
+
+  input.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
+      alert("PDFを選択してください。");
+      return;
+    }
+    setPdf(file);
+
+    aiExtract = { specText: [], opText: [], accText: [] };
+    renderAiBox("aiSpecBox", "仕様", []);
+    renderAiBox("aiOpBox", "動作", []);
+    renderAiBox("aiAccBox", "付属品", []);
+
+    showStatus("PDFを選択しました。必要なら「PDFをAIに読み取らせる」を押してください。");
+  });
+
+  drop.addEventListener("dragover", (e) => {
+    if (busy) return;
+    e.preventDefault();
+    drop.classList.add("bg-slate-100");
+  });
+
+  drop.addEventListener("dragleave", () => {
+    drop.classList.remove("bg-slate-100");
+  });
+
+  drop.addEventListener("drop", (e) => {
+    if (busy) return;
+    e.preventDefault();
+    drop.classList.remove("bg-slate-100");
+
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) {
+      alert("PDFをドロップしてください。");
+      return;
+    }
+    setPdf(file);
+
+    aiExtract = { specText: [], opText: [], accText: [] };
+    renderAiBox("aiSpecBox", "仕様", []);
+    renderAiBox("aiOpBox", "動作", []);
+    renderAiBox("aiAccBox", "付属品", []);
+
+    showStatus("PDFをドロップしました。必要なら「PDFをAIに読み取らせる」を押してください。");
+  });
 }
 
 async function runGenerate() {
@@ -346,51 +356,6 @@ async function runGenerate() {
     setBusy(false, "");
     setPdf(pdfFile);
   }
-}
-
-
-function setupPdfPicker() {
-  const drop = $("pdfDrop");
-  const input = $("pdfInput");
-  const nameEl = $("pdfName");
-  if (!drop || !input) return;
-
-  const setFile = (file) => {
-    if (!file) return;
-    if (file.type !== "application/pdf") {
-      alert("PDFファイルを選択してください。");
-      return;
-    }
-    pdfFile = file;
-    if (nameEl) nameEl.textContent = file.name || "selected.pdf";
-    const extractBtn = $("extractBtn");
-    if (extractBtn) extractBtn.disabled = false;
-  };
-
-  drop.addEventListener("click", () => input.click());
-
-  input.addEventListener("change", (e) => {
-    const f = e.target.files && e.target.files[0];
-    setFile(f);
-    // 同じファイルを再選択できるように
-    input.value = "";
-  });
-
-  drop.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    drop.classList.add("ring-2", "ring-slate-300");
-  });
-
-  drop.addEventListener("dragleave", () => {
-    drop.classList.remove("ring-2", "ring-slate-300");
-  });
-
-  drop.addEventListener("drop", (e) => {
-    e.preventDefault();
-    drop.classList.remove("ring-2", "ring-slate-300");
-    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    setFile(f);
-  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
