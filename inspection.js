@@ -3,7 +3,12 @@
 let pdfFile = null;
 let busy = false;
 
-let aiExtract = { specText: [], opText: [], accText: [] };
+let aiExtract = {
+  specText: [],
+  opText: [],
+  accText: [],
+  opGroups: null, // [{title, items}]
+};
 
 const $ = (id) => document.getElementById(id);
 
@@ -39,7 +44,7 @@ function setBusy(on, msg) {
       el.disabled = busy;
     }
     if (id === "selectListBox" || id.startsWith("ai")) {
-      el.querySelectorAll("input[type=checkbox]").forEach((cb) => cb.disabled = busy);
+      el.querySelectorAll("input[type=checkbox]").forEach((cb) => (cb.disabled = busy));
     }
     if (id === "pdfDrop") {
       el.style.pointerEvents = busy ? "none" : "auto";
@@ -127,7 +132,7 @@ function collectSelectedLabels() {
   return labels.filter((x) => (seen.has(x) ? false : (seen.add(x), true)));
 }
 
-function renderAiBox(boxId, kind, lines) {
+function renderSimpleList(boxId, kind, lines, defaultChecked) {
   const box = $(boxId);
   if (!box) return;
   box.innerHTML = "";
@@ -146,9 +151,10 @@ function renderAiBox(boxId, kind, lines) {
 
     const cb = document.createElement("input");
     cb.type = "checkbox";
-    cb.checked = false; // 初期未チェック
+    cb.checked = !!defaultChecked;
     cb.dataset.kind = kind;
     cb.dataset.text = line;
+    cb.dataset.isTitle = "0";
     cb.className = "mt-1";
 
     const span = document.createElement("span");
@@ -160,6 +166,67 @@ function renderAiBox(boxId, kind, lines) {
   }
 }
 
+// 動作：グループ（タイトル＋items）表示
+function renderOpGrouped(opGroups) {
+  const box = $("aiOpBox");
+  if (!box) return;
+  box.innerHTML = "";
+
+  if (!Array.isArray(opGroups) || opGroups.length === 0) {
+    box.innerHTML = `<div class="text-xs text-slate-500">（抽出なし）</div>`;
+    return;
+  }
+
+  for (const g of opGroups) {
+    const title = toText(g?.title).trim();
+    const items = Array.isArray(g?.items) ? g.items : [];
+
+    if (title) {
+      const rowT = document.createElement("label");
+      rowT.className = "flex items-start gap-2 py-1";
+
+      const cbT = document.createElement("input");
+      cbT.type = "checkbox";
+      cbT.checked = false; // 動作は初期未チェック（タイトルも同様）
+      cbT.dataset.kind = "動作";
+      cbT.dataset.text = title;
+      cbT.dataset.isTitle = "1";
+      cbT.className = "mt-1";
+
+      const spanT = document.createElement("span");
+      spanT.textContent = title;
+      spanT.className = "font-bold";
+
+      rowT.appendChild(cbT);
+      rowT.appendChild(spanT);
+      box.appendChild(rowT);
+    }
+
+    for (const raw of items) {
+      const line = toText(raw).trim();
+      if (!line) continue;
+
+      const row = document.createElement("label");
+      row.className = "flex items-start gap-2 py-1";
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = false; // 動作は初期未チェック
+      cb.dataset.kind = "動作";
+      cb.dataset.text = line;
+      cb.dataset.isTitle = "0";
+      cb.className = "mt-1";
+
+      const span = document.createElement("span");
+      span.textContent = line;
+
+      row.appendChild(cb);
+      row.appendChild(span);
+      box.appendChild(row);
+    }
+  }
+}
+
 function collectAiSelected() {
   const picked = [];
   ["aiSpecBox", "aiOpBox", "aiAccBox"].forEach((id) => {
@@ -167,7 +234,11 @@ function collectAiSelected() {
     if (!box) return;
     box.querySelectorAll("input[type=checkbox]").forEach((cb) => {
       if (cb.checked && cb.dataset.kind && cb.dataset.text) {
-        picked.push({ kind: cb.dataset.kind, text: cb.dataset.text });
+        picked.push({
+          kind: cb.dataset.kind,
+          text: cb.dataset.text,
+          isTitle: cb.dataset.isTitle === "1",
+        });
       }
     });
   });
@@ -179,7 +250,7 @@ function setIfEmpty(inputId, newVal) {
   if (!el) return;
   const cur = (el.value || "").trim();
   const next = (newVal || "").toString().trim();
-  if (!cur && next) el.value = next; // ★空のときだけ自動入力
+  if (!cur && next) el.value = next;
 }
 
 async function runExtract() {
@@ -215,13 +286,23 @@ async function runExtract() {
       specText: Array.isArray(data.specText) ? data.specText : [],
       opText: Array.isArray(data.opText) ? data.opText : [],
       accText: Array.isArray(data.accText) ? data.accText : [],
+      opGroups: Array.isArray(data.opGroups) ? data.opGroups : null,
     };
 
-    renderAiBox("aiSpecBox", "仕様", aiExtract.specText);
-    renderAiBox("aiOpBox", "動作", aiExtract.opText);
-    renderAiBox("aiAccBox", "付属品", aiExtract.accText);
+    // 仕様：初期未チェック
+    renderSimpleList("aiSpecBox", "仕様", aiExtract.specText, false);
 
-    // ★ 型番・製品名を自動入力（未入力時のみ）
+    // 動作：opGroupsがあればタイトル＋itemsで描画（タイトルもチェック有＆太字）
+    if (aiExtract.opGroups && aiExtract.opGroups.length > 0) {
+      renderOpGrouped(aiExtract.opGroups);
+    } else {
+      renderSimpleList("aiOpBox", "動作", aiExtract.opText, false);
+    }
+
+    // 付属品：初期全チェック
+    renderSimpleList("aiAccBox", "付属品", aiExtract.accText, true);
+
+    // 型番・製品名を自動入力（未入力時のみ）
     setIfEmpty("modelInput", data.model);
     setIfEmpty("productInput", data.product);
 
@@ -256,10 +337,10 @@ function setupPdfPicker() {
     }
     setPdf(file);
 
-    aiExtract = { specText: [], opText: [], accText: [] };
-    renderAiBox("aiSpecBox", "仕様", []);
-    renderAiBox("aiOpBox", "動作", []);
-    renderAiBox("aiAccBox", "付属品", []);
+    // 表示クリア
+    renderSimpleList("aiSpecBox", "仕様", [], false);
+    renderSimpleList("aiOpBox", "動作", [], false);
+    renderSimpleList("aiAccBox", "付属品", [], true);
 
     showStatus("PDFを選択しました。必要なら「PDFをAIに読み取らせる」を押してください。");
   });
@@ -287,10 +368,10 @@ function setupPdfPicker() {
     }
     setPdf(file);
 
-    aiExtract = { specText: [], opText: [], accText: [] };
-    renderAiBox("aiSpecBox", "仕様", []);
-    renderAiBox("aiOpBox", "動作", []);
-    renderAiBox("aiAccBox", "付属品", []);
+    // 表示クリア
+    renderSimpleList("aiSpecBox", "仕様", [], false);
+    renderSimpleList("aiOpBox", "動作", [], false);
+    renderSimpleList("aiAccBox", "付属品", [], true);
 
     showStatus("PDFをドロップしました。必要なら「PDFをAIに読み取らせる」を押してください。");
   });
@@ -373,7 +454,8 @@ document.addEventListener("DOMContentLoaded", () => {
     genBtn.addEventListener("click", runGenerate);
   }
 
-  renderAiBox("aiSpecBox", "仕様", []);
-  renderAiBox("aiOpBox", "動作", []);
-  renderAiBox("aiAccBox", "付属品", []);
+  // 初期表示
+  renderSimpleList("aiSpecBox", "仕様", [], false);
+  renderSimpleList("aiOpBox", "動作", [], false);
+  renderSimpleList("aiAccBox", "付属品", [], true);
 });
