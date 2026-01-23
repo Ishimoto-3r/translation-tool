@@ -348,6 +348,51 @@ async function runGenerate() {
   }
 }
 
+
+function setupPdfPicker() {
+  const drop = $("pdfDrop");
+  const input = $("pdfInput");
+  const nameEl = $("pdfName");
+  if (!drop || !input) return;
+
+  const setFile = (file) => {
+    if (!file) return;
+    if (file.type !== "application/pdf") {
+      alert("PDFファイルを選択してください。");
+      return;
+    }
+    pdfFile = file;
+    if (nameEl) nameEl.textContent = file.name || "selected.pdf";
+    const extractBtn = $("extractBtn");
+    if (extractBtn) extractBtn.disabled = false;
+  };
+
+  drop.addEventListener("click", () => input.click());
+
+  input.addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    setFile(f);
+    // 同じファイルを再選択できるように
+    input.value = "";
+  });
+
+  drop.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    drop.classList.add("ring-2", "ring-slate-300");
+  });
+
+  drop.addEventListener("dragleave", () => {
+    drop.classList.remove("ring-2", "ring-slate-300");
+  });
+
+  drop.addEventListener("drop", (e) => {
+    e.preventDefault();
+    drop.classList.remove("ring-2", "ring-slate-300");
+    const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    setFile(f);
+  });
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   setupPdfPicker();
   loadSelectOptions();
