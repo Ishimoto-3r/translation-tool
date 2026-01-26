@@ -5,12 +5,12 @@
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ===== PDF text extraction (server-side) =====
 async function extractPdfTextFromBuffer(buf) {
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.js");
   const u8 = new Uint8Array(buf);
   const loadingTask = pdfjsLib.getDocument({ data: u8, disableWorker: true });
   const pdf = await loadingTask.promise;
