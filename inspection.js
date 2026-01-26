@@ -2,7 +2,6 @@
 let pdfFile = null;
 const MAX_DD_BYTES = 4 * 1024 * 1024; // 4MB（D&D推奨上限）
 const MAX_SELECTION_ITEMS = 50;
-const MAX_PDF_TEXT_CHARS = 20000;
 const MAX_AI_ITEMS = 50;
 
 let selectionItems = []; // SharePointの「選択リスト」C列（表示用）
@@ -72,116 +71,6 @@ function normalizeText(v) {
 function capList(list, max = MAX_AI_ITEMS) {
   return Array.isArray(list) ? list.slice(0, max) : [];
 }
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error("File read failed"));
-    reader.readAsDataURL(file);
-  });
-}
-
-
-// --- PDF.js（クライアント側でPDFテキスト抽出：大きいPDFの413回避） ---
-async function ensurePdfJsReady() {
-  if (window.pdfjsLib && window.pdfjsLib.getDocument) return;
-
-  const candidates = [
-    // jsDelivr（優先）
-    {
-      lib: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
-      worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js",
-    },
-    // cdnjs
-    {
-      lib: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
-      worker: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
-    },
-    // 予備（古め）
-    {
-      lib: "https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js",
-      worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.worker.min.js",
-    },
-  ];
-
-  const loadScript = (src) =>
-    new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = src;
-      s.async = true;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error("Failed to load: " + src));
-      document.head.appendChild(s);
-    });
-
-  let lastErr = null;
-  for (const c of candidates) {
-    try {
-      await loadScript(c.lib);
-      if (window.pdfjsLib && window.pdfjsLib.getDocument) {
-        // worker設定
-        try {
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = c.worker;
-        } catch {}
-        return;
-      }
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error("PDF.js load failed");
-}
-
-async function extractPdfTextByPdfJsData(arrayBuffer) {
-  await ensurePdfJsReady();
-
-  const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-  const pdf = await loadingTask.promise;
-
-  const pageMax = pdf.numPages || 1;
-  const parts = [];
-  for (let p = 1; p <= pageMax; p++) {
-    const stepEl = document.getElementById("overlayStep");
-    if (stepEl) stepEl.textContent = `PDF解析 ${p}/${pageMax}`;
-    const page = await pdf.getPage(p);
-    const tc = await page.getTextContent({ normalizeWhitespace: true });
-    const line = (tc.items || [])
-      .map((it) => (it && it.str ? it.str : ""))
-      .filter(Boolean)
-      .join(" ");
-    if (line) parts.push(line);
-  }
-  return parts.join("\n");
-}
-
-async function extractPdfTextFromArrayBuffer(buf) {
-  await ensurePdfJsReady();
-
-  const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(buf) });
-  const pdf = await loadingTask.promise;
-
-  const pageMax = pdf.numPages || 1;
-  const parts = [];
-  for (let p = 1; p <= pageMax; p++) {
-    const stepEl = document.getElementById("overlayStep");
-    if (stepEl) stepEl.textContent = `PDF解析 ${p}/${pageMax}`;
-    const page = await pdf.getPage(p);
-    const tc = await page.getTextContent({ normalizeWhitespace: true });
-    const line = (tc.items || [])
-      .map((it) => (it && it.str ? it.str : ""))
-      .filter(Boolean)
-      .join(" ");
-    if (line) parts.push(line);
-  }
-  return parts.join("\n");
-}
-
-async function extractPdfTextByPdfJs(file) {
-  const buf = await file.arrayBuffer();
-  return await extractPdfTextFromArrayBuffer(buf);
-}
-// --- /PDF.js ---
 
 function setPdfStatus() {
   const url = ($("pdfUrlInput") && $("pdfUrlInput").value ? $("pdfUrlInput").value.trim() : "");
@@ -486,23 +375,43 @@ async function runExtract() {
       productHint: productHint || ""
     };
 
+    let r;
     if (pdfFile) {
-      $("overlayStep").textContent = "URL準備";
-      const blobUrl = URL.createObjectURL(pdfFile);
-      payload.pdfUrl = blobUrl;
-      payload.fileName = pdfFile.name || "upload.pdf";
+      $("overlayStep").textContent = "PDF送信";
+      $("overlayBar").style.width = "55%";
+      const params = new URLSearchParams({
+        op: "extract",
+        fileName: pdfFile.name || "upload.pdf",
+        modelHint: modelHint || "",
+        productHint: productHint || "",
+      });
+      const res = await fetch(`/api/inspection?${params.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/pdf" },
+        body: await pdfFile.arrayBuffer(),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      r = await res.json();
     } else {
       $("overlayStep").textContent = "URL準備";
       payload.pdfUrl = url;
       payload.fileName = (url.split("?")[0].split("#")[0].split("/").pop() || "from_url.pdf");
+      $("overlayBar").style.width = "55%";
+      $("overlayStep").textContent = "AI抽出";
+      r = await api("extract", payload);
     }
-
-    $("overlayBar").style.width = "55%";
-    $("overlayStep").textContent = "AI抽出";
-    const r = await api("extract", payload);
     $("overlayBar").style.width = "85%";
-    if (payload.pdfUrl && payload.pdfUrl.startsWith("blob:")) {
-      URL.revokeObjectURL(payload.pdfUrl);
+
+    if (r && r.ok && r.text === "" && r.explanationText) {
+      showError(r.explanationText);
+      return;
+    }
+    if (r && r.ok && r.text === "") {
+      showError("このPDFはテキスト抽出できません。");
+      return;
     }
 
     extracted.model = normalizeText(r.model || "").trim();

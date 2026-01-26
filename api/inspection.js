@@ -8,64 +8,26 @@ import OpenAI from "openai";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ===== PDF text extraction (server-side) =====
-async function loadPdfJsModule() {
-  const candidates = [
-    "pdfjs-dist/legacy/build/pdf.js",
-    "pdfjs-dist/build/pdf.js",
-    "pdfjs-dist/legacy/build/pdf.mjs",
-  ];
-  const errors = [];
-  for (const spec of candidates) {
-    try {
-      const mod = await import(spec);
-      const lib = mod?.default || mod;
-      if (lib && typeof lib.getDocument === "function") {
-        return { lib, spec };
-      }
-      errors.push(`${spec}: missing getDocument`);
-    } catch (e) {
-      console.info("[inspection][extract] pdfjs load failed:", spec, e?.message || e);
-      errors.push(`${spec}: ${e?.message || e}`);
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+async function getPdfBufferFromRequest(req, { pdfUrl }) {
+  const contentType = (req.headers["content-type"] || "").toLowerCase();
+  if (contentType.includes("application/pdf")) {
+    if (Buffer.isBuffer(req.body)) return req.body;
+    if (req.body instanceof ArrayBuffer) return Buffer.from(req.body);
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(Buffer.from(chunk));
     }
-  }
-  console.info("[inspection][extract] pdfjs load failed tried=", candidates);
-  return { lib: null, spec: "", tried: candidates, error: errors.join(" | ") };
-}
-
-async function extractPdfTextFromBuffer(buf) {
-  const { lib: pdfjsLib, spec, tried, error } = await loadPdfJsModule();
-  if (!pdfjsLib) {
-    return { pageCount: 0, pageItemCounts: [], importError: "pdfjs import failed", tried, error };
-  }
-  console.info("[inspection][extract] pdfjs loaded from", spec);
-  const u8 = new Uint8Array(buf);
-  const loadingTask = pdfjsLib.getDocument({ data: u8, disableWorker: true });
-  const pdf = await loadingTask.promise;
-  const pageCount = pdf.numPages;
-  const pageItemCounts = [];
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const tc = await page.getTextContent();
-    pageItemCounts.push(Array.isArray(tc.items) ? tc.items.length : 0);
-  }
-  return { pageCount, pageItemCounts };
-}
-
-async function loadPdfBufferFromInput({ pdfText, pdfUrl }) {
-  if (pdfText) {
-    const raw = String(pdfText);
-    const b64 = raw.includes(",") ? raw.split(",").pop() : raw;
-    const bin = Buffer.from(b64, "base64");
-    return bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
+    return Buffer.concat(chunks);
   }
   if (pdfUrl) {
     const r = await fetch(pdfUrl);
-    if (!r.ok) throw new Error(`PDFURLFetchError: `);
+    if (!r.ok) throw new Error("PDFURLFetchError");
     const ab = await r.arrayBuffer();
-    return ab;
+    return Buffer.from(ab);
   }
-  throw new Error("pdfText or pdfUrl is required");
+  throw new Error("pdfUrl or application/pdf body is required");
 }
 
 // ===== Graph token =====
@@ -333,6 +295,97 @@ ${pdfText}
   return { model, productName, specs, ops, accs };
 }
 
+// ===== AI extract from PDF file =====
+async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHint }) {
+  const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
+  const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
+  const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
+
+  const sys = `
+あなたは取扱説明書（日本語）の内容から、検品リスト作成に必要な情報を抽出します。
+必ずJSONのみを返してください（説明文は不要）。
+`;
+
+  const user = `
+【目的】
+検品リストに入れる「仕様」「動作」「付属品」、および「型番」「製品名」を抽出します。
+
+【重要ルール】
+- 「動作」には、安全注意/禁止/中止/警告/注意（安全・取扱注意、禁止事項）は入れない。
+- 「動作」は、実際の操作/設定/表示/接続/保存など “できること” を箇条書きで。
+- 「動作」は、まとまりがある場合は title を1つ作り、その配下に items を並べる（例：メニュー設定系はまとめる）。
+- 「付属品」は、PDFに書かれているものをできるだけ拾う。表記揺れを整理する（例：USBケーブル/USBコード/ケーブル→USBケーブル）。
+- ただし「取扱説明書」は、PDF内の明記が無くても必ず付属品候補に入れる（表記は「取扱説明書」に統一）。
+- 型番/製品名は、PDF内の表記（例：3R-XXXX）やタイトル行から推定。見つからない場合は空文字。
+
+【ヒント（既に入力されている可能性あり）】
+- 型番ヒント: ${modelHint || ""}
+- 製品名ヒント: ${productHint || ""}
+
+【返却JSONスキーマ（厳守）】
+{
+  "model": "型番",
+  "productName": "製品名",
+  "specs": ["仕様の箇条書き", "..."],
+  "ops": [{"title":"見出し","items":["動作1","動作2"]}],
+  "accs": ["付属品1","付属品2","取扱説明書"]
+}
+`;
+
+  const file = new File([pdfBuffer], fileName || "manual.pdf", { type: "application/pdf" });
+  const uploaded = await client.files.create({ file, purpose: "assistants" });
+
+  const resp = await client.responses.create({
+    model: MODEL,
+    reasoning: { effort: REASONING },
+    text: { verbosity: VERBOSITY },
+    input: [
+      { role: "system", content: sys.trim() },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: user.trim() },
+          { type: "input_file", file_id: uploaded.id },
+        ],
+      },
+    ],
+  });
+
+  const text = resp.output_text || "{}";
+  let obj;
+  try { obj = JSON.parse(text); } catch { obj = {}; }
+
+  const model = norm(obj.model);
+  const productName = norm(obj.productName);
+
+  const specs = dedupeKeepOrder(Array.isArray(obj.specs) ? obj.specs : []);
+
+  const opsIn = Array.isArray(obj.ops) ? obj.ops : [];
+  const ops = [];
+  for (const g0 of opsIn) {
+    const title = norm(g0?.title);
+    let items = Array.isArray(g0?.items) ? g0.items.map(norm) : [];
+    items = items.filter(x => x && !shouldSkipOpItem(x));
+    items = dedupeKeepOrder(items);
+    if (!title && items.length === 0) continue;
+    ops.push({ title, items });
+  }
+
+  let accs = Array.isArray(obj.accs) ? obj.accs.map(normalizeManualAccessory).map(norm) : [];
+  accs = accs.map(normalizeManualAccessory);
+  accs.push("取扱説明書");
+  accs = dedupeKeepOrder(accs);
+
+  accs = accs.map(a => {
+    if (a.includes("USB") && (a.includes("コード") || a.includes("ケーブル") || a === "ケーブル")) return "USBケーブル";
+    if (a === "ケーブル") return "USBケーブル";
+    return a;
+  });
+  accs = dedupeKeepOrder(accs);
+
+  return { model, productName, specs, ops, accs };
+}
+
 // ===== Excel generate =====
 function findMarkerRow(ws, marker) {
   // A列完全一致で探す
@@ -559,17 +612,23 @@ export default async function handler(req, res) {
     }
 
     if (op === "extract") {
-      const { pdfText: pdfTextInput, pdfUrl, fileName, modelHint, productHint } = req.body || {};
-      if (!pdfTextInput && !pdfUrl) {
-        return res.status(400).json({ error: "BadRequest", detail: "pdfText or pdfUrl is required" });
+      const body =
+        req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)
+          ? req.body
+          : {};
+      const query = req.query || {};
+      const pdfUrl = typeof body.pdfUrl === "string" ? body.pdfUrl.trim() : "";
+      const fileName = body.fileName || query.fileName || "manual.pdf";
+      const modelHint = body.modelHint || query.modelHint || "";
+      const productHint = body.productHint || query.productHint || "";
+      const contentType = (req.headers["content-type"] || "").toLowerCase();
+      if (!pdfUrl && !contentType.includes("application/pdf")) {
+        return res.status(400).json({ error: "BadRequest", detail: "pdfUrl or application/pdf body is required" });
       }
 
       let buf;
-      const pdfTextRaw = pdfTextInput ? String(pdfTextInput) : "";
-      const b64Payload = pdfTextRaw.includes(",") ? pdfTextRaw.split(",").pop() : pdfTextRaw;
-      const b64Len = b64Payload.length;
       try {
-        buf = await loadPdfBufferFromInput({ pdfText: pdfTextInput, pdfUrl });
+        buf = await getPdfBufferFromRequest(req, { pdfUrl });
       } catch (e) {
         console.error("[inspection][extract] pdf load failed:", e?.message || e);
         return res.status(200).json({
@@ -579,42 +638,37 @@ export default async function handler(req, res) {
         });
       }
 
-      let pageCount = 0;
-      let pageItemCounts = [];
-      let importError = "";
-      let importTried = [];
-      let importDetail = "";
-      try {
-        const extracted = await extractPdfTextFromBuffer(buf);
-        pageCount = extracted.pageCount || 0;
-        pageItemCounts = Array.isArray(extracted.pageItemCounts) ? extracted.pageItemCounts : [];
-        importError = extracted.importError || "";
-        importTried = Array.isArray(extracted.tried) ? extracted.tried : [];
-        importDetail = extracted.error || "";
-      } catch (e) {
-        console.error("[inspection][extract] pdf text extraction failed:", e?.message || e);
+      const pdfByteSize = buf?.byteLength || 0;
+      if (pdfByteSize > MAX_PDF_BYTES) {
+        return res.status(200).json({
+          ok: true,
+          text: "",
+          diag: { pdfTooLarge: true, pdfByteSize, maxBytes: MAX_PDF_BYTES },
+          explanationText: "このPDFは容量が大きいため処理できません。URL欄に直リンクを貼ってください。",
+        });
       }
 
-      const source = pdfTextInput ? "dnd" : "url";
-      const pdfByteSize = buf?.byteLength || 0;
       const headBytes = buf ? Buffer.from(buf).slice(0, 4).toString("ascii") : "";
-      console.info("[inspection][extract] source:", source);
-      console.info("[inspection][extract] b64 length:", b64Len);
       console.info("[inspection][extract] pdf byte size:", pdfByteSize);
       console.info("[inspection][extract] pdf head bytes:", headBytes);
-      console.info("[inspection][extract] page count:", pageCount);
-      console.info("[inspection][extract] page item counts:", pageItemCounts);
 
-      const hasTextLayer = pageItemCounts.some((count) => count > 0);
-      const diag = {
-        pdfjsLoadError: !!importError,
-        tried: importTried,
-        error: importDetail,
-        pageCount,
-        pageItemCounts,
-        hasTextLayer,
-      };
-      return res.status(200).json({ ok: true, text: "", diag });
+      try {
+        const r = await aiExtractFromPdfFile({
+          pdfBuffer: buf,
+          fileName,
+          modelHint,
+          productHint,
+        });
+        return res.status(200).json(r);
+      } catch (e) {
+        console.error("[inspection][extract] ai extract failed:", e?.message || e);
+        return res.status(200).json({
+          ok: true,
+          text: "",
+          diag: { aiExtractError: e?.message || String(e) },
+          explanationText: "このPDFはテキスト抽出できません。",
+        });
+      }
     }
 
     if (op === "generate") {
