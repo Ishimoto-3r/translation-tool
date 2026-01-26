@@ -15,19 +15,13 @@ async function extractPdfTextFromBuffer(buf) {
   const loadingTask = pdfjsLib.getDocument({ data: u8, disableWorker: true });
   const pdf = await loadingTask.promise;
   const pageCount = pdf.numPages;
-  const pageLengths = [];
-  let out = "";
+  const pageItemCounts = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
     const tc = await page.getTextContent();
-    const strings = tc.items.map((it) => (typeof it.str === "string" ? it.str : "")).filter(Boolean);
-    const pageText = strings.join(" ");
-    pageLengths.push(pageText.length);
-    out += pageText + "\n";
-    // セーフガード：長すぎる場合は途中で切る（APIコスト・時間対策）
-    if (out.length > 250000) break;
+    pageItemCounts.push(Array.isArray(tc.items) ? tc.items.length : 0);
   }
-  return { text: out.trim(), pageCount, pageLengths };
+  return { pageCount, pageItemCounts };
 }
 
 async function loadPdfBufferFromInput({ pdfText, pdfUrl }) {
@@ -560,52 +554,39 @@ export default async function handler(req, res) {
         });
       }
 
-      let pdfText = "";
       let pageCount = 0;
-      let pageLengths = [];
+      let pageItemCounts = [];
       try {
         const extracted = await extractPdfTextFromBuffer(buf);
-        pdfText = extracted.text || "";
         pageCount = extracted.pageCount || 0;
-        pageLengths = Array.isArray(extracted.pageLengths) ? extracted.pageLengths : [];
+        pageItemCounts = Array.isArray(extracted.pageItemCounts) ? extracted.pageItemCounts : [];
       } catch (e) {
         console.error("[inspection][extract] pdf text extraction failed:", e?.message || e);
       }
 
-      pdfText = (pdfText || "").toString();
       const source = pdfTextInput ? "dnd" : "url";
       const pdfByteSize = buf?.byteLength || 0;
       const headBytes = buf ? Buffer.from(buf).slice(0, 4).toString("ascii") : "";
-      const totalTextLen = pdfText.length;
       console.info("[inspection][extract] source:", source);
       console.info("[inspection][extract] b64 length:", b64Len);
       console.info("[inspection][extract] pdf byte size:", pdfByteSize);
       console.info("[inspection][extract] pdf head bytes:", headBytes);
       console.info("[inspection][extract] page count:", pageCount);
-      console.info("[inspection][extract] page text lengths:", pageLengths);
-      console.info("[inspection][extract] total text length:", totalTextLen);
+      console.info("[inspection][extract] page item counts:", pageItemCounts);
 
-      if (!pdfText.trim()) {
-        return res.status(200).json({
-          model: "",
-          productName: "",
-          specs: [],
-          ops: [],
-          accs: ["取扱説明書"],
-          explanationText: "PDFのテキスト抽出結果が空でした（画像主体のPDFの可能性）。別のPDFをご用意ください。",
-        });
-      }
+      const hasTextLayer = pageItemCounts.some((count) => count > 0);
+      const explanationText = hasTextLayer
+        ? "PDFのテキスト層は検出されました（ページごとのitems件数をログ参照）。後段処理の問題が疑われます。"
+        : "PDFのテキスト層が検出できません（画像主体のPDFの可能性）。";
 
-      const MAX_TEXT = 200000;
-      if (pdfText.length > MAX_TEXT) pdfText = pdfText.slice(0, MAX_TEXT);
-
-      const r = await aiExtractFromPdfText({
-        pdfText,
-        fileName: fileName || "manual.pdf",
-        modelHint: modelHint || "",
-        productHint: productHint || ""
+      return res.status(200).json({
+        model: "",
+        productName: "",
+        specs: [],
+        ops: [],
+        accs: ["取扱説明書"],
+        explanationText,
       });
-      return res.status(200).json(r);
     }
 
     if (op === "generate") {
