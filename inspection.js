@@ -487,9 +487,9 @@ async function runExtract() {
     };
 
     if (pdfFile) {
-      $("overlayStep").textContent = "PDF読込";
-      const b64 = await fileToBase64(pdfFile);
-      payload.pdfText = String(b64 || "").slice(0, MAX_PDF_TEXT_CHARS);
+      $("overlayStep").textContent = "URL準備";
+      const blobUrl = URL.createObjectURL(pdfFile);
+      payload.pdfUrl = blobUrl;
       payload.fileName = pdfFile.name || "upload.pdf";
     } else {
       $("overlayStep").textContent = "URL準備";
@@ -501,6 +501,9 @@ async function runExtract() {
     $("overlayStep").textContent = "AI抽出";
     const r = await api("extract", payload);
     $("overlayBar").style.width = "85%";
+    if (payload.pdfUrl && payload.pdfUrl.startsWith("blob:")) {
+      URL.revokeObjectURL(payload.pdfUrl);
+    }
 
     extracted.model = normalizeText(r.model || "").trim();
     extracted.productName = normalizeText(r.productName || "").trim();
