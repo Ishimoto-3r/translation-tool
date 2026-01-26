@@ -1,7 +1,7 @@
 // inspection.js（全文置き換え）
 let pdfFile = null;
 const MAX_DD_BYTES = 4 * 1024 * 1024; // 4MB（D&D推奨上限）
-const MAX_SELECTION_ITEMS = 100;
+const MAX_SELECTION_ITEMS = 50;
 
 let selectionItems = []; // SharePointの「選択リスト」C列（表示用）
 let extracted = {
