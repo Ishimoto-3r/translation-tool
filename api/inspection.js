@@ -12,9 +12,10 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 async function loadPdfJsModule() {
   const candidates = [
     "pdfjs-dist/legacy/build/pdf.js",
-    "pdfjs-dist/legacy/build/pdf.mjs",
     "pdfjs-dist/build/pdf.js",
+    "pdfjs-dist/legacy/build/pdf.mjs",
   ];
+  const errors = [];
   for (const spec of candidates) {
     try {
       const mod = await import(spec);
@@ -22,19 +23,22 @@ async function loadPdfJsModule() {
       if (lib && typeof lib.getDocument === "function") {
         return { lib, spec };
       }
+      errors.push(`${spec}: missing getDocument`);
     } catch (e) {
       console.info("[inspection][extract] pdfjs load failed:", spec, e?.message || e);
+      errors.push(`${spec}: ${e?.message || e}`);
     }
   }
-  return { lib: null, spec: "" };
+  console.info("[inspection][extract] pdfjs load failed tried=", candidates);
+  return { lib: null, spec: "", tried: candidates, error: errors.join(" | ") };
 }
 
 async function extractPdfTextFromBuffer(buf) {
-  const { lib: pdfjsLib, spec } = await loadPdfJsModule();
+  const { lib: pdfjsLib, spec, tried, error } = await loadPdfJsModule();
   if (!pdfjsLib) {
-    return { pageCount: 0, pageItemCounts: [], importError: "pdfjs import failed" };
+    return { pageCount: 0, pageItemCounts: [], importError: "pdfjs import failed", tried, error };
   }
-  console.info("[inspection][extract] pdfjs loaded:", spec);
+  console.info("[inspection][extract] pdfjs loaded from", spec);
   const u8 = new Uint8Array(buf);
   const loadingTask = pdfjsLib.getDocument({ data: u8, disableWorker: true });
   const pdf = await loadingTask.promise;
@@ -578,11 +582,15 @@ export default async function handler(req, res) {
       let pageCount = 0;
       let pageItemCounts = [];
       let importError = "";
+      let importTried = [];
+      let importDetail = "";
       try {
         const extracted = await extractPdfTextFromBuffer(buf);
         pageCount = extracted.pageCount || 0;
         pageItemCounts = Array.isArray(extracted.pageItemCounts) ? extracted.pageItemCounts : [];
         importError = extracted.importError || "";
+        importTried = Array.isArray(extracted.tried) ? extracted.tried : [];
+        importDetail = extracted.error || "";
       } catch (e) {
         console.error("[inspection][extract] pdf text extraction failed:", e?.message || e);
       }
@@ -599,7 +607,9 @@ export default async function handler(req, res) {
 
       const hasTextLayer = pageItemCounts.some((count) => count > 0);
       const diag = {
-        pdfjsLoadError: importError || "",
+        pdfjsLoadError: !!importError,
+        tried: importTried,
+        error: importDetail,
         pageCount,
         pageItemCounts,
         hasTextLayer,
