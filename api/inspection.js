@@ -5,12 +5,28 @@
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
+import { createRequire } from "module";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ===== PDF text extraction (server-side) =====
 async function extractPdfTextFromBuffer(buf) {
-  const { default: pdfjsLib } = await import("pdfjs-dist/legacy/build/pdf.js");
+  const require = createRequire(import.meta.url);
+  try {
+    const resolvedPath = require.resolve("pdfjs-dist/legacy/build/pdf.js");
+    console.info("[inspection][extract] pdfjs resolved path:", resolvedPath);
+  } catch (e) {
+    console.info("[inspection][extract] pdfjs resolve failed:", e?.message || e);
+  }
+
+  const pdfjsModule = await import("pdfjs-dist/legacy/build/pdf.js").catch((e) => {
+    console.error("[inspection][extract] pdfjs import failed:", e?.message || e);
+    return null;
+  });
+  if (!pdfjsModule || !pdfjsModule.default) {
+    return { pageCount: 0, pageItemCounts: [], importError: "pdfjs import failed" };
+  }
+  const { default: pdfjsLib } = pdfjsModule;
   const u8 = new Uint8Array(buf);
   const loadingTask = pdfjsLib.getDocument({ data: u8, disableWorker: true });
   const pdf = await loadingTask.promise;
@@ -556,10 +572,12 @@ export default async function handler(req, res) {
 
       let pageCount = 0;
       let pageItemCounts = [];
+      let importError = "";
       try {
         const extracted = await extractPdfTextFromBuffer(buf);
         pageCount = extracted.pageCount || 0;
         pageItemCounts = Array.isArray(extracted.pageItemCounts) ? extracted.pageItemCounts : [];
+        importError = extracted.importError || "";
       } catch (e) {
         console.error("[inspection][extract] pdf text extraction failed:", e?.message || e);
       }
@@ -575,9 +593,11 @@ export default async function handler(req, res) {
       console.info("[inspection][extract] page item counts:", pageItemCounts);
 
       const hasTextLayer = pageItemCounts.some((count) => count > 0);
-      const explanationText = hasTextLayer
-        ? "PDFのテキスト層は検出されました（ページごとのitems件数をログ参照）。後段処理の問題が疑われます。"
-        : "PDFのテキスト層が検出できません（画像主体のPDFの可能性）。";
+      const explanationText = importError
+        ? "PDF解析ライブラリの読み込みに失敗しました。Runtime Logsのpdfjs解決結果をご確認ください。"
+        : hasTextLayer
+          ? "PDFのテキスト層は検出されました（ページごとのitems件数をログ参照）。後段処理の問題が疑われます。"
+          : "PDFのテキスト層が検出できません（画像主体のPDFの可能性）。";
 
       return res.status(200).json({
         model: "",
