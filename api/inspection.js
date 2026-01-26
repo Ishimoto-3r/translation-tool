@@ -32,7 +32,8 @@ async function extractPdfTextFromBuffer(buf) {
 
 async function loadPdfBufferFromInput({ pdfText, pdfUrl }) {
   if (pdfText) {
-    const b64 = String(pdfText).split(",").pop();
+    const raw = String(pdfText);
+    const b64 = raw.includes(",") ? raw.split(",").pop() : raw;
     const bin = Buffer.from(b64, "base64");
     return bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
   }
@@ -542,6 +543,9 @@ export default async function handler(req, res) {
       }
 
       let buf;
+      const pdfTextRaw = pdfTextInput ? String(pdfTextInput) : "";
+      const b64Payload = pdfTextRaw.includes(",") ? pdfTextRaw.split(",").pop() : pdfTextRaw;
+      const b64Len = b64Payload.length;
       try {
         buf = await loadPdfBufferFromInput({ pdfText: pdfTextInput, pdfUrl });
       } catch (e) {
@@ -571,9 +575,12 @@ export default async function handler(req, res) {
       pdfText = (pdfText || "").toString();
       const source = pdfTextInput ? "dnd" : "url";
       const pdfByteSize = buf?.byteLength || 0;
+      const headBytes = buf ? Buffer.from(buf).slice(0, 4).toString("ascii") : "";
       const totalTextLen = pdfText.length;
       console.info("[inspection][extract] source:", source);
+      console.info("[inspection][extract] b64 length:", b64Len);
       console.info("[inspection][extract] pdf byte size:", pdfByteSize);
+      console.info("[inspection][extract] pdf head bytes:", headBytes);
       console.info("[inspection][extract] page count:", pageCount);
       console.info("[inspection][extract] page text lengths:", pageLengths);
       console.info("[inspection][extract] total text length:", totalTextLen);
