@@ -66,6 +66,15 @@ function normalizeText(v) {
   try { return JSON.stringify(v); } catch { return String(v); }
 }
 
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error("File read failed"));
+    reader.readAsDataURL(file);
+  });
+}
+
 
 // --- PDF.js（クライアント側でPDFテキスト抽出：大きいPDFの413回避） ---
 async function ensurePdfJsReady() {
@@ -473,7 +482,7 @@ async function runExtract() {
     if (pdfFile) {
       $("overlayStep").textContent = "PDF読込";
       const b64 = await fileToBase64(pdfFile);
-      payload.pdfBase64 = b64;
+      payload.pdfText = b64;
       payload.fileName = pdfFile.name || "upload.pdf";
     } else {
       $("overlayStep").textContent = "URL準備";
