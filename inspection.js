@@ -503,7 +503,11 @@ function initPdfDrop() {
         setPdfStatus(`容量超過（${mb}MB）`);
         showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。");
         const u = $("pdfUrlInput");
-        if (u) u.focus();
+        if (u) {
+          u.focus();
+          u.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+        setBusy(false);
         return;
       }
       pdfFile = f;
