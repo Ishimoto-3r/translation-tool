@@ -2,6 +2,8 @@
 let pdfFile = null;
 const MAX_DD_BYTES = 4 * 1024 * 1024; // 4MB（D&D推奨上限）
 const MAX_SELECTION_ITEMS = 50;
+const MAX_PDF_TEXT_CHARS = 20000;
+const MAX_AI_ITEMS = 50;
 
 let selectionItems = []; // SharePointの「選択リスト」C列（表示用）
 let extracted = {
@@ -65,6 +67,10 @@ function normalizeText(v) {
   if (typeof v === "string") return v;
   // [object Object] 対策：絶対にオブジェクトをそのまま表示しない
   try { return JSON.stringify(v); } catch { return String(v); }
+}
+
+function capList(list, max = MAX_AI_ITEMS) {
+  return Array.isArray(list) ? list.slice(0, max) : [];
 }
 
 function fileToBase64(file) {
@@ -483,7 +489,7 @@ async function runExtract() {
     if (pdfFile) {
       $("overlayStep").textContent = "PDF読込";
       const b64 = await fileToBase64(pdfFile);
-      payload.pdfText = b64;
+      payload.pdfText = String(b64 || "").slice(0, MAX_PDF_TEXT_CHARS);
       payload.fileName = pdfFile.name || "upload.pdf";
     } else {
       $("overlayStep").textContent = "URL準備";
@@ -547,10 +553,10 @@ async function runGenerate() {
       productName,
       selectedLabels,
       selectedSelectionItems,
-      specText: checked.spec,
-      opTitles: checked.opTitles,
-      opItems: checked.opItems,
-      accText: checked.acc
+      specText: capList(checked.spec),
+      opTitles: capList(checked.opTitles),
+      opItems: capList(checked.opItems),
+      accText: capList(checked.acc)
     });
 
     $("overlayBar").style.width = "90%";
