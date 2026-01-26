@@ -23,9 +23,14 @@ async function getPdfBufferFromRequest(req, { pdfUrl }) {
   }
   if (pdfUrl) {
     const r = await fetch(pdfUrl);
-    if (!r.ok) throw new Error("PDFURLFetchError");
+    const httpStatus = r.status;
+    if (!r.ok) {
+      const err = new Error("PDFURLFetchError");
+      err.httpStatus = httpStatus;
+      throw err;
+    }
     const ab = await r.arrayBuffer();
-    return Buffer.from(ab);
+    return { buffer: Buffer.from(ab), httpStatus };
   }
   throw new Error("pdfUrl or application/pdf body is required");
 }
@@ -627,13 +632,28 @@ export default async function handler(req, res) {
       }
 
       let buf;
+      let source = "dnd";
+      let fetchedBytes = 0;
+      let httpStatus = null;
       try {
-        buf = await getPdfBufferFromRequest(req, { pdfUrl });
+        if (pdfUrl) {
+          source = "url";
+        }
+        const result = await getPdfBufferFromRequest(req, { pdfUrl });
+        if (result && result.buffer) {
+          buf = result.buffer;
+          httpStatus = result.httpStatus ?? null;
+        } else {
+          buf = result;
+        }
+        fetchedBytes = buf?.byteLength || 0;
       } catch (e) {
         console.error("[inspection][extract] pdf load failed:", e?.message || e);
         return res.status(200).json({
           ok: true,
           text: "",
+          status: "read_error",
+          notice: "このPDFはテキスト抽出できません。",
           diag: { pdfLoadError: e?.message || String(e) },
         });
       }
@@ -643,12 +663,16 @@ export default async function handler(req, res) {
         return res.status(200).json({
           ok: true,
           text: "",
+          status: "read_error",
+          notice: "このPDFは容量が大きいため処理できません。URL欄に直リンクを貼ってください。",
           diag: { pdfTooLarge: true, pdfByteSize, maxBytes: MAX_PDF_BYTES },
-          explanationText: "このPDFは容量が大きいため処理できません。URL欄に直リンクを貼ってください。",
         });
       }
 
       const headBytes = buf ? Buffer.from(buf).slice(0, 4).toString("ascii") : "";
+      console.info("[inspection][extract] source:", source);
+      console.info("[inspection][extract] url http status:", httpStatus);
+      console.info("[inspection][extract] fetched bytes:", fetchedBytes);
       console.info("[inspection][extract] pdf byte size:", pdfByteSize);
       console.info("[inspection][extract] pdf head bytes:", headBytes);
 
@@ -665,8 +689,9 @@ export default async function handler(req, res) {
         return res.status(200).json({
           ok: true,
           text: "",
+          status: "no_text",
+          notice: "このPDFはテキスト抽出できません。",
           diag: { aiExtractError: e?.message || String(e) },
-          explanationText: "このPDFはテキスト抽出できません。",
         });
       }
     }

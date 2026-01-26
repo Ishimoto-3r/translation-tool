@@ -197,27 +197,6 @@ function renderOpGroups(containerId, groups) {
   }
 
   wrap.appendChild(frag);
-
-  // タイトルチェック＝配下を全ON/OFF（視認性と操作性）
-  wrap.querySelectorAll('input[data-kind="opTitle"]').forEach((tcb) => {
-    tcb.addEventListener("change", () => {
-      const g = tcb.dataset.group;
-      wrap.querySelectorAll(`input[data-kind="opItem"][data-group="${g}"]`).forEach((icb) => {
-        icb.checked = tcb.checked;
-      });
-    });
-  });
-
-  // 配下が1つでもONならタイトルもON（Excelにタイトルも入れる要件対応）
-  wrap.querySelectorAll('input[data-kind="opItem"]').forEach((icb) => {
-    icb.addEventListener("change", () => {
-      const g = icb.dataset.group;
-      const items = Array.from(wrap.querySelectorAll(`input[data-kind="opItem"][data-group="${g}"]`));
-      const anyOn = items.some(x => x.checked);
-      const t = wrap.querySelector(`input[data-kind="opTitle"][data-group="${g}"]`);
-      if (t) t.checked = anyOn;
-    });
-  });
 }
 
 function escapeHtml(s) {
@@ -240,16 +219,6 @@ async function api(op, payload) {
     throw new Error(`HTTP ${res.status} ${txt}`);
   }
   return res.json();
-}
-
-// PDFテキスト抽出（PDF丸投げを避けて 413 を回避）
-// - 小さいPDFはそのままAPI送信でも良いが、サイズが大きいとVercel側で 413 になりやすい
-// - その場合、ブラウザ側でテキストだけ抽出して送る
-async function extractPdfTextInBrowser(file) {
-  // PDF.js で全文テキスト抽出
-  // ※重すぎるPDFはブラウザ側で時間がかかるため、ユーザー体感を優先して上限ページを入れたい場合は
-  //   extractPdfTextByPdfJs のループに制限を入れてください（現時点は全ページ）
-  return await extractPdfTextByPdfJs(file);
 }
 
 function getSelectedLabels() {
@@ -353,7 +322,7 @@ async function runExtract() {
     pdfFile = null;
     $("pdfInput").value = "";
     setPdfStatus(`容量超過（${mb}MB）`);
-    showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
+    showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。");
     if ($("pdfUrlInput")) $("pdfUrlInput").focus();
     return;
   }
@@ -397,6 +366,7 @@ async function runExtract() {
       r = await res.json();
     } else {
       $("overlayStep").textContent = "URL準備";
+      payload.source = "url";
       payload.pdfUrl = url;
       payload.fileName = (url.split("?")[0].split("#")[0].split("/").pop() || "from_url.pdf");
       $("overlayBar").style.width = "55%";
@@ -405,8 +375,8 @@ async function runExtract() {
     }
     $("overlayBar").style.width = "85%";
 
-    if (r && r.ok && r.text === "" && r.explanationText) {
-      showError(r.explanationText);
+    if (r && r.ok && r.text === "" && r.notice) {
+      showError(r.notice);
       return;
     }
     if (r && r.ok && r.text === "") {
@@ -531,7 +501,7 @@ function initPdfDrop() {
         pdfFile = null;
         input.value = "";
         setPdfStatus(`容量超過（${mb}MB）`);
-        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
+        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。");
         const u = $("pdfUrlInput");
         if (u) u.focus();
         return;
@@ -554,7 +524,7 @@ function initPdfDrop() {
         pdfFile = null;
         input.value = "";
         setPdfStatus(`容量超過（${mb}MB）`);
-        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
+        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。");
         const u = $("pdfUrlInput");
         if (u) u.focus();
         return;
