@@ -1,6 +1,9 @@
 // inspection.js（全文置き換え）
 let pdfFile = null;
+let pdfFileSize = 0;
 const MAX_DD_BYTES = 4 * 1024 * 1024; // 4MB（D&D推奨上限）
+const MAX_SELECTION_ITEMS = 50;
+const MAX_AI_ITEMS = 50;
 
 let selectionItems = []; // SharePointの「選択リスト」C列（表示用）
 let extracted = {
@@ -17,6 +20,19 @@ function showError(msg) {
   const box = $("errorBox");
   box.textContent = msg;
   box.classList.remove("hidden");
+}
+
+function showDndNotice(msg) {
+  const urlInput = $("pdfUrlInput");
+  if (!urlInput) return;
+  let note = $("dndNotice");
+  if (!note) {
+    note = document.createElement("div");
+    note.id = "dndNotice";
+    note.className = "mt-2 text-sm text-red-600";
+    urlInput.parentElement?.insertBefore(note, urlInput);
+  }
+  note.textContent = msg;
 }
 
 function clearError() {
@@ -66,106 +82,9 @@ function normalizeText(v) {
   try { return JSON.stringify(v); } catch { return String(v); }
 }
 
-
-// --- PDF.js（クライアント側でPDFテキスト抽出：大きいPDFの413回避） ---
-async function ensurePdfJsReady() {
-  if (window.pdfjsLib && window.pdfjsLib.getDocument) return;
-
-  const candidates = [
-    // jsDelivr（優先）
-    {
-      lib: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
-      worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js",
-    },
-    // cdnjs
-    {
-      lib: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js",
-      worker: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js",
-    },
-    // 予備（古め）
-    {
-      lib: "https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.min.js",
-      worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@2.16.105/build/pdf.worker.min.js",
-    },
-  ];
-
-  const loadScript = (src) =>
-    new Promise((resolve, reject) => {
-      const s = document.createElement("script");
-      s.src = src;
-      s.async = true;
-      s.onload = () => resolve();
-      s.onerror = () => reject(new Error("Failed to load: " + src));
-      document.head.appendChild(s);
-    });
-
-  let lastErr = null;
-  for (const c of candidates) {
-    try {
-      await loadScript(c.lib);
-      if (window.pdfjsLib && window.pdfjsLib.getDocument) {
-        // worker設定
-        try {
-          window.pdfjsLib.GlobalWorkerOptions.workerSrc = c.worker;
-        } catch {}
-        return;
-      }
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  throw lastErr || new Error("PDF.js load failed");
+function capList(list, max = MAX_AI_ITEMS) {
+  return Array.isArray(list) ? list.slice(0, max) : [];
 }
-
-async function extractPdfTextByPdfJsData(arrayBuffer) {
-  await ensurePdfJsReady();
-
-  const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-  const pdf = await loadingTask.promise;
-
-  const pageMax = pdf.numPages || 1;
-  const parts = [];
-  for (let p = 1; p <= pageMax; p++) {
-    const stepEl = document.getElementById("overlayStep");
-    if (stepEl) stepEl.textContent = `PDF解析 ${p}/${pageMax}`;
-    const page = await pdf.getPage(p);
-    const tc = await page.getTextContent({ normalizeWhitespace: true });
-    const line = (tc.items || [])
-      .map((it) => (it && it.str ? it.str : ""))
-      .filter(Boolean)
-      .join(" ");
-    if (line) parts.push(line);
-  }
-  return parts.join("\n");
-}
-
-async function extractPdfTextFromArrayBuffer(buf) {
-  await ensurePdfJsReady();
-
-  const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(buf) });
-  const pdf = await loadingTask.promise;
-
-  const pageMax = pdf.numPages || 1;
-  const parts = [];
-  for (let p = 1; p <= pageMax; p++) {
-    const stepEl = document.getElementById("overlayStep");
-    if (stepEl) stepEl.textContent = `PDF解析 ${p}/${pageMax}`;
-    const page = await pdf.getPage(p);
-    const tc = await page.getTextContent({ normalizeWhitespace: true });
-    const line = (tc.items || [])
-      .map((it) => (it && it.str ? it.str : ""))
-      .filter(Boolean)
-      .join(" ");
-    if (line) parts.push(line);
-  }
-  return parts.join("\n");
-}
-
-async function extractPdfTextByPdfJs(file) {
-  const buf = await file.arrayBuffer();
-  return await extractPdfTextFromArrayBuffer(buf);
-}
-// --- /PDF.js ---
 
 function setPdfStatus() {
   const url = ($("pdfUrlInput") && $("pdfUrlInput").value ? $("pdfUrlInput").value.trim() : "");
@@ -292,27 +211,6 @@ function renderOpGroups(containerId, groups) {
   }
 
   wrap.appendChild(frag);
-
-  // タイトルチェック＝配下を全ON/OFF（視認性と操作性）
-  wrap.querySelectorAll('input[data-kind="opTitle"]').forEach((tcb) => {
-    tcb.addEventListener("change", () => {
-      const g = tcb.dataset.group;
-      wrap.querySelectorAll(`input[data-kind="opItem"][data-group="${g}"]`).forEach((icb) => {
-        icb.checked = tcb.checked;
-      });
-    });
-  });
-
-  // 配下が1つでもONならタイトルもON（Excelにタイトルも入れる要件対応）
-  wrap.querySelectorAll('input[data-kind="opItem"]').forEach((icb) => {
-    icb.addEventListener("change", () => {
-      const g = icb.dataset.group;
-      const items = Array.from(wrap.querySelectorAll(`input[data-kind="opItem"][data-group="${g}"]`));
-      const anyOn = items.some(x => x.checked);
-      const t = wrap.querySelector(`input[data-kind="opTitle"][data-group="${g}"]`);
-      if (t) t.checked = anyOn;
-    });
-  });
 }
 
 function escapeHtml(s) {
@@ -335,16 +233,6 @@ async function api(op, payload) {
     throw new Error(`HTTP ${res.status} ${txt}`);
   }
   return res.json();
-}
-
-// PDFテキスト抽出（PDF丸投げを避けて 413 を回避）
-// - 小さいPDFはそのままAPI送信でも良いが、サイズが大きいとVercel側で 413 になりやすい
-// - その場合、ブラウザ側でテキストだけ抽出して送る
-async function extractPdfTextInBrowser(file) {
-  // PDF.js で全文テキスト抽出
-  // ※重すぎるPDFはブラウザ側で時間がかかるため、ユーザー体感を優先して上限ページを入れたい場合は
-  //   extractPdfTextByPdfJs のループに制限を入れてください（現時点は全ページ）
-  return await extractPdfTextByPdfJs(file);
 }
 
 function getSelectedLabels() {
@@ -448,7 +336,7 @@ async function runExtract() {
     pdfFile = null;
     $("pdfInput").value = "";
     setPdfStatus(`容量超過（${mb}MB）`);
-    showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
+    showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にPDFのリンクを貼り付けてください。");
     if ($("pdfUrlInput")) $("pdfUrlInput").focus();
     return;
   }
@@ -470,21 +358,52 @@ async function runExtract() {
       productHint: productHint || ""
     };
 
+    let r;
     if (pdfFile) {
-      $("overlayStep").textContent = "PDF読込";
-      const b64 = await fileToBase64(pdfFile);
-      payload.pdfBase64 = b64;
-      payload.fileName = pdfFile.name || "upload.pdf";
+      if (pdfFileSize > MAX_DD_BYTES) {
+        const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にPDFのリンクを貼り付けてください。";
+        showError(msg);
+        showDndNotice(msg);
+        setBusy(false);
+        return;
+      }
+      $("overlayStep").textContent = "PDF送信";
+      $("overlayBar").style.width = "55%";
+      const params = new URLSearchParams({
+        op: "extract",
+        fileName: pdfFile.name || "upload.pdf",
+        modelHint: modelHint || "",
+        productHint: productHint || "",
+      });
+      const res = await fetch(`/api/inspection?${params.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/pdf" },
+        body: await pdfFile.arrayBuffer(),
+      });
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status} ${txt}`);
+      }
+      r = await res.json();
     } else {
       $("overlayStep").textContent = "URL準備";
+      payload.source = "url";
       payload.pdfUrl = url;
       payload.fileName = (url.split("?")[0].split("#")[0].split("/").pop() || "from_url.pdf");
+      $("overlayBar").style.width = "55%";
+      $("overlayStep").textContent = "AI抽出";
+      r = await api("extract", payload);
     }
-
-    $("overlayBar").style.width = "55%";
-    $("overlayStep").textContent = "AI抽出";
-    const r = await api("extract", payload);
     $("overlayBar").style.width = "85%";
+
+    if (r && r.ok && r.text === "" && r.notice) {
+      showError(r.notice);
+      return;
+    }
+    if (r && r.ok && r.text === "") {
+      showError("このPDFはテキスト抽出できません。");
+      return;
+    }
 
     extracted.model = normalizeText(r.model || "").trim();
     extracted.productName = normalizeText(r.productName || "").trim();
@@ -525,7 +444,7 @@ async function runGenerate() {
   }
 
   const selectedLabels = getSelectedLabels();
-  const selectedSelectionItems = getSelectedSelectionItems();
+  const selectedSelectionItems = getSelectedSelectionItems().slice(0, MAX_SELECTION_ITEMS);
   const checked = getCheckedExtracted();
 
   try {
@@ -537,10 +456,10 @@ async function runGenerate() {
       productName,
       selectedLabels,
       selectedSelectionItems,
-      specText: checked.spec,
-      opTitles: checked.opTitles,
-      opItems: checked.opItems,
-      accText: checked.acc
+      specText: capList(checked.spec),
+      opTitles: capList(checked.opTitles),
+      opItems: capList(checked.opItems),
+      accText: capList(checked.acc)
     });
 
     $("overlayBar").style.width = "90%";
@@ -573,6 +492,27 @@ function initPdfDrop() {
   const input = $("pdfInput");
   const urlInput = $("pdfUrlInput");
 
+  const blockOversizeDnd = (file) => {
+    if (!file) return false;
+    if (file.size <= MAX_DD_BYTES) return false;
+    const mb = (file.size / (1024 * 1024)).toFixed(2);
+    pdfFile = null;
+    pdfFileSize = 0;
+    input.value = "";
+    setPdfStatus(`容量超過（${mb}MB）`);
+    const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にPDFのリンクを貼り付けてください。";
+    showError(msg);
+    showDndNotice(msg);
+    console.log("[DND] blocked size=", file.size);
+    const u = $("pdfUrlInput");
+    if (u) {
+      u.focus();
+      u.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setBusy(false);
+    return true;
+  };
+
   if (urlInput) {
     urlInput.addEventListener("input", () => {
       const v = urlInput.value.trim();
@@ -583,6 +523,8 @@ function initPdfDrop() {
       }
       setPdfStatus();
     });
+    urlInput.addEventListener("click", (e) => e.stopPropagation());
+    urlInput.addEventListener("mousedown", (e) => e.stopPropagation());
   }
 
   dz.addEventListener("click", () => input.click());
@@ -597,18 +539,9 @@ function initPdfDrop() {
     dz.classList.remove("border-blue-400");
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (f && f.type === "application/pdf") {
-      // 容量が大きい場合は止めてURL案内（要件）
-      if (f.size > MAX_DD_BYTES) {
-        const mb = (f.size / (1024 * 1024)).toFixed(2);
-        pdfFile = null;
-        input.value = "";
-        setPdfStatus(`容量超過（${mb}MB）`);
-        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
-        const u = $("pdfUrlInput");
-        if (u) u.focus();
-        return;
-      }
+      if (blockOversizeDnd(f)) return;
       pdfFile = f;
+      pdfFileSize = f.size;
       // PDF選択時はURLをクリア（混在防止）
       const u = $("pdfUrlInput");
       if (u) u.value = "";
@@ -621,17 +554,9 @@ function initPdfDrop() {
   input.addEventListener("change", () => {
     const f = input.files && input.files[0];
     if (f && f.type === "application/pdf") {
-      if (f.size > MAX_DD_BYTES) {
-        const mb = (f.size / (1024 * 1024)).toFixed(2);
-        pdfFile = null;
-        input.value = "";
-        setPdfStatus(`容量超過（${mb}MB）`);
-        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください");
-        const u = $("pdfUrlInput");
-        if (u) u.focus();
-        return;
-      }
+      if (blockOversizeDnd(f)) return;
       pdfFile = f;
+      pdfFileSize = f.size;
       const u = $("pdfUrlInput");
       if (u) u.value = "";
       setPdfStatus();

@@ -3,9 +3,8 @@
     "node": "20.x"
   },
   "dependencies": {
-    "openai": "latest",
-    "xlsx": "^0.18.5",
     "exceljs": "^4.4.0",
-    "pdfjs-dist": "^3.11.174"
+    "openai": "latest",
+    "xlsx": "^0.18.5"
   }
 }
