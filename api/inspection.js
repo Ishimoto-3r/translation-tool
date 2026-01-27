@@ -5,40 +5,102 @@
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ===== PDF text extraction (server-side) =====
-async function extractPdfTextFromBuffer(buf) {
-  const u8 = new Uint8Array(buf);
-  const loadingTask = pdfjsLib.getDocument({ data: u8, disableWorker: true });
-  const pdf = await loadingTask.promise;
-  let out = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const tc = await page.getTextContent();
-    const strings = tc.items.map((it) => (typeof it.str === "string" ? it.str : "")).filter(Boolean);
-    out += strings.join(" ") + "\n";
-    // セーフガード：長すぎる場合は途中で切る（APIコスト・時間対策）
-    if (out.length > 250000) break;
+const MAX_PDF_BYTES = 4 * 1024 * 1024;
+
+function resolvePdfUrlFromHtml(baseUrl, htmlText) {
+  const hrefs = [];
+  const regex = /href\s*=\s*["']([^"']+)["']/gi;
+  let match;
+  while ((match = regex.exec(htmlText)) !== null) {
+    hrefs.push(match[1]);
   }
-  return out.trim();
+  const pdfLinks = hrefs
+    .map((href) => {
+      try {
+        return new URL(href, baseUrl).toString();
+      } catch {
+        return null;
+      }
+    })
+    .filter((href) => href && /\.pdf(\?|#|$)/i.test(href));
+
+  const keywords = ["manual", "マニュアル", "instruction", "取説", "download"];
+  const urlObj = new URL(baseUrl);
+  const parts = urlObj.pathname.split("/").filter(Boolean);
+  const slug = parts[parts.length - 1] || "";
+  const scored = pdfLinks.map((href, index) => {
+    let score = 0;
+    const lower = href.toLowerCase();
+    if (keywords.some((k) => lower.includes(k.toLowerCase()))) score += 2;
+    if (slug && lower.includes(slug.toLowerCase())) score += 1;
+    return { href, score, index };
+  });
+  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+
+  console.info("[inspection][extract] pdf candidates:", scored.length);
+  console.info("[inspection][extract] top3 pdf urls:", scored.slice(0, 3).map((s) => s.href));
+
+  return scored[0]?.href || "";
 }
 
-async function loadPdfBufferFromInput({ pdfBase64, pdfUrl }) {
-  if (pdfBase64) {
-    const b64 = String(pdfBase64).split(",").pop();
-    const bin = Buffer.from(b64, "base64");
-    return bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength);
+async function getPdfBufferFromRequest(req, { pdfUrl }) {
+  const contentType = (req.headers["content-type"] || "").toLowerCase();
+  if (contentType.includes("application/pdf")) {
+    if (Buffer.isBuffer(req.body)) return req.body;
+    if (req.body instanceof ArrayBuffer) return Buffer.from(req.body);
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
   if (pdfUrl) {
-    const r = await fetch(pdfUrl);
-    if (!r.ok) throw new Error(`PDFURLFetchError: `);
-    const ab = await r.arrayBuffer();
-    return ab;
+    const r = await fetch(pdfUrl, {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+      },
+    });
+    const httpStatus = r.status;
+    const contentType = (r.headers.get("content-type") || "").toLowerCase();
+    if (!r.ok) {
+      const err = new Error("PDFURLFetchError");
+      err.httpStatus = httpStatus;
+      throw err;
+    }
+    if (contentType.includes("application/pdf")) {
+      const ab = await r.arrayBuffer();
+      return { buffer: Buffer.from(ab), httpStatus };
+    }
+    const htmlText = await r.text();
+    const resolvedPdfUrl = resolvePdfUrlFromHtml(pdfUrl, htmlText);
+    if (!resolvedPdfUrl) {
+      const err = new Error("NoPdfLinkFound");
+      err.code = "NoPdfLinkFound";
+      throw err;
+    }
+    const pdfRes = await fetch(resolvedPdfUrl, {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+      },
+    });
+    const pdfStatus = pdfRes.status;
+    const pdfType = (pdfRes.headers.get("content-type") || "").toLowerCase();
+    if (!pdfRes.ok || !pdfType.includes("application/pdf")) {
+      const err = new Error("PDFURLFetchError");
+      err.httpStatus = pdfStatus;
+      throw err;
+    }
+    const pdfAb = await pdfRes.arrayBuffer();
+    return { buffer: Buffer.from(pdfAb), httpStatus: pdfStatus };
   }
-  throw new Error("pdfBase64 or pdfUrl is required");
+  throw new Error("pdfUrl or application/pdf body is required");
 }
 
 // ===== Graph token =====
@@ -306,6 +368,97 @@ ${pdfText}
   return { model, productName, specs, ops, accs };
 }
 
+// ===== AI extract from PDF file =====
+async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHint }) {
+  const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
+  const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
+  const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
+
+  const sys = `
+あなたは取扱説明書（日本語）の内容から、検品リスト作成に必要な情報を抽出します。
+必ずJSONのみを返してください（説明文は不要）。
+`;
+
+  const user = `
+【目的】
+検品リストに入れる「仕様」「動作」「付属品」、および「型番」「製品名」を抽出します。
+
+【重要ルール】
+- 「動作」には、安全注意/禁止/中止/警告/注意（安全・取扱注意、禁止事項）は入れない。
+- 「動作」は、実際の操作/設定/表示/接続/保存など “できること” を箇条書きで。
+- 「動作」は、まとまりがある場合は title を1つ作り、その配下に items を並べる（例：メニュー設定系はまとめる）。
+- 「付属品」は、PDFに書かれているものをできるだけ拾う。表記揺れを整理する（例：USBケーブル/USBコード/ケーブル→USBケーブル）。
+- ただし「取扱説明書」は、PDF内の明記が無くても必ず付属品候補に入れる（表記は「取扱説明書」に統一）。
+- 型番/製品名は、PDF内の表記（例：3R-XXXX）やタイトル行から推定。見つからない場合は空文字。
+
+【ヒント（既に入力されている可能性あり）】
+- 型番ヒント: ${modelHint || ""}
+- 製品名ヒント: ${productHint || ""}
+
+【返却JSONスキーマ（厳守）】
+{
+  "model": "型番",
+  "productName": "製品名",
+  "specs": ["仕様の箇条書き", "..."],
+  "ops": [{"title":"見出し","items":["動作1","動作2"]}],
+  "accs": ["付属品1","付属品2","取扱説明書"]
+}
+`;
+
+  const file = new File([pdfBuffer], fileName || "manual.pdf", { type: "application/pdf" });
+  const uploaded = await client.files.create({ file, purpose: "assistants" });
+
+  const resp = await client.responses.create({
+    model: MODEL,
+    reasoning: { effort: REASONING },
+    text: { verbosity: VERBOSITY },
+    input: [
+      { role: "system", content: sys.trim() },
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: user.trim() },
+          { type: "input_file", file_id: uploaded.id },
+        ],
+      },
+    ],
+  });
+
+  const text = resp.output_text || "{}";
+  let obj;
+  try { obj = JSON.parse(text); } catch { obj = {}; }
+
+  const model = norm(obj.model);
+  const productName = norm(obj.productName);
+
+  const specs = dedupeKeepOrder(Array.isArray(obj.specs) ? obj.specs : []);
+
+  const opsIn = Array.isArray(obj.ops) ? obj.ops : [];
+  const ops = [];
+  for (const g0 of opsIn) {
+    const title = norm(g0?.title);
+    let items = Array.isArray(g0?.items) ? g0.items.map(norm) : [];
+    items = items.filter(x => x && !shouldSkipOpItem(x));
+    items = dedupeKeepOrder(items);
+    if (!title && items.length === 0) continue;
+    ops.push({ title, items });
+  }
+
+  let accs = Array.isArray(obj.accs) ? obj.accs.map(normalizeManualAccessory).map(norm) : [];
+  accs = accs.map(normalizeManualAccessory);
+  accs.push("取扱説明書");
+  accs = dedupeKeepOrder(accs);
+
+  accs = accs.map(a => {
+    if (a.includes("USB") && (a.includes("コード") || a.includes("ケーブル") || a === "ケーブル")) return "USBケーブル";
+    if (a === "ケーブル") return "USBケーブル";
+    return a;
+  });
+  accs = dedupeKeepOrder(accs);
+
+  return { model, productName, specs, ops, accs };
+}
+
 // ===== Excel generate =====
 function findMarkerRow(ws, marker) {
   // A列完全一致で探す
@@ -453,6 +606,10 @@ async function generateExcel({
   function insertAtMarker(marker, rowsToInsert) {
     const r0 = findMarkerRow(wsMain, marker);
     if (r0 < 0) throw new Error(`MarkerError: ${marker} が見つかりません`);
+    const styleSources = [9, 10, 11].map((col) => wsMain.getRow(r0).getCell(col));
+    const styleClones = styleSources.map((cell) =>
+      cell && cell.style ? JSON.parse(JSON.stringify(cell.style)) : null
+    );
 
     // マーカー行の位置に行を挿入し、最後にマーカー行を消す
     // ExcelJS: spliceRows(start, deleteCount, ...rows)
@@ -477,6 +634,15 @@ async function generateExcel({
     const colCount = Math.max(wsMain.columnCount, 11); // A〜K相当まで
     for (let i = 0; i < mapped.length; i++) {
       applyRowStyle(wsMain, r0 + i, colCount);
+      for (let idx = 0; idx < styleClones.length; idx++) {
+        const style = styleClones[idx];
+        if (!style) continue;
+        const col = 9 + idx;
+        const cell = wsMain.getRow(r0 + i).getCell(col);
+        const border = cell.border;
+        cell.style = style;
+        if (border) cell.border = border;
+      }
     }
   }
 
@@ -500,6 +666,9 @@ async function generateExcel({
     .map(s => s.name)
     .filter(name => !keep.has(name))
     .forEach(name => wb.removeWorksheet(name));
+
+  const mainIndex = wb.worksheets.findIndex((s) => s.name === "検品リスト");
+  wb.views = [{ activeTab: mainIndex >= 0 ? mainIndex : 0 }];
 
   // ファイル名
   const safeModel = cleanFileNamePart(model);
@@ -532,40 +701,89 @@ export default async function handler(req, res) {
     }
 
     if (op === "extract") {
-      const { pdfBase64, pdfUrl, fileName, modelHint, productHint } = req.body || {};
-      if (!pdfBase64 && !pdfUrl) {
-        return res.status(400).json({ error: "BadRequest", detail: "pdfBase64 or pdfUrl is required" });
+      const body =
+        req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)
+          ? req.body
+          : {};
+      const query = req.query || {};
+      const pdfUrl = typeof body.pdfUrl === "string" ? body.pdfUrl.trim() : "";
+      const fileName = body.fileName || query.fileName || "manual.pdf";
+      const modelHint = body.modelHint || query.modelHint || "";
+      const productHint = body.productHint || query.productHint || "";
+      const contentType = (req.headers["content-type"] || "").toLowerCase();
+      if (!pdfUrl && !contentType.includes("application/pdf")) {
+        return res.status(400).json({ error: "BadRequest", detail: "pdfUrl or application/pdf body is required" });
       }
 
       let buf;
+      let source = "dnd";
+      let fetchedBytes = 0;
+      let httpStatus = null;
       try {
-        buf = await loadPdfBufferFromInput({ pdfBase64, pdfUrl });
+        if (pdfUrl) {
+          source = "url";
+        }
+        const result = await getPdfBufferFromRequest(req, { pdfUrl });
+        if (result && result.buffer) {
+          buf = result.buffer;
+          httpStatus = result.httpStatus ?? null;
+        } else {
+          buf = result;
+        }
+        fetchedBytes = buf?.byteLength || 0;
       } catch (e) {
-        return res.status(400).json({ error: "BadRequest", detail: "PDFの取得に失敗しました: " + e.message });
+        console.error("[inspection][extract] pdf load failed:", e?.message || e);
+        if (e?.code === "NoPdfLinkFound") {
+          return res.status(400).json({
+            error: "NoPdfLinkFound",
+            detail: "URL先はPDFではありません。ページ内にPDFリンクが見つかりませんでした。PDF直リンクを貼ってください。",
+          });
+        }
+        return res.status(200).json({
+          ok: true,
+          text: "",
+          status: "read_error",
+          notice: "このPDFはテキスト抽出できません。",
+          diag: { pdfLoadError: e?.message || String(e) },
+        });
       }
 
-      let pdfText = "";
+      const pdfByteSize = buf?.byteLength || 0;
+      if (pdfByteSize > MAX_PDF_BYTES) {
+        return res.status(200).json({
+          ok: true,
+          text: "",
+          status: "read_error",
+          notice: "このPDFは容量が大きいため処理できません。URL欄に直リンクを貼ってください。",
+          diag: { pdfTooLarge: true, pdfByteSize, maxBytes: MAX_PDF_BYTES },
+        });
+      }
+
+      const headBytes = buf ? Buffer.from(buf).slice(0, 4).toString("ascii") : "";
+      console.info("[inspection][extract] source:", source);
+      console.info("[inspection][extract] url http status:", httpStatus);
+      console.info("[inspection][extract] fetched bytes:", fetchedBytes);
+      console.info("[inspection][extract] pdf byte size:", pdfByteSize);
+      console.info("[inspection][extract] pdf head bytes:", headBytes);
+
       try {
-        pdfText = await extractPdfTextFromBuffer(buf);
+        const r = await aiExtractFromPdfFile({
+          pdfBuffer: buf,
+          fileName,
+          modelHint,
+          productHint,
+        });
+        return res.status(200).json(r);
       } catch (e) {
-        return res.status(400).json({ error: "BadRequest", detail: "PDFのテキスト抽出に失敗しました: " + e.message });
+        console.error("[inspection][extract] ai extract failed:", e?.message || e);
+        return res.status(200).json({
+          ok: true,
+          text: "",
+          status: "no_text",
+          notice: "このPDFはテキスト抽出できません。",
+          diag: { aiExtractError: e?.message || String(e) },
+        });
       }
-
-      pdfText = (pdfText || "").toString();
-      if (!pdfText.trim()) {
-        return res.status(400).json({ error: "BadRequest", detail: "pdfText is empty (PDFが画像主体の可能性)" });
-      }
-
-      const MAX_TEXT = 200000;
-      if (pdfText.length > MAX_TEXT) pdfText = pdfText.slice(0, MAX_TEXT);
-
-      const r = await aiExtractFromPdfText({
-        pdfText,
-        fileName: fileName || "manual.pdf",
-        modelHint: modelHint || "",
-        productHint: productHint || ""
-      });
-      return res.status(200).json(r);
     }
 
     if (op === "generate") {
