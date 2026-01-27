@@ -336,7 +336,7 @@ async function runExtract() {
     pdfFile = null;
     $("pdfInput").value = "";
     setPdfStatus(`容量超過（${mb}MB）`);
-    showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にPDFのリンクを貼り付けてください。");
+    showError("容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にマニュアルのリンクを貼り付けてください。");
     if ($("pdfUrlInput")) $("pdfUrlInput").focus();
     return;
   }
@@ -347,7 +347,7 @@ async function runExtract() {
   }
 
   try {
-    setBusy(true, "AI抽出中", "準備", "PDFから仕様/動作/付属品/型番/製品名を抽出しています。", "PDF解析はサーバー側で実施します。");
+    setBusy(true, "AI抽出中", "準備", "マニュアルから仕様/動作/付属品/型番/製品名を抽出しています。", "解析はサーバー側で実施します。");
     $("overlayBar").style.width = "20%";
 
     const modelHint = $("modelInput").value.trim();
@@ -547,7 +547,7 @@ function initPdfDrop() {
       if (u) u.value = "";
       setPdfStatus();
     } else {
-      showError("PDFファイルを指定してください。");
+      showError("ファイルを指定してください。");
     }
   });
 
@@ -561,7 +561,7 @@ function initPdfDrop() {
       if (u) u.value = "";
       setPdfStatus();
     } else if (f) {
-      showError("PDFファイルを指定してください。");
+      showError("ファイルを指定してください。");
     }
   });
 
