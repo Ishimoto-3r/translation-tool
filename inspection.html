@@ -107,52 +107,52 @@
           <div id="dropzone"
                class="mt-4 border-2 border-dashed border-gray-300 rounded-xl p-4 bg-white hover:bg-gray-50 transition cursor-pointer">
             <div class="text-center">
-              <div class="font-semibold">ここにPDFをドロップ（またはクリックで選択）</div>
-              <div class="mt-2 text-xs text-gray-500" id="pdfNameHint">※PDFをAI抽出に使用します</div>
+              <div class="font-semibold">ここにファイルをドロップ（またはクリックで選択）</div>
+              <div class="mt-2 text-xs text-gray-500" id="pdfNameHint">※選択したファイルの内容を解析に使用します</div>
             </div>
             <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
           </div>
 
-          <!-- URL入力（容量が大きいPDFはURL推奨） -->
+          <!-- URL入力（容量が大きいファイルはURL推奨） -->
           <div class="mt-4">
-            <label class="block text-sm font-bold">PDFのURL（容量が大きい場合はこちら）</label>
+            <label class="block text-sm font-bold">マニュアルURL（容量が大きい場合はこちら）</label>
             <div class="text-xs text-gray-500 mt-1">
-              ※ドラッグ＆ドロップは4MBまで。超えるPDFはURLを貼り付けてください（PDF直リンクのみ）。
+              ※ドラッグ＆ドロップは4MBまで。超える場合はURLを貼り付けてください（ファイル直リンクのみ）。
             </div>
             <div class="text-xs text-gray-500 mt-1">
               <a href="https://3rrr-btob.jp/manual/" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">マニュアル検索はこちら</a>
             </div>
             <input id="pdfUrlInput" type="url"
                    class="mt-2 w-full border border-gray-300 rounded-xl px-3 py-2"
-                   placeholder="例：https://www.example.com/manual.pdf" />
+                   placeholder="例：https://www.example.com/manual" />
           </div>
 
           <div class="mt-8 flex items-center justify-between gap-4 flex-wrap">
             <div>
-              <div class="font-bold">PDF読み取り（AI抽出）</div>
+              <div class="font-bold">ファイル読み取り（AI抽出）</div>
               <div class="text-sm text-gray-500 mt-1">
                 抽出結果を確認し、必要なものだけチェックして検品リストに反映します（初期は未チェック）。
               </div>
             </div>
             <button id="btnExtract"
                     class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700">
-              PDFをAIに読み取らせる
+              ファイル内容をAIに読み取らせる
             </button>
           </div>
           <div class="mt-2 text-xs text-gray-500">抽出結果を確認 → 必要な項目だけチェック → Excel生成</div>
 
           <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-bold mb-1">型番（PDFから自動取得）</label>
+              <label class="block text-sm font-bold mb-1">型番（URLから自動取得）</label>
               <input id="modelInput" type="text"
                      class="w-full border border-gray-300 rounded-xl px-3 py-2"
-                     placeholder="PDFから自動取得" />
+                     placeholder="URLから自動取得" />
             </div>
             <div>
-              <label class="block text-sm font-bold mb-1">製品名（PDFから自動取得）</label>
+              <label class="block text-sm font-bold mb-1">製品名（URLから自動取得）</label>
               <input id="productInput" type="text"
                      class="w-full border border-gray-300 rounded-xl px-3 py-2"
-                     placeholder="PDFから自動取得" />
+                     placeholder="URLから自動取得" />
             </div>
           </div>
         </div>
@@ -179,7 +179,7 @@
 
             <div class="bg-white border border-gray-200 rounded-2xl p-4">
               <div class="font-bold">付属品（AI抽出）</div>
-              <div class="text-xs text-gray-500">※取扱説明書はPDFに記載が無くても候補に出します</div>
+              <div class="text-xs text-gray-500">※取扱説明書はマニュアルに記載が無くても候補に出します</div>
               <div id="accList" class="mt-2 space-y-2 text-sm text-gray-700">（抽出なし）</div>
             </div>
           </div>
