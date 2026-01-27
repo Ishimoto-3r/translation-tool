@@ -10,6 +10,7 @@ import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const MAX_PDF_BYTES = 4 * 1024 * 1024;
+const MAX_HTML_TEXT_CHARS = 30000;
 
 async function resolvePdfUrlFromHtml(baseUrl, htmlText) {
   console.log("[inspection][extract] html length:", htmlText.length);
@@ -63,8 +64,6 @@ async function resolvePdfUrlFromHtml(baseUrl, htmlText) {
   }
 
   const deduped = Array.from(new Set(candidates)).slice(0, 20);
-  console.log("[inspection][extract] pdf candidates:", deduped.length);
-  console.log("[inspection][extract] top pdf urls:", deduped.slice(0, 10));
 
   const hits = [];
   for (const candidate of deduped) {
@@ -107,26 +106,47 @@ async function resolvePdfUrlFromHtml(baseUrl, htmlText) {
   }
 
   console.log("[inspection][extract] pdf hits:", hits.length);
-  return hits[0] || "";
+  return { resolvedUrl: hits[0] || "", candidates: deduped };
+}
+
+function htmlToText(html) {
+  if (!html) return "";
+  let text = html;
+  text = text.replace(/<\s*(script|style|noscript|header|footer|nav)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, " ");
+  text = text.replace(/<[^>]+>/g, " ");
+  const entities = {
+    "&nbsp;": " ",
+    "&amp;": "&",
+    "&lt;": "<",
+    "&gt;": ">",
+    "&quot;": "\"",
+    "&#39;": "'",
+  };
+  text = text.replace(/&(?:nbsp|amp|lt|gt|quot|#39);/g, (m) => entities[m] || m);
+  text = text.replace(/\s+/g, " ").trim();
+  if (text.length > MAX_HTML_TEXT_CHARS) {
+    text = text.slice(0, MAX_HTML_TEXT_CHARS);
+  }
+  return text;
 }
 
 async function getPdfBufferFromRequest(req, { pdfUrl }) {
   const contentType = (req.headers["content-type"] || "").toLowerCase();
   if (contentType.includes("application/pdf")) {
-    if (Buffer.isBuffer(req.body)) return req.body;
-    if (req.body instanceof ArrayBuffer) return Buffer.from(req.body);
+    if (Buffer.isBuffer(req.body)) return { buffer: req.body, sourceType: "pdf" };
+    if (req.body instanceof ArrayBuffer) return { buffer: Buffer.from(req.body), sourceType: "pdf" };
     const chunks = [];
     for await (const chunk of req) {
       chunks.push(Buffer.from(chunk));
     }
-    return Buffer.concat(chunks);
+    return { buffer: Buffer.concat(chunks), sourceType: "pdf" };
   }
   if (pdfUrl) {
     const r = await fetch(pdfUrl, {
       redirect: "follow",
       headers: {
         "User-Agent": "Mozilla/5.0",
-        "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
     });
     const httpStatus = r.status;
@@ -138,16 +158,19 @@ async function getPdfBufferFromRequest(req, { pdfUrl }) {
     }
     if (contentType.includes("application/pdf")) {
       const ab = await r.arrayBuffer();
-      return { buffer: Buffer.from(ab), httpStatus };
+      return { buffer: Buffer.from(ab), httpStatus, sourceType: "pdf" };
     }
     const htmlText = await r.text();
-    const resolvedPdfUrl = await resolvePdfUrlFromHtml(pdfUrl, htmlText);
-    if (!resolvedPdfUrl) {
-      const err = new Error("NoPdfLinkFound");
-      err.code = "NoPdfLinkFound";
-      throw err;
+    const { resolvedUrl, candidates } = await resolvePdfUrlFromHtml(pdfUrl, htmlText);
+    if (!resolvedUrl) {
+      return {
+        htmlText,
+        sourceType: "html",
+        httpStatus,
+        pdfCandidates: candidates,
+      };
     }
-    const pdfRes = await fetch(resolvedPdfUrl, {
+    const pdfRes = await fetch(resolvedUrl, {
       redirect: "follow",
       headers: {
         "User-Agent": "Mozilla/5.0",
@@ -162,7 +185,12 @@ async function getPdfBufferFromRequest(req, { pdfUrl }) {
       throw err;
     }
     const pdfAb = await pdfRes.arrayBuffer();
-    return { buffer: Buffer.from(pdfAb), httpStatus: pdfStatus };
+    return {
+      buffer: Buffer.from(pdfAb),
+      httpStatus: pdfStatus,
+      sourceType: "pdf",
+      pdfCandidates: candidates,
+    };
   }
   throw new Error("pdfUrl or application/pdf body is required");
 }
@@ -342,7 +370,7 @@ async function getSelectionItemsFromTemplate() {
 }
 
 // ===== AI extract =====
-async function aiExtractFromPdfText({ pdfText, fileName, modelHint, productHint }) {
+async function aiExtractFromSourceText({ sourceText, fileName, modelHint, productHint }) {
   const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
   const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
   const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
@@ -377,10 +405,10 @@ async function aiExtractFromPdfText({ pdfText, fileName, modelHint, productHint 
   "accs": ["付属品1","付属品2","取扱説明書"]
 }
 
-【PDFテキスト（抜粋元）】
+【本文テキスト（抜粋元）】
 ファイル名: ${fileName}
 ---
-${pdfText}
+${sourceText}
 `;
 
   const resp = await client.responses.create({
@@ -799,6 +827,9 @@ export default async function handler(req, res) {
       }
 
       let buf;
+      let htmlText = "";
+      let sourceType = "pdf";
+      let pdfCandidates = [];
       let source = "dnd";
       let fetchedBytes = 0;
       let httpStatus = null;
@@ -810,18 +841,19 @@ export default async function handler(req, res) {
         if (result && result.buffer) {
           buf = result.buffer;
           httpStatus = result.httpStatus ?? null;
+          sourceType = result.sourceType || "pdf";
+          pdfCandidates = result.pdfCandidates || [];
+        } else if (result && result.htmlText) {
+          htmlText = result.htmlText;
+          httpStatus = result.httpStatus ?? null;
+          sourceType = result.sourceType || "html";
+          pdfCandidates = result.pdfCandidates || [];
         } else {
           buf = result;
         }
         fetchedBytes = buf?.byteLength || 0;
       } catch (e) {
         console.error("[inspection][extract] pdf load failed:", e?.message || e);
-        if (e?.code === "NoPdfLinkFound") {
-          return res.status(400).json({
-            error: "NoPdfLinkFound",
-            detail: "URL先はPDFではなく、ページ内にもPDFリンクが見つかりませんでした。",
-          });
-        }
         return res.status(200).json({
           ok: true,
           text: "",
@@ -832,6 +864,11 @@ export default async function handler(req, res) {
       }
 
       const pdfByteSize = buf?.byteLength || 0;
+      const htmlTextLength = htmlText ? htmlText.length : 0;
+      console.info("[inspection][extract] sourceType:", sourceType);
+      console.info("[inspection][extract] sourceText length:", sourceType === "html" ? htmlTextLength : 0);
+      console.info("[inspection][extract] html pdfCandidates count:", pdfCandidates.length);
+      console.info("[inspection][extract] html top3 pdfCandidates:", pdfCandidates.slice(0, 3));
       if (pdfByteSize > MAX_PDF_BYTES) {
         return res.status(200).json({
           ok: true,
@@ -840,6 +877,36 @@ export default async function handler(req, res) {
           notice: "このPDFは容量が大きいため処理できません。URL欄に直リンクを貼ってください。",
           diag: { pdfTooLarge: true, pdfByteSize, maxBytes: MAX_PDF_BYTES },
         });
+      }
+
+      if (sourceType === "html") {
+        const sourceText = htmlToText(htmlText);
+        console.info("[inspection][extract] sourceText length:", sourceText.length);
+        if (sourceText.length < 1000) {
+          return res.status(400).json({
+            error: "NoExtractableContent",
+            detail:
+              "URL先がPDFでも、ページ本文から抽出できるテキストも見つかりませんでした。PDF直リンクを貼ってください。",
+          });
+        }
+        try {
+          const r = await aiExtractFromSourceText({
+            sourceText,
+            fileName,
+            modelHint,
+            productHint,
+          });
+          return res.status(200).json(r);
+        } catch (e) {
+          console.error("[inspection][extract] ai extract failed:", e?.message || e);
+          return res.status(200).json({
+            ok: true,
+            text: "",
+            status: "no_text",
+            notice: "このURLはテキスト抽出できません。",
+            diag: { aiExtractError: e?.message || String(e) },
+          });
+        }
       }
 
       const headBytes = buf ? Buffer.from(buf).slice(0, 4).toString("ascii") : "";
@@ -857,13 +924,14 @@ export default async function handler(req, res) {
       }
 
       console.log("[inspection][extract] pdfTextLen:", pdfText ? pdfText.length : 0);
+      console.info("[inspection][extract] sourceText length:", pdfText ? pdfText.length : 0);
       const fallbackToFile = !pdfText || pdfText.trim().length < 200;
       console.log("[inspection][extract] fallbackToFile:", fallbackToFile);
 
       if (!fallbackToFile) {
         try {
-          const r = await aiExtractFromPdfText({
-            pdfText,
+          const r = await aiExtractFromSourceText({
+            sourceText: pdfText,
             fileName,
             modelHint,
             productHint,
