@@ -10,14 +10,6 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0; padding: 0; background-color: #f3f4f6; color: #1f2937;
         }
-
-    .tool-nav{position:sticky;top:0;z-index:100;background:#374151;padding:10px 16px;box-shadow:0 2px 4px rgba(0,0,0,.12);display:flex;justify-content:center;gap:14px;align-items:center;flex-wrap:wrap}
-    .nav-groupbox{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 10px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.04)}
-    .nav-heading{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;font-weight:700;letter-spacing:.08em;color:rgba(243,244,246,.85)}
-    .nav-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .tool-nav a{color:#f3f4f6;text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06)}
-    .tool-nav a:hover{background:rgba(255,255,255,.12)}
-    .tool-nav a.active{background:#172554;color:#fff}
         .container {
             max-width: 800px; margin: 2rem auto; padding: 1.5rem 2rem;
             background-color: #ffffff; border-radius: 12px;
@@ -28,6 +20,16 @@
             border-bottom: 2px solid #3b82f6; padding-bottom: 0.75rem; margin-bottom: 1.5rem;
         }
         h1 { font-size: 1.75rem; margin: 0; color: #111827; }
+
+        .tool-nav {
+            background-color: #374151; padding: 0.75rem 1rem; text-align: center;
+        }
+        .tool-nav a {
+            color: #f3f4f6; text-decoration: none; font-weight: 500;
+            margin: 0 1rem; padding: 0.5rem 0.75rem; border-radius: 6px;
+        }
+        .tool-nav a:hover { background-color: #4b5563; }
+        .tool-nav a.active { background-color: #172554; color: white; font-weight: 600; }
 
         .section-card {
             margin-bottom: 1.5rem; padding: 1.25rem 1.5rem;
@@ -93,47 +95,110 @@
         #error-close { background-color: #111827; color: white; padding: 0.5rem 1.5rem; font-size: 0.9rem; }
 
         /* ===== Top Nav (Group + One-click) ===== */
+.tool-nav{
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background:#374151;
+  padding: 10px 16px;
+  box-shadow: 0 2px 4px rgba(0,0,0,.12);
+
+  display:flex;
+  justify-content:center;
+  gap: 14px;
+  align-items:center;
+}
+
 /* グループの“箱” */
+.tool-nav .nav-groupbox{
+  display:flex;
+  flex-direction:column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 10px;
+  background: rgba(255,255,255,.04);
+}
+
 /* 見出しは「ボタンに見せない」 */
+.tool-nav .nav-heading{
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: rgba(243,244,246,.75);
+  line-height: 1;
+  padding-left: 4px;
+  user-select: none;
+}
+
 /* リンク列 */
+.tool-nav .nav-links{
+  display:flex;
+  gap: 8px;
+  align-items:center;
+}
+
 /* リンクを“ピル”に統一（見出しと見分ける） */
+.tool-nav a{
+  color:#f3f4f6;
+  text-decoration:none;
+  font-weight: 600;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  transition: background-color .15s, transform .05s;
+  margin: 0; /* 既存CSSのmarginを無効化 */
+  display:inline-flex;
+  align-items:center;
+  gap: 6px;
+}
+.tool-nav a:hover{
+  background: rgba(255,255,255,.12);
+}
+.tool-nav a:active{
+  transform: translateY(1px);
+}
+
 /* 現在ページ */
+.tool-nav a.active{
+  background:#172554;
+  color:#fff;
+}
+
 /* 重要：見出しがリンクと同じ位置に見えないように */
-</style>
+.tool-nav .nav-heading::before{
+  content: "⭐";
+  opacity: .9;
+}
+
+    </style>
 </head>
 <body>
 
 
 <nav class="tool-nav">
-    <div class="nav-groupbox">
-      <div class="nav-heading">🌐 翻訳</div>
-      <div class="nav-links">
-        <a href="/index.html">翻訳ツール</a>
-        <a href="/verify.html">検証結果翻訳</a>
-        <a href="/column-translate.html" class="active">列指定翻訳</a>
-        <a href="/sheet-translate.html">シート翻訳</a>
-        <a href="/word-translate.html">Word翻訳</a>
-      </div>
+  <div class="nav-groupbox">
+    <div class="nav-heading">翻訳</div>
+    <div class="nav-links">
+      <a href="/index.html">翻訳ツール</a>
+      <a href="/verify.html">検証結果翻訳</a>
+  <a href="/column-translate.html" class="active">列指定翻訳</a>
+      <a href="/sheet-translate.html">シート翻訳</a>
+      <a href="/word-translate.html">Word翻訳</a>
     </div>
+  </div>
 
-    <div class="nav-groupbox">
-      <div class="nav-heading">📝 マニュアル</div>
-      <div class="nav-links">
-        <a href="/manual.html">原稿作成（AIチェック）</a>
-        <a href="/media-manual.html">動画から原稿作成</a>
-      </div>
-    </div>
+  <div class="nav-groupbox">
+    <div class="nav-heading">その他</div>
+    <div class="nav-links">
+      <a href="/report.html">修理レポート</a>
+      <a href="/manual.html">原稿作成（AIチェック）</a>
+                      <a href="/prompt.html">単発プロンプト</a>
 
-    <div class="nav-groupbox">
-      <div class="nav-heading">★ その他</div>
-      <div class="nav-links">
-        <a href="/report.html">修理レポート</a>
-        <a href="/kensho.html">検証項目作成</a>
-        <a href="/prompt.html">単発プロンプト</a>
-        <a href="/inspection.html">検品リスト作成</a>
-      </div>
     </div>
-  </nav>
+  </div>
+</nav>
     
 
     
