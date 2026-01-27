@@ -21,6 +21,14 @@
         body {
             font-family: "Meiryo UI", "Helvetica Neue", Arial, sans-serif;
         }
+
+    .tool-nav{position:sticky;top:0;z-index:100;background:#374151;padding:10px 16px;box-shadow:0 2px 4px rgba(0,0,0,.12);display:flex;justify-content:center;gap:14px;align-items:center;flex-wrap:wrap}
+    .nav-groupbox{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 10px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.04)}
+    .nav-heading{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;font-weight:700;letter-spacing:.08em;color:rgba(243,244,246,.85)}
+    .nav-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .tool-nav a{color:#f3f4f6;text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06)}
+    .tool-nav a:hover{background:rgba(255,255,255,.12)}
+    .tool-nav a.active{background:#172554;color:#fff}
         .grid-layout {
             display: grid;
             grid-template-columns: 320px 1fr 380px;
@@ -423,14 +431,7 @@ body {
 
 
 /* リンク列 */
-.nav-links{
-  display:flex;
-  align-items:center;
-  gap:8px;
-}
-
-
-  /* ===== 見出しを「UIのタイトル」に格上げ ===== */
+/* ===== 見出しを「UIのタイトル」に格上げ ===== */
 .ui-section-title{
   display:flex;
   align-items:center;
@@ -488,23 +489,6 @@ body {
       
 
 /* ===== 共通ヘッダー（翻訳ツールと同じ見た目） ===== */
-.tool-nav{
-  position: sticky;
-  top: 0;
-  z-index: 9999;
-  background: #374151;              /* 透けさせない（うっすら文字が見える対策） */
-  box-shadow: 0 2px 4px rgba(0,0,0,.18);
-}
-
-.tool-nav-inner{
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 10px 16px;
-  display: flex;
-  justify-content: center;
-  gap: 14px;
-}
-
 .nav-group{
   display: flex;
   flex-direction: column;            /* 見出しを“上”、ボタン群を“下”にする */
@@ -524,34 +508,7 @@ body {
   line-height: 1;
 }
 
-.nav-links{
-  display: flex;
-  gap: 8px;
-}
-
-.tool-nav a{
-  color: #f3f4f6;
-  text-decoration: none;
-  font-weight: 700;
-  font-size: 14px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(255,255,255,.06);
-  transition: background-color .15s ease, transform .15s ease;
-}
-
-.tool-nav a:hover{
-  background: rgba(255,255,255,.12);
-  transform: translateY(-1px);
-}
-
-.tool-nav a.active{
-  background: #172554;
-  color: #ffffff;
-}
-
-
-    </style>
+</style>
 
 
 
@@ -561,10 +518,8 @@ body {
 
 <body class="bg-gray-100 text-gray-800">
     <nav class="tool-nav">
-  <div class="tool-nav-inner">
-
-    <div class="nav-group">
-      <div class="nav-group-title">⭐翻訳</div>
+    <div class="nav-groupbox">
+      <div class="nav-heading">🌐 翻訳</div>
       <div class="nav-links">
         <a href="/index.html">翻訳ツール</a>
         <a href="/verify.html">検証結果翻訳</a>
@@ -574,18 +529,24 @@ body {
       </div>
     </div>
 
-    <div class="nav-group">
-      <div class="nav-group-title">⭐その他</div>
+    <div class="nav-groupbox">
+      <div class="nav-heading">📝 マニュアル</div>
       <div class="nav-links">
-        <a href="/report.html">修理レポート</a>
         <a href="/manual.html" class="active">原稿作成（AIチェック）</a>
-                        <a href="/prompt.html">単発プロンプト</a>
-
+        <a href="/media-manual.html">動画から原稿作成</a>
       </div>
     </div>
 
-  </div>
-</nav>
+    <div class="nav-groupbox">
+      <div class="nav-heading">★ その他</div>
+      <div class="nav-links">
+        <a href="/report.html">修理レポート</a>
+        <a href="/kensho.html">検証項目作成</a>
+        <a href="/prompt.html">単発プロンプト</a>
+        <a href="/inspection.html">検品リスト作成</a>
+      </div>
+    </div>
+  </nav>
 
 
 <div id="loadingOverlay">

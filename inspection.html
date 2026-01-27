@@ -14,7 +14,6 @@
       margin:0;padding:0;
     }
 
-    /* ===== Top Nav (media-manual.html と同一) ===== */
     .tool-nav{position:sticky;top:0;z-index:100;background:#374151;padding:10px 16px;box-shadow:0 2px 4px rgba(0,0,0,.12);display:flex;justify-content:center;gap:14px;align-items:center;flex-wrap:wrap}
     .nav-groupbox{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 10px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.04)}
     .nav-heading{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;font-weight:700;letter-spacing:.08em;color:rgba(243,244,246,.85)}
@@ -23,6 +22,7 @@
     .tool-nav a:hover{background:rgba(255,255,255,.12)}
     .tool-nav a.active{background:#172554;color:#fff}
 
+    /* ===== Top Nav (media-manual.html と同一) ===== */
     /* overlay */
     .overlay{
       position: fixed; inset: 0; z-index: 2000;
@@ -98,8 +98,7 @@
 
       <!-- PDF -->
       <section class="mt-6">
-        <div class="flex items-center justify-between gap-3">
-          <h2 class="text-lg font-bold">PDF（ドラッグ＆ドロップ / クリック選択）</h2>
+        <div class="flex items-center justify-end gap-3">
           <div class="text-sm text-gray-500" id="pdfStatus">未選択</div>
         </div>
 
@@ -127,7 +126,7 @@
                    placeholder="例：https://www.example.com/manual.pdf" />
           </div>
 
-          <div class="flex items-center justify-between gap-4 flex-wrap">
+          <div class="mt-6 flex items-center justify-between gap-4 flex-wrap">
             <div>
               <div class="font-bold">PDF読み取り（AI抽出）</div>
               <div class="text-sm text-gray-500 mt-1">
