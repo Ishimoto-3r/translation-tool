@@ -5,6 +5,7 @@
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -431,6 +432,25 @@ ${pdfText}
   return { model, productName, specs, ops, accs };
 }
 
+async function extractPdfTextFromBuffer(pdfBuffer) {
+  const loadingTask = pdfjsLib.getDocument({
+    data: pdfBuffer,
+    disableWorker: true,
+    useSystemFonts: true,
+  });
+  const pdf = await loadingTask.promise;
+  const pages = [];
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const textItems = content.items
+      .map((item) => (item && typeof item.str === "string" ? item.str : ""))
+      .filter(Boolean);
+    pages.push(textItems.join(" "));
+  }
+  return pages.join("\n");
+}
+
 // ===== AI extract from PDF file =====
 async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHint }) {
   const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
@@ -829,6 +849,38 @@ export default async function handler(req, res) {
       console.info("[inspection][extract] pdf byte size:", pdfByteSize);
       console.info("[inspection][extract] pdf head bytes:", headBytes);
 
+      let pdfText = "";
+      try {
+        pdfText = await extractPdfTextFromBuffer(buf);
+      } catch (e) {
+        console.error("[inspection][extract] pdf text extract failed:", e?.message || e);
+      }
+
+      console.log("[inspection][extract] pdfTextLen:", pdfText ? pdfText.length : 0);
+      const fallbackToFile = !pdfText || pdfText.trim().length < 200;
+      console.log("[inspection][extract] fallbackToFile:", fallbackToFile);
+
+      if (!fallbackToFile) {
+        try {
+          const r = await aiExtractFromPdfText({
+            pdfText,
+            fileName,
+            modelHint,
+            productHint,
+          });
+          return res.status(200).json(r);
+        } catch (e) {
+          console.error("[inspection][extract] ai extract failed:", e?.message || e);
+          return res.status(200).json({
+            ok: true,
+            text: "",
+            status: "no_text",
+            notice: "このPDFはテキスト抽出できません。",
+            diag: { aiExtractError: e?.message || String(e) },
+          });
+        }
+      }
+
       try {
         const r = await aiExtractFromPdfFile({
           pdfBuffer: buf,
@@ -839,12 +891,11 @@ export default async function handler(req, res) {
         return res.status(200).json(r);
       } catch (e) {
         console.error("[inspection][extract] ai extract failed:", e?.message || e);
-        return res.status(200).json({
-          ok: true,
-          text: "",
-          status: "no_text",
-          notice: "このPDFはテキスト抽出できません。",
-          diag: { aiExtractError: e?.message || String(e) },
+        return res.status(400).json({
+          error: "PdfNotExtractable",
+          detail:
+            "PDFのテキスト抽出ができず、ファイル解析も失敗しました。画像PDF等の可能性があります。" +
+            (e?.message ? ` (${String(e.message).slice(0, 200)})` : ""),
         });
       }
     }
