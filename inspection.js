@@ -1,5 +1,6 @@
 // inspection.js（全文置き換え）
 let pdfFile = null;
+let pdfFileSize = 0;
 const MAX_DD_BYTES = 4 * 1024 * 1024; // 4MB（D&D推奨上限）
 const MAX_SELECTION_ITEMS = 50;
 const MAX_AI_ITEMS = 50;
@@ -19,6 +20,19 @@ function showError(msg) {
   const box = $("errorBox");
   box.textContent = msg;
   box.classList.remove("hidden");
+}
+
+function showDndNotice(msg) {
+  const urlInput = $("pdfUrlInput");
+  if (!urlInput) return;
+  let note = $("dndNotice");
+  if (!note) {
+    note = document.createElement("div");
+    note.id = "dndNotice";
+    note.className = "mt-2 text-sm text-red-600";
+    urlInput.parentElement?.insertBefore(note, urlInput);
+  }
+  note.textContent = msg;
 }
 
 function clearError() {
@@ -346,6 +360,13 @@ async function runExtract() {
 
     let r;
     if (pdfFile) {
+      if (pdfFileSize > MAX_DD_BYTES) {
+        const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。";
+        showError(msg);
+        showDndNotice(msg);
+        setBusy(false);
+        return;
+      }
       $("overlayStep").textContent = "PDF送信";
       $("overlayBar").style.width = "55%";
       const params = new URLSearchParams({
@@ -471,6 +492,27 @@ function initPdfDrop() {
   const input = $("pdfInput");
   const urlInput = $("pdfUrlInput");
 
+  const blockOversizeDnd = (file) => {
+    if (!file) return false;
+    if (file.size <= MAX_DD_BYTES) return false;
+    const mb = (file.size / (1024 * 1024)).toFixed(2);
+    pdfFile = null;
+    pdfFileSize = 0;
+    input.value = "";
+    setPdfStatus(`容量超過（${mb}MB）`);
+    const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。";
+    showError(msg);
+    showDndNotice(msg);
+    console.log("[DND] blocked size=", file.size);
+    const u = $("pdfUrlInput");
+    if (u) {
+      u.focus();
+      u.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setBusy(false);
+    return true;
+  };
+
   if (urlInput) {
     urlInput.addEventListener("input", () => {
       const v = urlInput.value.trim();
@@ -495,22 +537,9 @@ function initPdfDrop() {
     dz.classList.remove("border-blue-400");
     const f = e.dataTransfer.files && e.dataTransfer.files[0];
     if (f && f.type === "application/pdf") {
-      // 容量が大きい場合は止めてURL案内（要件）
-      if (f.size > MAX_DD_BYTES) {
-        const mb = (f.size / (1024 * 1024)).toFixed(2);
-        pdfFile = null;
-        input.value = "";
-        setPdfStatus(`容量超過（${mb}MB）`);
-        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。");
-        const u = $("pdfUrlInput");
-        if (u) {
-          u.focus();
-          u.scrollIntoView({ behavior: "smooth", block: "center" });
-        }
-        setBusy(false);
-        return;
-      }
+      if (blockOversizeDnd(f)) return;
       pdfFile = f;
+      pdfFileSize = f.size;
       // PDF選択時はURLをクリア（混在防止）
       const u = $("pdfUrlInput");
       if (u) u.value = "";
@@ -523,17 +552,9 @@ function initPdfDrop() {
   input.addEventListener("change", () => {
     const f = input.files && input.files[0];
     if (f && f.type === "application/pdf") {
-      if (f.size > MAX_DD_BYTES) {
-        const mb = (f.size / (1024 * 1024)).toFixed(2);
-        pdfFile = null;
-        input.value = "";
-        setPdfStatus(`容量超過（${mb}MB）`);
-        showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。");
-        const u = $("pdfUrlInput");
-        if (u) u.focus();
-        return;
-      }
+      if (blockOversizeDnd(f)) return;
       pdfFile = f;
+      pdfFileSize = f.size;
       const u = $("pdfUrlInput");
       if (u) u.value = "";
       setPdfStatus();
