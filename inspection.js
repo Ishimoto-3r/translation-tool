@@ -336,7 +336,7 @@ async function runExtract() {
     pdfFile = null;
     $("pdfInput").value = "";
     setPdfStatus(`容量超過（${mb}MB）`);
-    showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。");
+    showError("このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にPDFのリンクを貼り付けてください。");
     if ($("pdfUrlInput")) $("pdfUrlInput").focus();
     return;
   }
@@ -361,7 +361,7 @@ async function runExtract() {
     let r;
     if (pdfFile) {
       if (pdfFileSize > MAX_DD_BYTES) {
-        const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。";
+        const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にPDFのリンクを貼り付けてください。";
         showError(msg);
         showDndNotice(msg);
         setBusy(false);
@@ -500,7 +500,7 @@ function initPdfDrop() {
     pdfFileSize = 0;
     input.value = "";
     setPdfStatus(`容量超過（${mb}MB）`);
-    const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できない場合があります。下のURL欄にPDFのリンクを貼り付けてください。";
+    const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にPDFのリンクを貼り付けてください。";
     showError(msg);
     showDndNotice(msg);
     console.log("[DND] blocked size=", file.size);
@@ -523,6 +523,8 @@ function initPdfDrop() {
       }
       setPdfStatus();
     });
+    urlInput.addEventListener("click", (e) => e.stopPropagation());
+    urlInput.addEventListener("mousedown", (e) => e.stopPropagation());
   }
 
   dz.addEventListener("click", () => input.click());

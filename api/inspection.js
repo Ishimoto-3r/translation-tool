@@ -538,6 +538,10 @@ async function generateExcel({
   function insertAtMarker(marker, rowsToInsert) {
     const r0 = findMarkerRow(wsMain, marker);
     if (r0 < 0) throw new Error(`MarkerError: ${marker} が見つかりません`);
+    const styleSources = [9, 10, 11].map((col) => wsMain.getRow(r0).getCell(col));
+    const styleClones = styleSources.map((cell) =>
+      cell && cell.style ? JSON.parse(JSON.stringify(cell.style)) : null
+    );
 
     // マーカー行の位置に行を挿入し、最後にマーカー行を消す
     // ExcelJS: spliceRows(start, deleteCount, ...rows)
@@ -562,6 +566,15 @@ async function generateExcel({
     const colCount = Math.max(wsMain.columnCount, 11); // A〜K相当まで
     for (let i = 0; i < mapped.length; i++) {
       applyRowStyle(wsMain, r0 + i, colCount);
+      for (let idx = 0; idx < styleClones.length; idx++) {
+        const style = styleClones[idx];
+        if (!style) continue;
+        const col = 9 + idx;
+        const cell = wsMain.getRow(r0 + i).getCell(col);
+        const border = cell.border;
+        cell.style = style;
+        if (border) cell.border = border;
+      }
     }
   }
 
@@ -585,6 +598,9 @@ async function generateExcel({
     .map(s => s.name)
     .filter(name => !keep.has(name))
     .forEach(name => wb.removeWorksheet(name));
+
+  const mainIndex = wb.worksheets.findIndex((s) => s.name === "検品リスト");
+  wb.views = [{ activeTab: mainIndex >= 0 ? mainIndex : 0 }];
 
   // ファイル名
   const safeModel = cleanFileNamePart(model);
