@@ -14,41 +14,14 @@
       margin:0;padding:0;
     }
 
-    /* ===== Top Nav (kensho.html と同一系) ===== */
-    .tool-nav{
-      position: sticky; top: 0; z-index: 100;
-      background:#374151; padding: 10px 16px;
-      box-shadow: 0 2px 4px rgba(0,0,0,.12);
-      display:flex; justify-content:center; gap: 14px;
-      align-items:center; flex-wrap: wrap;
-    }
-    .tool-nav .nav-groupbox{
-      display:flex; flex-direction:column; align-items:center; gap: 6px;
-      padding: 8px 10px;
-      border: 1px solid rgba(255,255,255,.14);
-      border-radius: 10px;
-      background: rgba(255,255,255,.04);
-    }
-    .tool-nav .nav-heading{
-      display:flex; align-items:center; justify-content:center; gap:6px;
-      width:100%;
-      font-size: 12px; font-weight: 700; letter-spacing: .08em;
-      color: rgba(243,244,246,.75);
-      line-height: 1; user-select: none;
-    }
-    .tool-nav .nav-links{
-      display:flex; gap: 8px; align-items:center; flex-wrap: wrap;
-    }
-    .tool-nav a{
-      color:#f3f4f6; text-decoration:none; font-weight: 600; font-size: 14px;
-      padding: 8px 12px; border-radius: 999px;
-      background: rgba(255,255,255,.06);
-      transition: background-color .15s, transform .05s;
-      display:inline-flex; align-items:center; gap: 6px;
-    }
-    .tool-nav a:hover{ background: rgba(255,255,255,.12); }
-    .tool-nav a:active{ transform: translateY(1px); }
-    .tool-nav a.active{ background:#172554; color:#fff; }
+    /* ===== Top Nav (media-manual.html と同一) ===== */
+    .tool-nav{position:sticky;top:0;z-index:100;background:#374151;padding:10px 16px;box-shadow:0 2px 4px rgba(0,0,0,.12);display:flex;justify-content:center;gap:14px;align-items:center;flex-wrap:wrap}
+    .nav-groupbox{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 10px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.04)}
+    .nav-heading{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;font-weight:700;letter-spacing:.08em;color:rgba(243,244,246,.85)}
+    .nav-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .tool-nav a{color:#f3f4f6;text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06)}
+    .tool-nav a:hover{background:rgba(255,255,255,.12)}
+    .tool-nav a.active{background:#172554;color:#fff}
 
     /* overlay */
     .overlay{
@@ -75,7 +48,7 @@
 <body class="bg-gray-100 text-gray-800">
   <nav class="tool-nav">
     <div class="nav-groupbox">
-      <div class="nav-heading">⭐翻訳</div>
+      <div class="nav-heading">🌐 翻訳</div>
       <div class="nav-links">
         <a href="/index.html">翻訳ツール</a>
         <a href="/verify.html">検証結果翻訳</a>
@@ -86,11 +59,18 @@
     </div>
 
     <div class="nav-groupbox">
-      <div class="nav-heading">⭐その他</div>
+      <div class="nav-heading">📝 マニュアル</div>
+      <div class="nav-links">
+        <a href="/manual.html">原稿作成（AIチェック）</a>
+        <a href="/media-manual.html">動画から原稿作成</a>
+      </div>
+    </div>
+
+    <div class="nav-groupbox">
+      <div class="nav-heading">★ その他</div>
       <div class="nav-links">
         <a href="/report.html">修理レポート</a>
         <a href="/kensho.html">検証項目作成</a>
-        <a href="/manual.html">原稿作成（AIチェック）</a>
         <a href="/prompt.html">単発プロンプト</a>
         <a href="/inspection.html" class="active">検品リスト作成</a>
       </div>
@@ -123,16 +103,18 @@
           <div class="text-sm text-gray-500" id="pdfStatus">未選択</div>
         </div>
 
-        <div id="dropzone"
-             class="mt-3 border-2 border-dashed border-gray-300 rounded-xl p-4 bg-gray-50 hover:bg-gray-100 transition cursor-pointer">
-          <div class="text-center">
-            <div class="font-semibold">ここにPDFをドロップ（またはクリックで選択）</div>
-            <div class="mt-2 text-xs text-gray-500" id="pdfNameHint">※PDFをAI抽出に使用します</div>
+        <div class="mt-3 bg-white border border-gray-200 rounded-2xl p-5">
+          <div id="dropzone"
+               class="border-2 border-dashed border-gray-300 rounded-xl p-4 bg-gray-50 hover:bg-gray-100 transition cursor-pointer">
+            <div class="text-center">
+              <div class="font-semibold">ここにPDFをドロップ（またはクリックで選択）</div>
+              <div class="mt-2 text-xs text-gray-500" id="pdfNameHint">※PDFをAI抽出に使用します</div>
+            </div>
+            <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
           </div>
-          <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
 
           <!-- URL入力（容量が大きいPDFはURL推奨） -->
-          <div class="mt-4 text-left">
+          <div class="mt-4">
             <label class="block text-sm font-bold">PDFのURL（容量が大きい場合はこちら）</label>
             <div class="text-xs text-gray-500 mt-1">
               ※ドラッグ＆ドロップは4MBまで。超えるPDFはURLを貼り付けてください（PDF直リンクのみ）。
@@ -144,10 +126,7 @@
                    class="mt-2 w-full border border-gray-300 rounded-xl px-3 py-2"
                    placeholder="例：https://www.example.com/manual.pdf" />
           </div>
-        </div>
 
-        <!-- AI抽出ブロック（ここに型番・製品名も配置） -->
-        <div class="mt-5 bg-white border border-gray-200 rounded-2xl p-5">
           <div class="flex items-center justify-between gap-4 flex-wrap">
             <div>
               <div class="font-bold">PDF読み取り（AI抽出）</div>
@@ -163,16 +142,16 @@
 
           <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label class="block text-sm font-bold mb-1">型番（未入力ならPDFから自動取得）</label>
+              <label class="block text-sm font-bold mb-1">型番（PDFから自動取得）</label>
               <input id="modelInput" type="text"
                      class="w-full border border-gray-300 rounded-xl px-3 py-2"
-                     placeholder="未入力ならPDFから自動取得" />
+                     placeholder="PDFから自動取得" />
             </div>
             <div>
-              <label class="block text-sm font-bold mb-1">製品名（未入力ならPDFから自動取得）</label>
+              <label class="block text-sm font-bold mb-1">製品名（PDFから自動取得）</label>
               <input id="productInput" type="text"
                      class="w-full border border-gray-300 rounded-xl px-3 py-2"
-                     placeholder="未入力ならPDFから自動取得" />
+                     placeholder="PDFから自動取得" />
             </div>
           </div>
 
