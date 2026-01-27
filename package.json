@@ -5,7 +5,6 @@
   "dependencies": {
     "exceljs": "^4.4.0",
     "openai": "latest",
-    "pdfjs-dist": "^3.11.174",
     "xlsx": "^0.18.5"
   }
 }

@@ -8,23 +8,7 @@ import OpenAI from "openai";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ===== PDF text extraction (server-side) =====
-async function extractPdfTextFromBuffer(buf) {
-  const { default: pdfjsLib } = await import("pdfjs-dist/legacy/build/pdf.js");
-  const u8 = new Uint8Array(buf);
-  const loadingTask = pdfjsLib.getDocument({ data: u8, disableWorker: true });
-  const pdf = await loadingTask.promise;
-  let out = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const tc = await page.getTextContent();
-    const strings = tc.items.map((it) => (typeof it.str === "string" ? it.str : "")).filter(Boolean);
-    out += strings.join(" ") + "\n";
-    // セーフガード：長すぎる場合は途中で切る（APIコスト・時間対策）
-    if (out.length > 250000) break;
-  }
-  return out.trim();
-}
+const MAX_PDF_BYTES = 4 * 1024 * 1024;
 
 async function getPdfBufferFromRequest(req, { pdfUrl }) {
   const contentType = (req.headers["content-type"] || "").toLowerCase();
