@@ -5,32 +5,192 @@
 
 import ExcelJS from "exceljs";
 import OpenAI from "openai";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const MAX_PDF_BYTES = 4 * 1024 * 1024;
+const MAX_HTML_TEXT_CHARS = 30000;
+
+async function resolvePdfUrlFromHtml(baseUrl, htmlText) {
+  console.log("[inspection][extract] html length:", htmlText.length);
+  const rawLinks = [];
+  const attrRegex = /(href|src)\s*=\s*["']([^"']+)["']/gi;
+  let match;
+  while ((match = attrRegex.exec(htmlText)) !== null) {
+    rawLinks.push(match[2]);
+  }
+  const candidates = rawLinks
+    .map((href) => {
+      try {
+        return new URL(href, baseUrl).toString();
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .filter((href) => {
+      const lower = href.toLowerCase();
+      return (
+        lower.includes(".pdf") ||
+        lower.includes("wp-content/uploads") ||
+        lower.includes("manual") ||
+        lower.includes("download") ||
+        lower.includes("attachment")
+      );
+    });
+
+  const jsonRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let jsonMatch;
+  while ((jsonMatch = jsonRegex.exec(htmlText)) !== null) {
+    const jsonText = jsonMatch[1];
+    try {
+      const data = JSON.parse(jsonText);
+      const stack = [data];
+      while (stack.length) {
+        const node = stack.pop();
+        if (node && typeof node === "object") {
+          if (typeof node.contentUrl === "string") candidates.push(new URL(node.contentUrl, baseUrl).toString());
+          if (typeof node.url === "string") candidates.push(new URL(node.url, baseUrl).toString());
+          if (node.associatedMedia) stack.push(node.associatedMedia);
+          for (const val of Object.values(node)) {
+            if (val && typeof val === "object") stack.push(val);
+          }
+        }
+      }
+    } catch {
+      // ignore JSON parse errors
+    }
+  }
+
+  const deduped = Array.from(new Set(candidates)).slice(0, 20);
+
+  const hits = [];
+  for (const candidate of deduped) {
+    let contentType = "";
+    try {
+      const headRes = await fetch(candidate, {
+        method: "HEAD",
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+        },
+      });
+      contentType = (headRes.headers.get("content-type") || "").toLowerCase();
+      if (headRes.ok && contentType.includes("application/pdf")) {
+        hits.push(candidate);
+        continue;
+      }
+    } catch {
+      // fall through to range fetch
+    }
+
+    try {
+      const rangeRes = await fetch(candidate, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+          "Range": "bytes=0-2047",
+        },
+      });
+      const rangeType = (rangeRes.headers.get("content-type") || "").toLowerCase();
+      if (rangeRes.ok && rangeType.includes("application/pdf")) {
+        hits.push(candidate);
+      }
+    } catch {
+      // ignore range errors
+    }
+  }
+
+  console.log("[inspection][extract] pdf hits:", hits.length);
+  return { resolvedUrl: hits[0] || "", candidates: deduped };
+}
+
+function htmlToText(html) {
+  if (!html) return "";
+  let text = html;
+  text = text.replace(/<\s*(script|style|noscript|header|footer|nav)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, " ");
+  text = text.replace(/<[^>]+>/g, " ");
+  const entities = {
+    "&nbsp;": " ",
+    "&amp;": "&",
+    "&lt;": "<",
+    "&gt;": ">",
+    "&quot;": "\"",
+    "&#39;": "'",
+  };
+  text = text.replace(/&(?:nbsp|amp|lt|gt|quot|#39);/g, (m) => entities[m] || m);
+  text = text.replace(/\s+/g, " ").trim();
+  if (text.length > MAX_HTML_TEXT_CHARS) {
+    text = text.slice(0, MAX_HTML_TEXT_CHARS);
+  }
+  return text;
+}
 
 async function getPdfBufferFromRequest(req, { pdfUrl }) {
   const contentType = (req.headers["content-type"] || "").toLowerCase();
   if (contentType.includes("application/pdf")) {
-    if (Buffer.isBuffer(req.body)) return req.body;
-    if (req.body instanceof ArrayBuffer) return Buffer.from(req.body);
+    if (Buffer.isBuffer(req.body)) return { buffer: req.body, sourceType: "pdf" };
+    if (req.body instanceof ArrayBuffer) return { buffer: Buffer.from(req.body), sourceType: "pdf" };
     const chunks = [];
     for await (const chunk of req) {
       chunks.push(Buffer.from(chunk));
     }
-    return Buffer.concat(chunks);
+    return { buffer: Buffer.concat(chunks), sourceType: "pdf" };
   }
   if (pdfUrl) {
-    const r = await fetch(pdfUrl);
+    const r = await fetch(pdfUrl, {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    });
     const httpStatus = r.status;
+    const contentType = (r.headers.get("content-type") || "").toLowerCase();
     if (!r.ok) {
       const err = new Error("PDFURLFetchError");
       err.httpStatus = httpStatus;
       throw err;
     }
-    const ab = await r.arrayBuffer();
-    return { buffer: Buffer.from(ab), httpStatus };
+    if (contentType.includes("application/pdf")) {
+      const ab = await r.arrayBuffer();
+      return { buffer: Buffer.from(ab), httpStatus, sourceType: "pdf" };
+    }
+    const htmlText = await r.text();
+    const { resolvedUrl, candidates } = await resolvePdfUrlFromHtml(pdfUrl, htmlText);
+    if (!resolvedUrl) {
+      return {
+        htmlText,
+        sourceType: "html",
+        httpStatus,
+        pdfCandidates: candidates,
+      };
+    }
+    const pdfRes = await fetch(resolvedUrl, {
+      redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+      },
+    });
+    const pdfStatus = pdfRes.status;
+    const pdfType = (pdfRes.headers.get("content-type") || "").toLowerCase();
+    if (!pdfRes.ok || !pdfType.includes("application/pdf")) {
+      const err = new Error("PDFURLFetchError");
+      err.httpStatus = pdfStatus;
+      throw err;
+    }
+    const pdfAb = await pdfRes.arrayBuffer();
+    return {
+      buffer: Buffer.from(pdfAb),
+      httpStatus: pdfStatus,
+      sourceType: "pdf",
+      pdfCandidates: candidates,
+    };
   }
   throw new Error("pdfUrl or application/pdf body is required");
 }
@@ -210,7 +370,7 @@ async function getSelectionItemsFromTemplate() {
 }
 
 // ===== AI extract =====
-async function aiExtractFromPdfText({ pdfText, fileName, modelHint, productHint }) {
+async function aiExtractFromSourceText({ sourceText, fileName, modelHint, productHint }) {
   const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
   const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
   const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
@@ -245,10 +405,10 @@ async function aiExtractFromPdfText({ pdfText, fileName, modelHint, productHint 
   "accs": ["付属品1","付属品2","取扱説明書"]
 }
 
-【PDFテキスト（抜粋元）】
+【本文テキスト（抜粋元）】
 ファイル名: ${fileName}
 ---
-${pdfText}
+${sourceText}
 `;
 
   const resp = await client.responses.create({
@@ -298,6 +458,25 @@ ${pdfText}
   accs = dedupeKeepOrder(accs);
 
   return { model, productName, specs, ops, accs };
+}
+
+async function extractPdfTextFromBuffer(pdfBuffer) {
+  const loadingTask = pdfjsLib.getDocument({
+    data: pdfBuffer,
+    disableWorker: true,
+    useSystemFonts: true,
+  });
+  const pdf = await loadingTask.promise;
+  const pages = [];
+  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
+    const page = await pdf.getPage(pageNum);
+    const content = await page.getTextContent();
+    const textItems = content.items
+      .map((item) => (item && typeof item.str === "string" ? item.str : ""))
+      .filter(Boolean);
+    pages.push(textItems.join(" "));
+  }
+  return pages.join("\n");
 }
 
 // ===== AI extract from PDF file =====
@@ -648,6 +827,9 @@ export default async function handler(req, res) {
       }
 
       let buf;
+      let htmlText = "";
+      let sourceType = "pdf";
+      let pdfCandidates = [];
       let source = "dnd";
       let fetchedBytes = 0;
       let httpStatus = null;
@@ -659,6 +841,13 @@ export default async function handler(req, res) {
         if (result && result.buffer) {
           buf = result.buffer;
           httpStatus = result.httpStatus ?? null;
+          sourceType = result.sourceType || "pdf";
+          pdfCandidates = result.pdfCandidates || [];
+        } else if (result && result.htmlText) {
+          htmlText = result.htmlText;
+          httpStatus = result.httpStatus ?? null;
+          sourceType = result.sourceType || "html";
+          pdfCandidates = result.pdfCandidates || [];
         } else {
           buf = result;
         }
@@ -675,6 +864,11 @@ export default async function handler(req, res) {
       }
 
       const pdfByteSize = buf?.byteLength || 0;
+      const htmlTextLength = htmlText ? htmlText.length : 0;
+      console.info("[inspection][extract] sourceType:", sourceType);
+      console.info("[inspection][extract] sourceText length:", sourceType === "html" ? htmlTextLength : 0);
+      console.info("[inspection][extract] html pdfCandidates count:", pdfCandidates.length);
+      console.info("[inspection][extract] html top3 pdfCandidates:", pdfCandidates.slice(0, 3));
       if (pdfByteSize > MAX_PDF_BYTES) {
         return res.status(200).json({
           ok: true,
@@ -685,12 +879,75 @@ export default async function handler(req, res) {
         });
       }
 
+      if (sourceType === "html") {
+        const sourceText = htmlToText(htmlText);
+        console.info("[inspection][extract] sourceText length:", sourceText.length);
+        if (sourceText.length < 1000) {
+          return res.status(400).json({
+            error: "NoExtractableContent",
+            detail:
+              "URL先がPDFでも、ページ本文から抽出できるテキストも見つかりませんでした。PDF直リンクを貼ってください。",
+          });
+        }
+        try {
+          const r = await aiExtractFromSourceText({
+            sourceText,
+            fileName,
+            modelHint,
+            productHint,
+          });
+          return res.status(200).json(r);
+        } catch (e) {
+          console.error("[inspection][extract] ai extract failed:", e?.message || e);
+          return res.status(200).json({
+            ok: true,
+            text: "",
+            status: "no_text",
+            notice: "このURLはテキスト抽出できません。",
+            diag: { aiExtractError: e?.message || String(e) },
+          });
+        }
+      }
+
       const headBytes = buf ? Buffer.from(buf).slice(0, 4).toString("ascii") : "";
       console.info("[inspection][extract] source:", source);
       console.info("[inspection][extract] url http status:", httpStatus);
       console.info("[inspection][extract] fetched bytes:", fetchedBytes);
       console.info("[inspection][extract] pdf byte size:", pdfByteSize);
       console.info("[inspection][extract] pdf head bytes:", headBytes);
+
+      let pdfText = "";
+      try {
+        pdfText = await extractPdfTextFromBuffer(buf);
+      } catch (e) {
+        console.error("[inspection][extract] pdf text extract failed:", e?.message || e);
+      }
+
+      console.log("[inspection][extract] pdfTextLen:", pdfText ? pdfText.length : 0);
+      console.info("[inspection][extract] sourceText length:", pdfText ? pdfText.length : 0);
+      const fallbackToFile = !pdfText || pdfText.trim().length < 200;
+      console.log("[inspection][extract] fallbackToFile:", fallbackToFile);
+
+      if (!fallbackToFile) {
+        try {
+          const r = await aiExtractFromSourceText({
+            sourceText: pdfText,
+            fileName,
+            modelHint,
+            productHint,
+          });
+          return res.status(200).json(r);
+        } catch (e) {
+          console.error("[inspection][extract] ai extract failed:", e?.message || e);
+          return res.status(200).json({
+            ok: true,
+            text: "",
+            status: "no_text",
+            notice: "このPDFはテキスト抽出できません。",
+            diag: { aiExtractError: e?.message || String(e) },
+          });
+        }
+      }
 
       try {
         const r = await aiExtractFromPdfFile({
@@ -702,12 +959,11 @@ export default async function handler(req, res) {
         return res.status(200).json(r);
       } catch (e) {
         console.error("[inspection][extract] ai extract failed:", e?.message || e);
-        return res.status(200).json({
-          ok: true,
-          text: "",
-          status: "no_text",
-          notice: "このPDFはテキスト抽出できません。",
-          diag: { aiExtractError: e?.message || String(e) },
+        return res.status(400).json({
+          error: "PdfNotExtractable",
+          detail:
+            "PDFのテキスト抽出ができず、ファイル解析も失敗しました。画像PDF等の可能性があります。" +
+            (e?.message ? ` (${String(e.message).slice(0, 200)})` : ""),
         });
       }
     }
