@@ -10,14 +10,15 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const MAX_PDF_BYTES = 4 * 1024 * 1024;
 
-function resolvePdfUrlFromHtml(baseUrl, htmlText) {
-  const hrefs = [];
-  const regex = /href\s*=\s*["']([^"']+)["']/gi;
+async function resolvePdfUrlFromHtml(baseUrl, htmlText) {
+  console.log("[inspection][extract] html length:", htmlText.length);
+  const rawLinks = [];
+  const attrRegex = /(href|src)\s*=\s*["']([^"']+)["']/gi;
   let match;
-  while ((match = regex.exec(htmlText)) !== null) {
-    hrefs.push(match[1]);
+  while ((match = attrRegex.exec(htmlText)) !== null) {
+    rawLinks.push(match[2]);
   }
-  const pdfLinks = hrefs
+  const candidates = rawLinks
     .map((href) => {
       try {
         return new URL(href, baseUrl).toString();
@@ -25,25 +26,87 @@ function resolvePdfUrlFromHtml(baseUrl, htmlText) {
         return null;
       }
     })
-    .filter((href) => href && /\.pdf(\?|#|$)/i.test(href));
+    .filter(Boolean)
+    .filter((href) => {
+      const lower = href.toLowerCase();
+      return (
+        lower.includes(".pdf") ||
+        lower.includes("wp-content/uploads") ||
+        lower.includes("manual") ||
+        lower.includes("download") ||
+        lower.includes("attachment")
+      );
+    });
 
-  const keywords = ["manual", "マニュアル", "instruction", "取説", "download"];
-  const urlObj = new URL(baseUrl);
-  const parts = urlObj.pathname.split("/").filter(Boolean);
-  const slug = parts[parts.length - 1] || "";
-  const scored = pdfLinks.map((href, index) => {
-    let score = 0;
-    const lower = href.toLowerCase();
-    if (keywords.some((k) => lower.includes(k.toLowerCase()))) score += 2;
-    if (slug && lower.includes(slug.toLowerCase())) score += 1;
-    return { href, score, index };
-  });
-  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+  const jsonRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let jsonMatch;
+  while ((jsonMatch = jsonRegex.exec(htmlText)) !== null) {
+    const jsonText = jsonMatch[1];
+    try {
+      const data = JSON.parse(jsonText);
+      const stack = [data];
+      while (stack.length) {
+        const node = stack.pop();
+        if (node && typeof node === "object") {
+          if (typeof node.contentUrl === "string") candidates.push(new URL(node.contentUrl, baseUrl).toString());
+          if (typeof node.url === "string") candidates.push(new URL(node.url, baseUrl).toString());
+          if (node.associatedMedia) stack.push(node.associatedMedia);
+          for (const val of Object.values(node)) {
+            if (val && typeof val === "object") stack.push(val);
+          }
+        }
+      }
+    } catch {
+      // ignore JSON parse errors
+    }
+  }
 
-  console.info("[inspection][extract] pdf candidates:", scored.length);
-  console.info("[inspection][extract] top3 pdf urls:", scored.slice(0, 3).map((s) => s.href));
+  const deduped = Array.from(new Set(candidates)).slice(0, 20);
+  console.log("[inspection][extract] pdf candidates:", deduped.length);
+  console.log("[inspection][extract] top pdf urls:", deduped.slice(0, 10));
 
-  return scored[0]?.href || "";
+  const hits = [];
+  for (const candidate of deduped) {
+    let contentType = "";
+    try {
+      const headRes = await fetch(candidate, {
+        method: "HEAD",
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+        },
+      });
+      contentType = (headRes.headers.get("content-type") || "").toLowerCase();
+      if (headRes.ok && contentType.includes("application/pdf")) {
+        hits.push(candidate);
+        continue;
+      }
+    } catch {
+      // fall through to range fetch
+    }
+
+    try {
+      const rangeRes = await fetch(candidate, {
+        method: "GET",
+        redirect: "follow",
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8",
+          "Range": "bytes=0-2047",
+        },
+      });
+      const rangeType = (rangeRes.headers.get("content-type") || "").toLowerCase();
+      if (rangeRes.ok && rangeType.includes("application/pdf")) {
+        hits.push(candidate);
+      }
+    } catch {
+      // ignore range errors
+    }
+  }
+
+  console.log("[inspection][extract] pdf hits:", hits.length);
+  return hits[0] || "";
 }
 
 async function getPdfBufferFromRequest(req, { pdfUrl }) {
@@ -77,7 +140,7 @@ async function getPdfBufferFromRequest(req, { pdfUrl }) {
       return { buffer: Buffer.from(ab), httpStatus };
     }
     const htmlText = await r.text();
-    const resolvedPdfUrl = resolvePdfUrlFromHtml(pdfUrl, htmlText);
+    const resolvedPdfUrl = await resolvePdfUrlFromHtml(pdfUrl, htmlText);
     if (!resolvedPdfUrl) {
       const err = new Error("NoPdfLinkFound");
       err.code = "NoPdfLinkFound";
@@ -736,7 +799,7 @@ export default async function handler(req, res) {
         if (e?.code === "NoPdfLinkFound") {
           return res.status(400).json({
             error: "NoPdfLinkFound",
-            detail: "URL先はPDFではありません。ページ内にPDFリンクが見つかりませんでした。PDF直リンクを貼ってください。",
+            detail: "URL先はPDFではなく、ページ内にもPDFリンクが見つかりませんでした。",
           });
         }
         return res.status(200).json({
