@@ -16,76 +16,21 @@
       padding:0;
     }
 
-    /* ===== Top Nav (Group + One-click) ===== */
-    .tool-nav{
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background:#374151;
-      padding: 10px 16px;
-      box-shadow: 0 2px 4px rgba(0,0,0,.12);
-
-      display:flex;
-      justify-content:center;
-      gap: 14px;
-      align-items:center;
-      flex-wrap: wrap;
-    }
-    .tool-nav .nav-groupbox{
-      display:flex;
-      flex-direction:column;
-      align-items:center;
-      gap: 6px;
-      padding: 8px 10px;
-      border: 1px solid rgba(255,255,255,.14);
-      border-radius: 10px;
-      background: rgba(255,255,255,.04);
-    }
-    .tool-nav .nav-heading{
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:6px;
-      width:100%;
-
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: .08em;
-      color: rgba(243,244,246,.75);
-      line-height: 1;
-      padding-left: 0;
-      user-select: none;
-    }
-    .tool-nav .nav-links{
-      display:flex;
-      gap: 8px;
-      align-items:center;
-      flex-wrap: wrap;
-    }
-    .tool-nav a{
-      color:#f3f4f6;
-      text-decoration:none;
-      font-weight: 600;
-      font-size: 14px;
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: rgba(255,255,255,.06);
-      transition: background-color .15s, transform .05s;
-      display:inline-flex;
-      align-items:center;
-      gap: 6px;
-    }
-    .tool-nav a:hover{ background: rgba(255,255,255,.12); }
-    .tool-nav a:active{ transform: translateY(1px); }
-    .tool-nav a.active{ background:#172554; color:#fff; }
-    .tool-nav .nav-heading::before{ content: "⭐"; opacity: .9; margin:0; }
+    /* ===== Top Nav (inspection.html と同一) ===== */
+    .tool-nav{position:sticky;top:0;z-index:100;background:#374151;padding:10px 16px;box-shadow:0 2px 4px rgba(0,0,0,.12);display:flex;justify-content:center;gap:14px;align-items:center;flex-wrap:wrap}
+    .nav-groupbox{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 10px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.04)}
+    .nav-heading{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;font-weight:700;letter-spacing:.08em;color:rgba(243,244,246,.85)}
+    .nav-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .tool-nav a{color:#f3f4f6;text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06)}
+    .tool-nav a:hover{background:rgba(255,255,255,.12)}
+    .tool-nav a.active{background:#172554;color:#fff}
   </style>
 </head>
 
 <body class="bg-slate-100">
   <nav class="tool-nav">
     <div class="nav-groupbox">
-      <div class="nav-heading">翻訳</div>
+      <div class="nav-heading">🌐 翻訳</div>
       <div class="nav-links">
         <a href="/index.html">翻訳ツール</a>
         <a href="/verify.html">検証結果翻訳</a>
@@ -96,12 +41,20 @@
     </div>
 
     <div class="nav-groupbox">
-      <div class="nav-heading">その他</div>
+      <div class="nav-heading">📝 マニュアル</div>
+      <div class="nav-links">
+        <a href="/manual.html">原稿作成（AIチェック）</a>
+        <a href="/media-manual.html">動画から原稿作成</a>
+      </div>
+    </div>
+
+    <div class="nav-groupbox">
+      <div class="nav-heading">★ その他</div>
       <div class="nav-links">
         <a href="/report.html">修理レポート</a>
-        <a href="/manual.html">原稿作成（AIチェック）</a>
-        <a href="/prompt.html">単発プロンプト</a>
         <a href="/kensho.html" class="active">検証項目作成</a>
+        <a href="/prompt.html">単発プロンプト</a>
+        <a href="/inspection.html">検品リスト作成</a>
       </div>
     </div>
   </nav>
@@ -184,7 +137,18 @@
     <!-- 右：検証ラベル -->
     <section class="col-span-12 lg:col-span-8 xl:col-span-9 bg-white rounded-xl p-4 shadow lg:h-[calc(100vh-96px)] flex flex-col">
       <div class="flex items-center justify-between gap-3 mb-3">
-        <div class="font-bold">検証ラベル（ジャンル別）</div>
+        <div class="font-bold flex items-center">
+          検証ラベル（ジャンル別）
+          <a
+            href="https://3rhd.sharepoint.com/:x:/r/sites/doc_share/DocLib2/%E5%95%86%E5%93%81%E9%96%8B%E7%99%BA%E3%83%81%E3%83%BC%E3%83%A0/ai-manual-database/database.xlsx?d=w8deb5def816b4890aa586b309de54dc5&csf=1&web=1&e=QXQeD6"
+            target="_blank"
+            rel="noopener"
+            class="ml-2 text-xs font-bold text-blue-600 underline hover:text-blue-800 flex items-center gap-1"
+          >
+            <i class="fas fa-database"></i>
+            database
+          </a>
+        </div>
 
         <div class="flex items-center gap-2">
           <!-- 選択数 -->
