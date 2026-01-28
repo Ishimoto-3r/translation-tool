@@ -200,7 +200,6 @@ ${contextPrompt}
   });
 
   const wsOut = xlsx.utils.aoa_to_sheet(aoa, { origin: { r: range.s.r, c: range.s.c } });
-  wsOut["!merges"] = wsIn["!merges"];
 
   merges.forEach((merge) => {
     if (!merge || !merge.s || !merge.e) return;
@@ -209,7 +208,9 @@ ${contextPrompt}
         if (r === merge.s.r && c === merge.s.c) continue;
         const addr = xlsx.utils.encode_cell({ r, c });
         if (wsOut[addr]) {
-          delete wsOut[addr];
+          wsOut[addr].v = undefined;
+          wsOut[addr].t = undefined;
+          delete wsOut[addr].w;
         }
       }
     }
@@ -224,6 +225,7 @@ ${contextPrompt}
     if (merge.e.c > outRange.e.c) outRange.e.c = merge.e.c;
   });
   wsOut["!ref"] = xlsx.utils.encode_range(outRange);
+  wsOut["!merges"] = wsIn["!merges"];
 
   const wbOut = xlsx.utils.book_new();
   wbIn.SheetNames.forEach((name) => {
