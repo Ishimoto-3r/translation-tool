@@ -1,4 +1,5 @@
 // api/sheet.js
+import * as xlsx from "xlsx";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -27,10 +28,11 @@ export default async function handler(req, res) {
 
   const body =
     typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-  const { rows, toLang, context, merges, cellRefs } = body;
+  const { toLang, context, file, fileBase64, data, sheetName } = body;
 
-  if (!rows || !Array.isArray(rows) || rows.length === 0) {
-    return res.status(400).json({ error: "rows is required" });
+  const inputData = fileBase64 || file || data;
+  if (!inputData) {
+    return res.status(400).json({ error: "file is required" });
   }
   if (!toLang) {
     return res.status(400).json({ error: "toLang is required" });
@@ -69,121 +71,170 @@ ${contextPrompt}
 { "translations": ["翻訳1", "翻訳2"] }
 `;
 
-  const skippedIndexes = new Set();
-  if (Array.isArray(merges) && Array.isArray(cellRefs) && cellRefs.length === rows.length) {
-    const cellIndexMap = new Map();
-    cellRefs.forEach((ref, idx) => {
-      if (!ref) return;
-      const row = Number(ref.r ?? ref.row ?? ref[0]);
-      const col = Number(ref.c ?? ref.col ?? ref[1]);
-      if (Number.isFinite(row) && Number.isFinite(col)) {
-        cellIndexMap.set(`${row}:${col}`, idx);
-      }
-    });
+  const buffer = (() => {
+    if (Buffer.isBuffer(inputData)) return inputData;
+    if (Array.isArray(inputData)) return Buffer.from(inputData);
+    if (inputData instanceof ArrayBuffer) return Buffer.from(inputData);
+    if (typeof inputData === "string") {
+      const base64 = inputData.includes(",") ? inputData.split(",").pop() : inputData;
+      return Buffer.from(base64 || "", "base64");
+    }
+    if (inputData?.data && Array.isArray(inputData.data)) {
+      return Buffer.from(inputData.data);
+    }
+    return null;
+  })();
 
-    const markMergedRange = (top, left, bottom, right) => {
-      const t = Number(top);
-      const l = Number(left);
-      const b = Number(bottom);
-      const r = Number(right);
-      if (![t, l, b, r].every((n) => Number.isFinite(n))) return;
-      for (let row = t; row <= b; row += 1) {
-        for (let col = l; col <= r; col += 1) {
-          if (row === t && col === l) continue;
-          const idx = cellIndexMap.get(`${row}:${col}`);
-          if (idx !== undefined) skippedIndexes.add(idx);
+  if (!buffer || buffer.length === 0) {
+    return res.status(400).json({ error: "file is invalid" });
+  }
+
+  const wbIn = xlsx.read(buffer, { type: "buffer" });
+  const targetSheetName = sheetName || wbIn.SheetNames[0];
+  if (!targetSheetName) {
+    return res.status(400).json({ error: "sheetName is required" });
+  }
+
+  const wsIn = wbIn.Sheets[targetSheetName];
+  if (!wsIn) {
+    return res.status(400).json({ error: "sheet not found" });
+  }
+
+  const merges = Array.isArray(wsIn["!merges"]) ? wsIn["!merges"] : [];
+  let range = wsIn["!ref"] ? xlsx.utils.decode_range(wsIn["!ref"]) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+  merges.forEach((merge) => {
+    if (!merge || !merge.s || !merge.e) return;
+    if (merge.s.r < range.s.r) range.s.r = merge.s.r;
+    if (merge.s.c < range.s.c) range.s.c = merge.s.c;
+    if (merge.e.r > range.e.r) range.e.r = merge.e.r;
+    if (merge.e.c > range.e.c) range.e.c = merge.e.c;
+  });
+
+  const isMergedNonTopLeft = (r, c) => {
+    for (let i = 0; i < merges.length; i += 1) {
+      const merge = merges[i];
+      if (!merge || !merge.s || !merge.e) continue;
+      if (r < merge.s.r || r > merge.e.r) continue;
+      if (c < merge.s.c || c > merge.e.c) continue;
+      if (r === merge.s.r && c === merge.s.c) return false;
+      return true;
+    }
+    return false;
+  };
+
+  const aoa = [];
+  const translateRows = [];
+  const translateTargets = [];
+
+  for (let r = range.s.r; r <= range.e.r; r += 1) {
+    const row = [];
+    for (let c = range.s.c; c <= range.e.c; c += 1) {
+      const addr = xlsx.utils.encode_cell({ r, c });
+      const cell = wsIn[addr];
+      const rawValue = cell ? cell.v : null;
+      if (isMergedNonTopLeft(r, c)) {
+        row.push(null);
+        continue;
+      }
+      row.push(rawValue ?? null);
+      if (typeof rawValue === "string") {
+        const trimmed = rawValue.trim();
+        if (trimmed !== "") {
+          translateRows.push(trimmed.replace(/\n/g, "|||"));
+          translateTargets.push({ r, c, original: rawValue });
         }
       }
-    };
+    }
+    aoa.push(row);
+  }
 
-    merges.forEach((merge) => {
-      if (!merge) return;
-      if (typeof merge === "string") {
-        const match = merge.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/i);
-        if (match) {
-          const colToNumber = (col) =>
-            col.toUpperCase().split("").reduce((sum, ch) => sum * 26 + (ch.charCodeAt(0) - 64), 0);
-          const top = Number(match[2]);
-          const left = colToNumber(match[1]);
-          const bottom = Number(match[4]);
-          const right = colToNumber(match[3]);
-          markMergedRange(top, left, bottom, right);
+  const translations = [];
+  const BATCH_SIZE = 40;
+  for (let i = 0; i < translateRows.length; i += BATCH_SIZE) {
+    const batch = translateRows.slice(i, i + BATCH_SIZE);
+    const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: MODEL_TRANSLATE,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: JSON.stringify({ rows: batch }) },
+        ],
+        response_format: { type: "json_object" },
+        reasoning_effort: "none",
+        verbosity: "low",
+      }),
+    });
+
+    const apiData = await apiResponse.json();
+    const content = apiData?.choices?.[0]?.message?.content || "{}";
+
+    let parsed = {};
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      return res.status(502).json({
+        error: "ParseError",
+        detail: "AIのJSONがパースできませんでした",
+      });
+    }
+
+    const batchTranslations = Array.isArray(parsed.translations) ? parsed.translations : [];
+    batch.forEach((src, idx) => {
+      const t = batchTranslations[idx];
+      translations.push((t === undefined || t === null) ? src : String(t));
+    });
+  }
+
+  translateTargets.forEach((target, idx) => {
+    const translated = (translations[idx] || "").replace(/\|\|\|/g, "\n");
+    const rowIndex = target.r - range.s.r;
+    const colIndex = target.c - range.s.c;
+    if (aoa[rowIndex] && colIndex >= 0) {
+      aoa[rowIndex][colIndex] = translated || target.original;
+    }
+  });
+
+  const wsOut = xlsx.utils.aoa_to_sheet(aoa, { origin: { r: range.s.r, c: range.s.c } });
+  wsOut["!merges"] = wsIn["!merges"];
+
+  merges.forEach((merge) => {
+    if (!merge || !merge.s || !merge.e) return;
+    for (let r = merge.s.r; r <= merge.e.r; r += 1) {
+      for (let c = merge.s.c; c <= merge.e.c; c += 1) {
+        if (r === merge.s.r && c === merge.s.c) continue;
+        const addr = xlsx.utils.encode_cell({ r, c });
+        if (wsOut[addr]) {
+          delete wsOut[addr];
         }
-        return;
       }
-      if (merge.s && merge.e) {
-        markMergedRange(merge.s.r, merge.s.c, merge.e.r, merge.e.c);
-        return;
-      }
-      if (merge.start && merge.end) {
-        markMergedRange(merge.start.r, merge.start.c, merge.end.r, merge.end.c);
-        return;
-      }
-      if (merge.top !== undefined) {
-        markMergedRange(merge.top, merge.left, merge.bottom, merge.right);
-      }
-    });
-  }
-
-  const rowsToTranslate = [];
-  const translateIndexMap = new Map();
-  rows.forEach((row, idx) => {
-    if (skippedIndexes.has(idx)) return;
-    translateIndexMap.set(idx, rowsToTranslate.length);
-    rowsToTranslate.push(row);
+    }
   });
 
-  const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL_TRANSLATE,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: JSON.stringify({ rows: rowsToTranslate }) },
-      ],
-      response_format: { type: "json_object" },
-      reasoning_effort: "none",
-      verbosity: "low",
-    }),
+  let outRange = wsOut["!ref"] ? xlsx.utils.decode_range(wsOut["!ref"]) : range;
+  merges.forEach((merge) => {
+    if (!merge || !merge.s || !merge.e) return;
+    if (merge.s.r < outRange.s.r) outRange.s.r = merge.s.r;
+    if (merge.s.c < outRange.s.c) outRange.s.c = merge.s.c;
+    if (merge.e.r > outRange.e.r) outRange.e.r = merge.e.r;
+    if (merge.e.c > outRange.e.c) outRange.e.c = merge.e.c;
+  });
+  wsOut["!ref"] = xlsx.utils.encode_range(outRange);
+
+  const wbOut = xlsx.utils.book_new();
+  wbIn.SheetNames.forEach((name) => {
+    if (name === targetSheetName) {
+      xlsx.utils.book_append_sheet(wbOut, wsOut, name);
+    } else {
+      xlsx.utils.book_append_sheet(wbOut, wbIn.Sheets[name], name);
+    }
   });
 
-  const data = await apiResponse.json();
-  const content = data?.choices?.[0]?.message?.content || "{}";
-
-  let parsed = {};
-  try {
-    parsed = JSON.parse(content);
-  } catch (e) {
-    return res.status(502).json({
-      error: "ParseError",
-      detail: "AIのJSONがパースできませんでした",
-    });
-  }
-
-  const translations = Array.isArray(parsed.translations) ? parsed.translations : [];
-  const fixed = rows.map((src, idx) => {
-    if (skippedIndexes.has(idx)) return "";
-    const mappedIndex = translateIndexMap.get(idx);
-    const t = mappedIndex === undefined ? undefined : translations[mappedIndex];
-    return (t === undefined || t === null) ? src : String(t);
-  });
-
-  const padded = Math.max(0, rowsToTranslate.length - translations.length);
-
-  parsed.translations = fixed;
-  parsed.meta = { ...(parsed.meta || {}), padded, mergesProvided: Array.isArray(merges) };
-
-  if (padded > 0) {
-    console.warn(`[sheet] padded ${padded} item(s) to match rows length.`);
-  }
-
-  if (Array.isArray(merges)) {
-    parsed.merges = merges;
-  }
-
-  return res.status(200).json(parsed);
+  const output = xlsx.write(wbOut, { type: "buffer", bookType: "xlsx" });
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  return res.status(200).send(output);
 }
