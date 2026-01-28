@@ -122,21 +122,15 @@ ${contextPrompt}
     return false;
   };
 
-  const aoa = [];
   const translateRows = [];
   const translateTargets = [];
 
   for (let r = range.s.r; r <= range.e.r; r += 1) {
-    const row = [];
     for (let c = range.s.c; c <= range.e.c; c += 1) {
       const addr = xlsx.utils.encode_cell({ r, c });
       const cell = wsIn[addr];
       const rawValue = cell ? cell.v : null;
-      if (isMergedNonTopLeft(r, c)) {
-        row.push(null);
-        continue;
-      }
-      row.push(rawValue ?? null);
+      if (isMergedNonTopLeft(r, c)) continue;
       if (typeof rawValue === "string") {
         const trimmed = rawValue.trim();
         if (trimmed !== "") {
@@ -145,7 +139,6 @@ ${contextPrompt}
         }
       }
     }
-    aoa.push(row);
   }
 
   const translations = [];
@@ -190,16 +183,18 @@ ${contextPrompt}
     });
   }
 
+  const wsOut = JSON.parse(JSON.stringify(wsIn));
   translateTargets.forEach((target, idx) => {
     const translated = (translations[idx] || "").replace(/\|\|\|/g, "\n");
-    const rowIndex = target.r - range.s.r;
-    const colIndex = target.c - range.s.c;
-    if (aoa[rowIndex] && colIndex >= 0) {
-      aoa[rowIndex][colIndex] = translated || target.original;
+    const addr = xlsx.utils.encode_cell({ r: target.r, c: target.c });
+    if (!wsOut[addr]) {
+      wsOut[addr] = { t: "s", v: translated || target.original };
+      return;
     }
+    wsOut[addr].v = translated || target.original;
+    wsOut[addr].t = "s";
+    delete wsOut[addr].w;
   });
-
-  const wsOut = xlsx.utils.aoa_to_sheet(aoa, { origin: { r: range.s.r, c: range.s.c } });
 
   merges.forEach((merge) => {
     if (!merge || !merge.s || !merge.e) return;
