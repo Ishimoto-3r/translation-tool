@@ -1,5 +1,5 @@
 // api/sheet.js
-import * as xlsx from "xlsx";
+import ExcelJS from "exceljs";
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -89,62 +89,53 @@ ${contextPrompt}
     return res.status(400).json({ error: "file is invalid" });
   }
 
-  const wbIn = xlsx.read(buffer, { type: "buffer" });
-  const targetSheetName = sheetName || wbIn.SheetNames[0];
+  const wbIn = new ExcelJS.Workbook();
+  await wbIn.xlsx.load(buffer);
+  const targetSheetName = sheetName || wbIn.worksheets[0]?.name;
   if (!targetSheetName) {
     return res.status(400).json({ error: "sheetName is required" });
   }
 
-  const wsIn = wbIn.Sheets[targetSheetName];
+  const wsIn = wbIn.getWorksheet(targetSheetName);
   if (!wsIn) {
     return res.status(400).json({ error: "sheet not found" });
   }
 
   if (debug === true) {
+    const merges = Array.isArray(wsIn.model?.merges) ? wsIn.model.merges : [];
+    const dimensions = wsIn.dimensions;
+    const ref = dimensions
+      ? `${wsIn.getCell(dimensions.top, dimensions.left).address}:${wsIn.getCell(dimensions.bottom, dimensions.right).address}`
+      : null;
     return res.status(200).json({
       sheetName: targetSheetName,
-      mergesCount: Array.isArray(wsIn["!merges"]) ? wsIn["!merges"].length : 0,
-      mergesPreview: (wsIn["!merges"] || []).slice(0, 5).map((m) => ({
-        start: xlsx.utils.encode_cell(m.s),
-        end: xlsx.utils.encode_cell(m.e),
-      })),
-      ref: wsIn["!ref"] || null,
+      mergesCount: merges.length,
+      mergesPreview: merges.slice(0, 5).map((range) => {
+        const [start, end] = String(range).split(":");
+        return { start, end: end || start };
+      }),
+      ref,
     });
   }
 
-  const merges = Array.isArray(wsIn["!merges"]) ? wsIn["!merges"] : [];
-  const range = wsIn["!ref"] ? xlsx.utils.decode_range(wsIn["!ref"]) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
-
-  const isMergedNonTopLeft = (r, c) => {
-    for (let i = 0; i < merges.length; i += 1) {
-      const merge = merges[i];
-      if (!merge || !merge.s || !merge.e) continue;
-      if (r < merge.s.r || r > merge.e.r) continue;
-      if (c < merge.s.c || c > merge.e.c) continue;
-      if (r === merge.s.r && c === merge.s.c) return false;
-      return true;
-    }
-    return false;
-  };
-
   const translateRows = [];
   const translateTargets = [];
+  const seenMergedMasters = new Set();
 
-  for (let r = range.s.r; r <= range.e.r; r += 1) {
-    for (let c = range.s.c; c <= range.e.c; c += 1) {
-      const addr = xlsx.utils.encode_cell({ r, c });
-      const cell = wsIn[addr];
-      const rawValue = cell ? cell.v : null;
-      if (isMergedNonTopLeft(r, c)) continue;
-      if (typeof rawValue === "string") {
-        const trimmed = rawValue.trim();
-        if (trimmed !== "") {
-          translateRows.push(trimmed.replace(/\n/g, "|||"));
-          translateTargets.push({ r, c, original: rawValue });
-        }
+  wsIn.eachRow({ includeEmpty: false }, (row) => {
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      if (typeof cell.value !== "string") return;
+      const trimmed = cell.value.trim();
+      if (trimmed === "") return;
+      if (cell.isMerged && cell.master) {
+        if (cell.master.address !== cell.address) return;
+        if (seenMergedMasters.has(cell.master.address)) return;
+        seenMergedMasters.add(cell.master.address);
       }
-    }
-  }
+      translateRows.push(trimmed.replace(/\n/g, "|||"));
+      translateTargets.push({ cell, original: cell.value });
+    });
+  });
 
   const translations = [];
   const BATCH_SIZE = 40;
@@ -190,22 +181,10 @@ ${contextPrompt}
 
   translateTargets.forEach((target, idx) => {
     const translated = (translations[idx] || "").replace(/\|\|\|/g, "\n");
-    const addr = xlsx.utils.encode_cell({ r: target.r, c: target.c });
-    const cell = wsIn[addr];
-    if (!cell) return;
-    cell.v = translated || target.original;
+    target.cell.value = translated || target.original;
   });
 
-  const wbOut = xlsx.utils.book_new();
-  wbIn.SheetNames.forEach((name) => {
-    if (name === targetSheetName) {
-      xlsx.utils.book_append_sheet(wbOut, wsIn, name);
-    } else {
-      xlsx.utils.book_append_sheet(wbOut, wbIn.Sheets[name], name);
-    }
-  });
-
-  const output = xlsx.write(wbOut, { type: "buffer", bookType: "xlsx" });
+  const output = await wbIn.xlsx.writeBuffer();
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   return res.status(200).send(output);
 }
