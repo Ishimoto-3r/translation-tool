@@ -125,6 +125,9 @@ function duplicateSheet(originalSheet, newSheetName) {
         }
     }
   }
+
+  const merges = Array.isArray(originalSheet.model?.merges) ? originalSheet.model.merges : [];
+  merges.forEach(range => newSheet.mergeCells(range));
   
   return newSheet;
 }
@@ -133,9 +136,15 @@ function duplicateSheet(originalSheet, newSheetName) {
 function collectCellsToTranslate(sheet) {
   const texts = [];     // 翻訳するテキストのリスト
   const cellRefs = [];  // そのテキストがどのセルか {r, c}
+  const masterCells = new Set();
   
   sheet.eachRow((row, rowNumber) => {
     row.eachCell((cell, colNumber) => {
+      if (cell.master && cell.master.address !== cell.address) return;
+      if (cell.master) {
+        if (masterCells.has(cell.master.address)) return;
+        masterCells.add(cell.master.address);
+      }
       let val = cell.value;
       
       // 数式やリッチテキストの場合は、単純な文字列だけ取る
