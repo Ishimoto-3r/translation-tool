@@ -101,14 +101,7 @@ ${contextPrompt}
   }
 
   const merges = Array.isArray(wsIn["!merges"]) ? wsIn["!merges"] : [];
-  let range = wsIn["!ref"] ? xlsx.utils.decode_range(wsIn["!ref"]) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
-  merges.forEach((merge) => {
-    if (!merge || !merge.s || !merge.e) return;
-    if (merge.s.r < range.s.r) range.s.r = merge.s.r;
-    if (merge.s.c < range.s.c) range.s.c = merge.s.c;
-    if (merge.e.r > range.e.r) range.e.r = merge.e.r;
-    if (merge.e.c > range.e.c) range.e.c = merge.e.c;
-  });
+  const range = wsIn["!ref"] ? xlsx.utils.decode_range(wsIn["!ref"]) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
 
   const isMergedNonTopLeft = (r, c) => {
     for (let i = 0; i < merges.length; i += 1) {
@@ -183,49 +176,18 @@ ${contextPrompt}
     });
   }
 
-  const wsOut = JSON.parse(JSON.stringify(wsIn));
   translateTargets.forEach((target, idx) => {
     const translated = (translations[idx] || "").replace(/\|\|\|/g, "\n");
     const addr = xlsx.utils.encode_cell({ r: target.r, c: target.c });
-    if (!wsOut[addr]) {
-      wsOut[addr] = { t: "s", v: translated || target.original };
-      return;
-    }
-    wsOut[addr].v = translated || target.original;
-    wsOut[addr].t = "s";
-    delete wsOut[addr].w;
+    const cell = wsIn[addr];
+    if (!cell) return;
+    cell.v = translated || target.original;
   });
-
-  merges.forEach((merge) => {
-    if (!merge || !merge.s || !merge.e) return;
-    for (let r = merge.s.r; r <= merge.e.r; r += 1) {
-      for (let c = merge.s.c; c <= merge.e.c; c += 1) {
-        if (r === merge.s.r && c === merge.s.c) continue;
-        const addr = xlsx.utils.encode_cell({ r, c });
-        if (wsOut[addr]) {
-          wsOut[addr].v = undefined;
-          wsOut[addr].t = undefined;
-          delete wsOut[addr].w;
-        }
-      }
-    }
-  });
-
-  let outRange = wsOut["!ref"] ? xlsx.utils.decode_range(wsOut["!ref"]) : range;
-  merges.forEach((merge) => {
-    if (!merge || !merge.s || !merge.e) return;
-    if (merge.s.r < outRange.s.r) outRange.s.r = merge.s.r;
-    if (merge.s.c < outRange.s.c) outRange.s.c = merge.s.c;
-    if (merge.e.r > outRange.e.r) outRange.e.r = merge.e.r;
-    if (merge.e.c > outRange.e.c) outRange.e.c = merge.e.c;
-  });
-  wsOut["!ref"] = xlsx.utils.encode_range(outRange);
-  wsOut["!merges"] = wsIn["!merges"];
 
   const wbOut = xlsx.utils.book_new();
   wbIn.SheetNames.forEach((name) => {
     if (name === targetSheetName) {
-      xlsx.utils.book_append_sheet(wbOut, wsOut, name);
+      xlsx.utils.book_append_sheet(wbOut, wsIn, name);
     } else {
       xlsx.utils.book_append_sheet(wbOut, wbIn.Sheets[name], name);
     }
