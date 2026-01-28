@@ -196,20 +196,6 @@ ${contextPrompt}
     cell.v = translated || target.original;
   });
 
-  merges.forEach((merge) => {
-    if (!merge || !merge.s || !merge.e) return;
-    for (let r = merge.s.r; r <= merge.e.r; r += 1) {
-      for (let c = merge.s.c; c <= merge.e.c; c += 1) {
-        if (r === merge.s.r && c === merge.s.c) continue;
-        const addr = xlsx.utils.encode_cell({ r, c });
-        const cell = wsIn[addr];
-        if (!cell) continue;
-        delete cell.v;
-        delete cell.w;
-      }
-    }
-  });
-
   const wbOut = xlsx.utils.book_new();
   wbIn.SheetNames.forEach((name) => {
     if (name === targetSheetName) {
@@ -218,7 +204,6 @@ ${contextPrompt}
       xlsx.utils.book_append_sheet(wbOut, wbIn.Sheets[name], name);
     }
   });
-  wbOut.Sheets[targetSheetName]["!merges"] = wsIn["!merges"];
 
   const output = xlsx.write(wbOut, { type: "buffer", bookType: "xlsx" });
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
