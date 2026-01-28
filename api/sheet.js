@@ -28,7 +28,7 @@ export default async function handler(req, res) {
 
   const body =
     typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
-  const { toLang, context, file, fileBase64, data, sheetName } = body;
+  const { toLang, context, file, fileBase64, data, sheetName, debug } = body;
 
   const inputData = fileBase64 || file || data;
   if (!inputData) {
@@ -98,6 +98,18 @@ ${contextPrompt}
   const wsIn = wbIn.Sheets[targetSheetName];
   if (!wsIn) {
     return res.status(400).json({ error: "sheet not found" });
+  }
+
+  if (debug === true) {
+    return res.status(200).json({
+      sheetName: targetSheetName,
+      mergesCount: Array.isArray(wsIn["!merges"]) ? wsIn["!merges"].length : 0,
+      mergesPreview: (wsIn["!merges"] || []).slice(0, 5).map((m) => ({
+        start: xlsx.utils.encode_cell(m.s),
+        end: xlsx.utils.encode_cell(m.e),
+      })),
+      ref: wsIn["!ref"] || null,
+    });
   }
 
   const merges = Array.isArray(wsIn["!merges"]) ? wsIn["!merges"] : [];
