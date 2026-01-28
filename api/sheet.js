@@ -185,6 +185,7 @@ ${contextPrompt}
   });
 
   const output = await wbIn.xlsx.writeBuffer();
+  const outputBuffer = Buffer.isBuffer(output) ? output : Buffer.from(output);
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  return res.status(200).send(output);
+  return res.status(200).send(outputBuffer);
 }
