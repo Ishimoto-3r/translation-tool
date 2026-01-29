@@ -59,6 +59,7 @@ async function handleFileSelected(event) {
   setStatus(`読込完了: ${file.name}`);
 }
 
+
 function setupDragAndDrop() {
   const dropZone = document.getElementById("drop-zone");
   const fileInput = document.getElementById("word-file");
