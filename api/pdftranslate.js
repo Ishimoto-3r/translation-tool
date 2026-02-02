@@ -13,7 +13,7 @@ export const config = {
     api: { bodyParser: false },
 };
 
-// --- Consolidated Logic: Font Management ---
+// --- Consolidated Configuration & Utilities ---
 
 const FONT_URLS = {
     jp: "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf", 
@@ -30,7 +30,7 @@ async function downloadFont(url, dest) {
 async function loadFontWithCache(lang) {
     const isZh = lang.includes("zh");
     const fontKey = isZh ? "sc" : "jp";
-    const filename = `font-${fontKey}-v2.otf`;
+    const filename = `noto-${fontKey}-cache.otf`;
     const tmpPath = path.join("/tmp", filename);
     
     try {
@@ -62,85 +62,90 @@ export default async function handler(req, res) {
         let direction = "ja-zh";
 
         if (contentType.includes("application/json")) {
-            const bodyString = bodyBuffer.toString() || "{}";
-            const body = JSON.parse(bodyString);
+            const body = JSON.parse(bodyBuffer.toString() || "{}");
             direction = body.direction || "ja-zh";
             if (body.pdfUrl) {
                 const r = await fetch(body.pdfUrl);
                 if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
-                else throw new Error("Fetch failed for pdfUrl: " + r.status);
+                else throw new Error("Could not fetch PDF from URL: " + r.status);
             }
         } else {
             pdfBuffer = bodyBuffer;
         }
 
-        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("PDF data is empty.");
+        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("No PDF content received.");
 
         // 2. Extract Text
         let extractedText = "";
-        let extractError = null;
+        let errorMsg = null;
         try {
             const parsed = await pdfParse(pdfBuffer);
             extractedText = (parsed.text || "").trim();
         } catch (e) {
-            extractError = e.message;
+            errorMsg = "PDF Parse Error: " + e.message;
         }
 
-        if (!extractedText && !extractError) {
-            extractError = "No text found (Possible image-based PDF)";
+        if (!extractedText && !errorMsg) {
+            errorMsg = "No selectable text found. This PDF might be an image/scan.";
         }
 
         if (debugMode === "smoke") {
             return res.status(200).json({ 
-                status: "success", 
+                status: extractedText ? "success" : "warning", 
                 length: extractedText.length, 
-                error: extractError,
+                message: errorMsg,
                 preview: extractedText.slice(0, 200)
             });
         }
 
-        if (extractError) {
-            throw new Error(`PDF Extraction Failed: ${extractError}`);
+        // 3. Prepare Display Content
+        let displayContent = "";
+        if (errorMsg) {
+            displayContent = `[!] Error: ${errorMsg}\n\n(Note: OCR is currently not supported. Please use a PDF with selectable text.)`;
+        } else {
+            const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+            const target = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
+            
+            const completion = await client.chat.completions.create({
+                model: "gpt-4o",
+                messages: [
+                    { role: "system", content: `Translate text to ${target}. Keep technical terms where appropriate.` },
+                    { role: "user", content: extractedText.slice(0, 3000) }
+                ]
+            });
+            displayContent = completion.choices[0]?.message?.content || "No translation produced.";
         }
 
-        // 3. Translate
-        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const targetLangName = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
-        
-        const completion = await client.chat.completions.create({
-            model: "gpt-4o",
-            messages: [
-                { role: "system", content: `You are a professional translator. Translate to ${targetLangName}.` },
-                { role: "user", content: extractedText.slice(0, 2000) }
-            ]
-        });
-        const translatedContent = completion.choices[0]?.message?.content || "No translation produced.";
-
-        // 4. Generate PDF
+        // 4. Generate Result PDF
         const pdfDoc = await PDFDocument.create();
         pdfDoc.registerFontkit(fontkit);
+        
         const fontBytes = await loadFontWithCache(direction);
-        const customFont = await pdfDoc.embedFont(fontBytes);
+        const font = await pdfDoc.embedFont(fontBytes);
 
         const page = pdfDoc.addPage();
         const { width, height } = page.getSize();
         const margin = 50;
+        const fontSize = 11;
 
-        page.drawText(translatedContent.slice(0, 2000), {
+        page.drawText(displayContent, {
             x: margin,
             y: height - margin,
-            size: 10,
-            font: customFont,
+            size: fontSize,
+            font: font,
             maxWidth: width - (margin * 2),
-            lineHeight: 14
+            lineHeight: 16
         });
 
-        const finalPdfBytes = await pdfDoc.save();
+        const finalBytes = await pdfDoc.save();
+        
         res.setHeader("Content-Type", "application/pdf");
-        return res.status(200).send(Buffer.from(finalPdfBytes));
+        res.setHeader("Content-Disposition", `attachment; filename="translated_results.pdf"`);
+        return res.status(200).send(Buffer.from(finalBytes));
 
     } catch (err) {
+        console.error("API Error Trace:", err);
         if (debugMode) return res.status(500).json({ error: err.message });
-        res.status(500).send("Error: " + err.message);
+        res.status(500).send("Critical API Error: " + err.message);
     }
 }
