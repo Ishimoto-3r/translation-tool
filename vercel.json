@@ -2,7 +2,10 @@
   "functions": {
     "api/*.js": {
       "maxDuration": 10,
-      "includeFiles": ["fonts/**"]
+      "includeFiles": [
+        "api/NotoSansJP-Regular.ttf",
+        "api/NotoSansSC-Regular.ttf"
+      ]
     }
   }
 }

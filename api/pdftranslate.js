@@ -15,14 +15,15 @@ async function loadLocalFont(lang) {
     const isZh = lang.includes("zh");
     const fontName = isZh ? "NotoSansSC-Regular.ttf" : "NotoSansJP-Regular.ttf";
     
-    // Path strategy: Look in "fonts" folder at root (process.cwd())
-    const fontPath = path.join(process.cwd(), "fonts", fontName);
+    // Path strategy: Look in "api" folder at root (process.cwd())
+    // Since files are now in api/
+    const fontPath = path.join(process.cwd(), "api", fontName);
     
     try {
         const buffer = await fs.readFile(fontPath);
         return buffer;
     } catch (e) {
-        return null;
+        return null; // Trigger debug error
     }
 }
 
@@ -92,10 +93,10 @@ export default async function handler(req, res) {
             // Detailed debug for 500 error
             let listing = [];
             try { listing = await fs.readdir(process.cwd()); } catch(e) {}
-            let fontsListing = [];
-            try { fontsListing = await fs.readdir(path.join(process.cwd(), "fonts")); } catch(e) { fontsListing = [e.message]; }
+            let apiListing = [];
+            try { apiListing = await fs.readdir(path.join(process.cwd(), "api")); } catch(e) { apiListing = [e.message]; }
             
-            throw new Error(`Font missing. Searched: fonts/${fontName}. Root: ${JSON.stringify(listing)}. Fonts dir: ${JSON.stringify(fontsListing)}`);
+            throw new Error(`Font missing. Searched: api/${fontName}. Root: ${JSON.stringify(listing)}. API dir: ${JSON.stringify(apiListing)}`);
         }
         
         const font = await pdfDoc.embedFont(fontData);
