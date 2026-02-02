@@ -1,8 +1,8 @@
 {
   "functions": {
-    "api/pdftranslate.js": {
+    "api/*.js": {
       "maxDuration": 10,
-      "includeFiles": "api/*.ttf"
+      "includeFiles": ["fonts/**"]
     }
   }
 }

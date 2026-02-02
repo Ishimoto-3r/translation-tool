@@ -6,7 +6,6 @@ import fontkit from "@pdf-lib/fontkit";
 import pdfParse from "pdf-parse";
 import path from "path";
 import fs from "fs/promises";
-// import { fileURLToPath } from 'url'; // Removed to avoid CJS/ESM conflict causing crash
 
 export const config = {
     api: { bodyParser: false },
@@ -16,28 +15,15 @@ async function loadLocalFont(lang) {
     const isZh = lang.includes("zh");
     const fontName = isZh ? "NotoSansSC-Regular.ttf" : "NotoSansJP-Regular.ttf";
     
-    // Robust path search strategies
-    const root = process.cwd();
-    const candidates = [
-        path.join(root, "api", fontName),
-        path.join(root, fontName),
-        path.join(root, "fonts", fontName), // Legacy/Backup
-        path.join(__dirname, fontName), // If CJS and __dirname available
-    ];
-
-    let lastError = null;
-    for (const p of candidates) {
-        try {
-            const buffer = await fs.readFile(p);
-            // console.log("Font found at:", p);
-            return buffer;
-        } catch (e) {
-            lastError = e;
-        }
-    }
+    // Path strategy: Look in "fonts" folder at root (process.cwd())
+    const fontPath = path.join(process.cwd(), "fonts", fontName);
     
-    // If we get here, no font found. Return null to trigger detailed error below.
-    return null;
+    try {
+        const buffer = await fs.readFile(fontPath);
+        return buffer;
+    } catch (e) {
+        return null;
+    }
 }
 
 export default async function handler(req, res) {
@@ -103,11 +89,13 @@ export default async function handler(req, res) {
         
         const fontData = await loadLocalFont(direction);
         if (!fontData) {
+            // Detailed debug for 500 error
             let listing = [];
             try { listing = await fs.readdir(process.cwd()); } catch(e) {}
-            try { listing.push("API content:", ...await fs.readdir(path.join(process.cwd(), "api"))); } catch(e) {}
+            let fontsListing = [];
+            try { fontsListing = await fs.readdir(path.join(process.cwd(), "fonts")); } catch(e) { fontsListing = [e.message]; }
             
-            throw new Error(`Font missing. Searched paths in ${process.cwd()}. Root files: ${JSON.stringify(listing)}`);
+            throw new Error(`Font missing. Searched: fonts/${fontName}. Root: ${JSON.stringify(listing)}. Fonts dir: ${JSON.stringify(fontsListing)}`);
         }
         
         const font = await pdfDoc.embedFont(fontData);
