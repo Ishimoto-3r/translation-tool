@@ -13,28 +13,40 @@ export const config = {
 };
 
 /**
- * マルチパートリクエストの簡易パース
+ * マルチパートリクエストのバイナリセーフなパース
  */
 async function parseMultipart(req) {
     const contentType = req.headers["content-type"] || "";
     const boundaryMatch = contentType.match(/boundary=(.+)/);
     if (!boundaryMatch) return {};
 
-    const boundary = "--" + boundaryMatch[1];
+    const boundary = Buffer.from("--" + boundaryMatch[1]);
     const chunks = [];
     for await (const chunk of req) {
         chunks.push(Buffer.from(chunk));
     }
     const buffer = Buffer.concat(chunks);
-    const parts = buffer.toString("binary").split(boundary);
-
     const result = {};
 
-    for (const part of parts) {
-        if (part.trim() === "" || part.trim() === "--") continue;
+    let pos = 0;
+    while (true) {
+        pos = buffer.indexOf(boundary, pos);
+        if (pos === -1) break;
+        pos += boundary.length;
 
-        const [headerText, ...bodyParts] = part.split("\r\n\r\n");
-        const body = bodyParts.join("\r\n\r\n").replace(/\r\n$/, "");
+        let nextPos = buffer.indexOf(boundary, pos);
+        if (nextPos === -1) break;
+
+        const part = buffer.slice(pos, nextPos);
+        const headerEnd = part.indexOf("\r\n\r\n");
+        if (headerEnd === -1) {
+            pos = nextPos;
+            continue;
+        }
+
+        const headerText = part.slice(0, headerEnd).toString();
+        // ボディの前後にある \r\n を削る
+        const body = part.slice(headerEnd + 4, part.length - 2);
 
         const nameMatch = headerText.match(/name="([^"]+)"/);
         const filenameMatch = headerText.match(/filename="([^"]+)"/);
@@ -42,17 +54,16 @@ async function parseMultipart(req) {
         if (nameMatch) {
             const name = nameMatch[1];
             if (filenameMatch) {
-                // ファイルの場合はバイナリで保持
-                const start = buffer.indexOf(body, buffer.indexOf(headerText));
                 result[name] = {
                     filename: filenameMatch[1],
-                    content: buffer.slice(start, start + body.length),
+                    content: body,
                     type: "file"
                 };
             } else {
-                result[name] = body;
+                result[name] = body.toString();
             }
         }
+        pos = nextPos;
     }
     return result;
 }
@@ -109,23 +120,8 @@ async function translateText(text, direction) {
 
 /**
  * 簡易的な別紙PDF（fallback）の生成
- * Node.js単体でPDFバイナリを生成する極簡易版
  */
 function generateFallbackPdf(text) {
-    // 本来は pdf-lib 等を使うべきだが、依存追加禁止のため、
-    // 最低限「PDFとして認識されるバイナリ」を返すか、
-    // もし環境に pdf-lib 等が隠れていればそれを使いたい。
-    // ここでは「PDF生成ライブラリがない」場合の極小PDF構造を出力。
-    // 注: 日本語/中国語の描画にはフォント埋め込みが必要なため、
-    // 手書きバイナリでの実装は限界がある。
-
-    // 代替案: もし pdf-lib が動的に import できればそれを使う。
-    // ここでは一旦、プレーンテキストをPDFっぽくラップするか、
-    // ユーザーが期待する「PDFバイナリ」を返す最小限のダミーを置く。
-
-    // 実際の実装では、ユーザー環境に pdf-lib があることを期待して試しに import する。
-    // 動かない場合は、非常にシンプルなPDF（ただしマルチバイト非対応の可能性が高い）を返す。
-
     const pdfContent = `%PDF-1.4
 1 0 obj
 << /Title (Translated Manual) /Producer (AI Translator) >>
@@ -238,7 +234,6 @@ export default async function handler(req, res) {
 
     } catch (error) {
         console.error("[pdftranslate] Fatal API Error:", error.stack || error);
-        // エラーでもPDFを返す
         res.setHeader("Content-Type", "application/pdf");
         res.status(200).send(generateFallbackPdf("致命的なエラーが発生しました: " + error.message));
     }

@@ -6,6 +6,6 @@
     "exceljs": "^4.4.0",
     "openai": "latest",
     "xlsx": "^0.18.5",
-    "pdfjs-dist": "^4.0.379"
+    "pdfjs-dist": "3.11.174"
   }
 }
