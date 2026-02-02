@@ -1,21 +1,49 @@
 // api/pdftranslate.js
 
 import OpenAI from "openai";
-import { PDFDocument, StandardFonts } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import pdfParse from "pdf-parse";
-import { NotoSansJP, NotoSansSC } from "./fontAssets.js";
+import path from "path";
+import fs from "fs/promises";
+import { createWriteStream } from "fs";
+import { pipeline } from "stream/promises";
 
 export const config = {
     api: { bodyParser: false },
 };
 
-function loadLocalFont(lang) {
+// Reliable font URLs (Raw content)
+const FONT_URLS = {
+    // Using a reliable mirror for Noto Sans JP/SC
+    // Google Fonts GitHub Raw (OTF)
+    jp: "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf", 
+    sc: "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf"
+};
+
+async function downloadFont(url, dest) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch font: ${res.statusText}`);
+    const stream = createWriteStream(dest);
+    await pipeline(res.body, stream);
+}
+
+async function loadFont(lang) {
     const isZh = lang.includes("zh");
-    const base64Data = isZh ? NotoSansSC : NotoSansJP;
+    const fontKey = isZh ? "sc" : "jp";
+    const filename = `font-${fontKey}.otf`;
+    // Vercel Serverless Functions allow writing to /tmp
+    const tmpPath = path.join("/tmp", filename);
     
-    if (!base64Data) return null;
-    return Buffer.from(base64Data, "base64");
+    // Check cache
+    try {
+        await fs.access(tmpPath);
+    } catch {
+        console.log(`Downloading font ${fontKey} to ${tmpPath}...`);
+        await downloadFont(FONT_URLS[fontKey], tmpPath);
+    }
+    
+    return await fs.readFile(tmpPath);
 }
 
 export default async function handler(req, res) {
@@ -79,25 +107,26 @@ export default async function handler(req, res) {
         const pdfDoc = await PDFDocument.create();
         pdfDoc.registerFontkit(fontkit);
         
-        const fontData = loadLocalFont(direction);
-        if (!fontData) {
-           throw new Error("Embedded font data missing.");
-        }
-        
-        const font = await pdfDoc.embedFont(fontData);
+        try {
+            const fontData = await loadFont(direction);
+            const font = await pdfDoc.embedFont(fontData);
 
-        const page = pdfDoc.addPage();
-        const { height } = page.getSize();
-        
-        // No filtering needed as we trust the font is loaded
-        page.drawText(translated.slice(0, 500), { x: 50, y: height - 100, size: 12, font });
+            const page = pdfDoc.addPage();
+            const { height } = page.getSize();
+            
+            page.drawText(translated.slice(0, 500), { x: 50, y: height - 100, size: 12, font });
+        } catch (fontErr) {
+            console.error("Font error:", fontErr);
+            throw new Error("Font load failed: " + fontErr.message);
+        }
 
         const finalBytes = await pdfDoc.save();
         res.setHeader("Content-Type", "application/pdf");
         return res.status(200).send(Buffer.from(finalBytes));
 
     } catch (err) {
-        if (debugMode) return res.status(500).json({ error: err.message });
+        console.error(err);
+        if (debugMode) return res.status(500).json({ error: err.message, stack: err.stack });
         res.status(500).send("Error: " + err.message);
     }
 }
