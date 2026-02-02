@@ -1,9 +1,9 @@
 // api/pdftranslate.js
 
 import OpenAI from "openai";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
+import pdfParse from "pdf-parse";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -31,7 +31,7 @@ async function loadFontData(lang) {
     for (const url of urls) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 15000); 
+            const timeoutId = setTimeout(() => controller.abort(), 10000); 
             const res = await fetch(url, { signal: controller.signal });
             clearTimeout(timeoutId);
             if (res.ok) return await res.arrayBuffer();
@@ -41,37 +41,10 @@ async function loadFontData(lang) {
 }
 
 /**
- * PDFからテキスト抽出
- */
-async function extractText(pdfBuffer) {
-    try {
-        const data = new Uint8Array(pdfBuffer);
-        const loadingTask = pdfjsLib.getDocument({
-            data: data,
-            disableWorker: true,
-            useSystemFonts: true,
-            isEvalSupported: false,
-        });
-        const pdf = await loadingTask.promise;
-        let fullText = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items.map(item => item.str).join(" ");
-            if (pageText.trim()) fullText += pageText + "\n";
-        }
-        return fullText.normalize("NFKC").trim();
-    } catch (e) {
-        console.error("[pdftranslate] PDFJS error:", e.message);
-        return "";
-    }
-}
-
-/**
  * OpenAI翻訳
  */
 async function translateText(text, direction) {
-    if (!text) return "Extraction failed.";
+    if (!text || text.length < 5) return "Extraction failed or text too short.";
     const isToZh = direction === "ja-zh";
     const targetLang = isToZh ? "中国語（簡体字）" : "日本語";
 
@@ -79,14 +52,14 @@ async function translateText(text, direction) {
         const response = await client.chat.completions.create({
             model: process.env.MODEL_TRANSLATE || "gpt-5.1",
             messages: [
-                { role: "system", content: `あなたはプロの翻訳者です。原文を${targetLang}に翻訳してください。` },
+                { role: "system", content: `あなたはマニュアル翻訳の専門家です。原文を${targetLang}に簡潔かつ正確に翻訳してください。出力は翻訳結果のみとしてください。` },
                 { role: "user", content: text.slice(0, 3000) }
             ],
             temperature: 0.1,
         });
         return response.choices[0]?.message?.content || "";
     } catch (e) {
-        return "Error: " + e.message;
+        return "Translation Error: " + e.message;
     }
 }
 
@@ -125,39 +98,48 @@ async function createPdf(text, lang) {
 }
 
 /**
- * マルチパートパース
+ * バイナリセーフなパース
  */
-async function parseMultipart(req) {
-    const contentType = req.headers["content-type"] || "";
-    const boundaryMatch = contentType.match(/boundary=(.+)/);
-    if (!boundaryMatch) return {};
-    const boundary = Buffer.from("--" + boundaryMatch[1]);
+async function parseRequest(req) {
     const chunks = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const buffer = Buffer.concat(chunks);
-    const result = {};
-    let pos = 0;
-    while (true) {
-        pos = buffer.indexOf(boundary, pos);
-        if (pos === -1) break;
-        pos += boundary.length;
-        let nextPos = buffer.indexOf(boundary, pos);
-        if (nextPos === -1) break;
-        const part = buffer.slice(pos, nextPos);
-        const headerEnd = part.indexOf("\r\n\r\n");
-        if (headerEnd === -1) { pos = nextPos; continue; }
-        const headerText = part.slice(0, headerEnd).toString();
-        const body = part.slice(headerEnd + 4, part.length - 2);
-        const nameMatch = headerText.match(/name="([^"]+)"/);
-        const filenameMatch = headerText.match(/filename="([^"]+)"/);
-        if (nameMatch) {
-            const name = nameMatch[1];
-            if (filenameMatch) result[name] = { filename: filenameMatch[1], content: body };
-            else result[name] = body.toString();
+    
+    const contentType = req.headers["content-type"] || "";
+    if (contentType.includes("multipart/form-data")) {
+        const boundaryMatch = contentType.match(/boundary=(.+)/);
+        if (!boundaryMatch) return {};
+        const boundary = Buffer.from("--" + boundaryMatch[1]);
+        const result = {};
+        let pos = 0;
+        while (true) {
+            pos = buffer.indexOf(boundary, pos);
+            if (pos === -1) break;
+            pos += boundary.length;
+            let nextPos = buffer.indexOf(boundary, pos);
+            if (nextPos === -1) break;
+            const part = buffer.slice(pos, nextPos);
+            const headerEnd = part.indexOf("\r\n\r\n");
+            if (headerEnd === -1) { pos = nextPos; continue; }
+            const headerText = part.slice(0, headerEnd).toString();
+            const body = part.slice(headerEnd + 4, part.length - 2);
+            const nameMatch = headerText.match(/name="([^"]+)"/);
+            const filenameMatch = headerText.match(/filename="([^"]+)"/);
+            if (nameMatch) {
+                const name = nameMatch[1];
+                if (filenameMatch) result[name] = { filename: filenameMatch[1], content: body };
+                else result[name] = body.toString();
+            }
+            pos = nextPos;
         }
-        pos = nextPos;
+        return result;
+    } else {
+        try {
+            return JSON.parse(buffer.toString() || "{}");
+        } catch (e) {
+            return {};
+        }
     }
-    return result;
 }
 
 export default async function handler(req, res) {
@@ -167,41 +149,31 @@ export default async function handler(req, res) {
     if (req.method === "OPTIONS") return res.status(200).end();
 
     try {
-        let direction = "ja-zh";
+        const data = await parseRequest(req);
+        const direction = data.direction || "ja-zh";
         let pdfBuffer = null;
 
-        const contentType = req.headers["content-type"] || "";
-        if (contentType.includes("multipart/form-data")) {
-            const parts = await parseMultipart(req);
-            direction = parts.direction || "ja-zh";
-            if (parts.file) pdfBuffer = parts.file.content;
-            else if (parts.pdfUrl) {
-                const r = await fetch(parts.pdfUrl);
-                if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
-            }
-        } else {
-            const chunks = [];
-            for await (const chunk of req) chunks.push(chunk);
-            const rawBody = Buffer.concat(chunks).toString();
-            const body = JSON.parse(rawBody || "{}");
-            direction = body.direction || "ja-zh";
-            if (body.pdfUrl) {
-                const r = await fetch(body.pdfUrl);
-                if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
-            }
+        if (data.file) pdfBuffer = data.file.content;
+        else if (data.pdfUrl) {
+            const r = await fetch(data.pdfUrl);
+            if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
         }
 
-        if (!pdfBuffer) throw new Error("No PDF source.");
+        if (!pdfBuffer) throw new Error("No PDF source found.");
 
-        const text = await extractText(pdfBuffer);
-        const translated = await translateText(text, direction);
+        const pdfData = await pdfParse(pdfBuffer);
+        const extractedText = pdfData.text.normalize("NFKC").trim();
+        
+        console.log("[pdftranslate] Extracted length:", extractedText.length);
+
+        const translated = await translateText(extractedText, direction);
         const finalPdf = await createPdf(translated, direction);
 
         res.setHeader("Content-Type", "application/pdf");
         res.status(200).send(finalPdf);
 
     } catch (error) {
-        console.error("[pdftranslate] Error:", error.message);
+        console.error("[pdftranslate] Fatal:", error.message);
         try {
             const pdfDoc = await PDFDocument.create();
             const page = pdfDoc.addPage();
