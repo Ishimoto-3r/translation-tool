@@ -16,7 +16,7 @@ async function loadLocalFont(lang) {
     const isZh = lang.includes("zh");
     const fontName = isZh ? "NotoSansSC-Regular.ttf" : "NotoSansJP-Regular.ttf";
     
-    // Resolve path relative to THIS file (ESM)
+    // Resolve path relative to THIS file
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
     const fontPath = path.join(__dirname, fontName);
@@ -25,8 +25,7 @@ async function loadLocalFont(lang) {
         const fontBuffer = await fs.readFile(fontPath);
         return fontBuffer;
     } catch (e) {
-        console.error("Font load error:", e.message, fontPath);
-        return null;
+        return null; // Trigger main handler debug logic
     }
 }
 
@@ -92,21 +91,20 @@ export default async function handler(req, res) {
         pdfDoc.registerFontkit(fontkit);
         
         const fontData = await loadLocalFont(direction);
-        let font;
-        if (fontData) {
-            try { font = await pdfDoc.embedFont(fontData); } catch (e) {}
+        if (!fontData) {
+            const __filename = fileURLToPath(import.meta.url);
+            const __dirname = path.dirname(__filename);
+            let files = [];
+            try { files = await fs.readdir(__dirname); } catch(e) { files = [e.message]; }
+            throw new Error(`Font missing. Path: ${__dirname}. Files: ${JSON.stringify(files)}`);
         }
-        if (!font) font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        
+        const font = await pdfDoc.embedFont(fontData);
 
         const page = pdfDoc.addPage();
         const { height } = page.getSize();
         
-        const safeText = translated.split("").filter(c => {
-            if (!fontData) return c.charCodeAt(0) < 128;
-            return true;
-        }).join("");
-
-        page.drawText(safeText.slice(0, 500), { x: 50, y: height - 100, size: 12, font });
+        page.drawText(translated.slice(0, 500), { x: 50, y: height - 100, size: 12, font });
 
         const finalBytes = await pdfDoc.save();
         res.setHeader("Content-Type", "application/pdf");

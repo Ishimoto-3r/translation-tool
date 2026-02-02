@@ -1,6 +1,6 @@
 {
   "functions": {
-    "api/*.js": {
+    "api/pdftranslate.js": {
       "maxDuration": 10,
       "includeFiles": "api/*.ttf"
     }
