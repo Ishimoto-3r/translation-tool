@@ -4,27 +4,25 @@ import OpenAI from "openai";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import pdfParse from "pdf-parse";
+import path from "path";
+import fs from "fs/promises";
 
 export const config = {
     api: { bodyParser: false },
 };
 
-async function loadFontData(lang) {
+async function loadLocalFont(lang) {
     const isZh = lang.includes("zh");
-    const urls = isZh 
-        ? ["https://github.com/asfadmin/noto-sans-sc-subset/raw/master/fonts/NotoSansSC-Regular.ttf"]
-        : ["https://github.com/mizdra/noto-sans-jp-subset-for-vercel/raw/main/public/NotoSansJP-Regular.ttf"];
+    const fontName = isZh ? "NotoSansSC-Regular.ttf" : "NotoSansJP-Regular.ttf";
+    const fontPath = path.join(process.cwd(), "api", "fonts", fontName);
     
-    for (const url of urls) {
-        try {
-            const controller = new AbortController();
-            const id = setTimeout(() => controller.abort(), 3000);
-            const res = await fetch(url, { signal: controller.signal });
-            clearTimeout(id);
-            if (res.ok) return await res.arrayBuffer();
-        } catch (e) {}
+    try {
+        const fontBuffer = await fs.readFile(fontPath);
+        return fontBuffer;
+    } catch (e) {
+        console.error("Font load error:", e.message, fontPath);
+        return null;
     }
-    return null;
 }
 
 export default async function handler(req, res) {
@@ -77,17 +75,18 @@ export default async function handler(req, res) {
 
         const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const targetDesc = direction === "ja-zh" ? "Chinese" : "Japanese";
+        
         const completion = await client.chat.completions.create({
             model: "gpt-4o",
-            messages: [{ role: "user", content: `Translate to ${targetDesc}: ${extractedText.slice(0, 500)}` }],
-            max_tokens: 500
+            messages: [{ role: "user", content: `Translate to ${targetDesc} (summary only): ${extractedText.slice(0, 300)}` }],
+            max_tokens: 300
         });
         const translated = completion.choices[0]?.message?.content || "No translation";
 
         const pdfDoc = await PDFDocument.create();
         pdfDoc.registerFontkit(fontkit);
         
-        const fontData = await loadFontData(direction);
+        const fontData = await loadLocalFont(direction);
         let font;
         if (fontData) {
             try { font = await pdfDoc.embedFont(fontData); } catch (e) {}
@@ -98,7 +97,7 @@ export default async function handler(req, res) {
         const { height } = page.getSize();
         
         const safeText = translated.split("").filter(c => {
-            if (!fontData) return c.charCodeAt(0) < 128; // fallback for ASCII
+            if (!fontData) return c.charCodeAt(0) < 128;
             return true;
         }).join("");
 

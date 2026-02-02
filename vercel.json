@@ -1,5 +1,8 @@
 {
-  "github": {
-    "silent": true
+  "functions": {
+    "api/pdftranslate.js": {
+      "maxDuration": 10,
+      "includeFiles": "api/fonts/**"
+    }
   }
 }
