@@ -15,6 +15,17 @@ export const config = {
     api: { bodyParser: false, maxDuration: 60 },
 };
 
+// Tesseract Paths (Explicitly use CDN for Serverless reliability)
+// Using v5 compatible paths
+const TESSERACT_CONFIG = {
+    // langPath: 'https://tessdata.projectnaptha.com/4.0.0', // Common repo
+    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core.wasm.js',
+    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
+    cachePath: '/tmp'
+    // Default langPath is usually fine if cachePath is writable, 
+    // but specifying it can help if default lookup fails.
+};
+
 // --- Font Management ---
 const FONT_URLS = {
     jp: "https://raw.githubusercontent.com/googlefonts/noto-cjk/main/Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf", 
@@ -91,8 +102,7 @@ export default async function handler(req, res) {
     try {
         const chunks = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
-        res.on('close', () => console.log('Response closed')); // Debug
-
+        
         const bodyBuffer = Buffer.concat(chunks);
         const contentType = req.headers["content-type"] || "";
         
@@ -125,7 +135,6 @@ export default async function handler(req, res) {
         const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const targetLang = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
 
-        // === BRANCH 1: Text Exists ===
         if (extractedText.length > 50) { 
             const completion = await client.chat.completions.create({
                 model: "gpt-4o",
@@ -141,7 +150,6 @@ export default async function handler(req, res) {
             page.drawText(translated, { x: 50, y: height - 50, size: 10, font: customFont, maxWidth: width - 100, lineHeight: 14 });
             
         } 
-        // === BRANCH 2: Image/OCR Translation ===
         else {
             console.log("Image-based PDF detected. Starting OCR...");
             const page = pdfDoc.getPages()[0];
@@ -152,12 +160,10 @@ export default async function handler(req, res) {
                 p.drawText("Error: No text and no supported image found.", { x: 50, y: 700, size: 24, font: customFont });
             } else {
                 try {
-                    // Tesseract Config for Serverless (Write only to /tmp)
-                    // Note: Use 'eng' or 'chi_sim' depending on direction.
                     const sourceLang = direction === "ja-zh" ? "jpn" : "chi_sim";
                     
                     const worker = await createWorker(sourceLang, 1, {
-                        cachePath: "/tmp",
+                        ...TESSERACT_CONFIG,
                         logger: m => console.log(m),
                         errorHandler: e => console.error("Tesseract Error:", e)
                     });
