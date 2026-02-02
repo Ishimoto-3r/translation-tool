@@ -91,10 +91,11 @@ export default async function handler(req, res) {
     try {
         const chunks = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
+        res.on('close', () => console.log('Response closed')); // Debug
+
         const bodyBuffer = Buffer.concat(chunks);
         const contentType = req.headers["content-type"] || "";
         
-        // Parse Input
         let pdfBuffer = bodyBuffer;
         let direction = "ja-zh";
         let pdfUrl = null;
@@ -111,14 +112,12 @@ export default async function handler(req, res) {
         }
         if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("No PDF content.");
 
-        // 1. Try Text Extraction
         let extractedText = "";
         try {
             const parsed = await pdfParse(pdfBuffer);
             extractedText = (parsed.text || "").trim();
         } catch (e) { console.error("Parse error:", e); }
 
-        // Start Building PDF early
         const pdfDoc = await PDFDocument.load(pdfBuffer);
         pdfDoc.registerFontkit(fontkit);
         const fontBytes = await loadFontWithCache(direction);
@@ -126,7 +125,7 @@ export default async function handler(req, res) {
         const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const targetLang = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
 
-        // === BRANCH 1: Text Exists (Standard Translation) ===
+        // === BRANCH 1: Text Exists ===
         if (extractedText.length > 50) { 
             const completion = await client.chat.completions.create({
                 model: "gpt-4o",
@@ -137,100 +136,100 @@ export default async function handler(req, res) {
             });
             const translated = completion.choices[0]?.message?.content || "No translation.";
             
-            // Append new page with translation
             const page = pdfDoc.addPage();
             const { width, height } = page.getSize();
             page.drawText(translated, { x: 50, y: height - 50, size: 10, font: customFont, maxWidth: width - 100, lineHeight: 14 });
             
         } 
-        // === BRANCH 2: Image/OCR Translation (Layout Preserving) ===
+        // === BRANCH 2: Image/OCR Translation ===
         else {
             console.log("Image-based PDF detected. Starting OCR...");
-            
-            // Limit to Page 1 for performance in Serverless
             const page = pdfDoc.getPages()[0];
             const imgData = await extractFirstOverlayImage(pdfDoc, 0);
 
             if (!imgData) {
-                // If text is empty and no image found, fallback to just showing error on page
                 const p = pdfDoc.addPage();
                 p.drawText("Error: No text and no supported image found.", { x: 50, y: 700, size: 24, font: customFont });
             } else {
-                // OCR
-                const worker = await createWorker('eng'); 
-                const sourceLang = direction === "ja-zh" ? "jpn" : "chi_sim";
-                
-                await worker.loadLanguage(sourceLang);
-                await worker.initialize(sourceLang);
-                const { data } = await worker.recognize(imgData.buffer);
-                await worker.terminate();
-
-                console.log(`OCR Lines: ${data.lines.length}`);
-                
-                const linesToTranslate = data.lines.map(l => l.text.replace(/\n/g, '').trim()).filter(t => t.length > 0);
-                
-                // Batch Translate
-                if (linesToTranslate.length > 0) {
-                     const prompt = `Translate these lines to ${targetLang}. Return a JSON object with a key "translations" containing an array of strings. \nLines:\n` + JSON.stringify(linesToTranslate);
-                     
-                     const completion = await client.chat.completions.create({
-                        model: "gpt-4o",
-                        messages: [{ role: "user", content: prompt }],
-                        response_format: { type: "json_object" }
+                try {
+                    // Tesseract Config for Serverless (Write only to /tmp)
+                    // Note: Use 'eng' or 'chi_sim' depending on direction.
+                    const sourceLang = direction === "ja-zh" ? "jpn" : "chi_sim";
+                    
+                    const worker = await createWorker(sourceLang, 1, {
+                        cachePath: "/tmp",
+                        logger: m => console.log(m),
+                        errorHandler: e => console.error("Tesseract Error:", e)
                     });
                     
-                    let translatedLines = [];
-                    try {
-                        const jsonRes = JSON.parse(completion.choices[0]?.message?.content);
-                        if (jsonRes.translations && Array.isArray(jsonRes.translations)) {
-                            translatedLines = jsonRes.translations;
-                        } else {
-                            // Fallback try first key
-                            const keys = Object.keys(jsonRes);
-                            if (keys.length > 0 && Array.isArray(jsonRes[keys[0]])) translatedLines = jsonRes[keys[0]];
-                        }
-                    } catch (e) { console.error("JSON parse error:", e); }
+                    const { data } = await worker.recognize(imgData.buffer);
+                    await worker.terminate();
 
-                    // Drawing
-                    const { width: pgW, height: pgH } = page.getSize();
-                    const scaleX = pgW / imgData.width;
-                    const scaleY = pgH / imgData.height;
-
-                    let lineIdx = 0;
-                    data.lines.forEach((line) => {
-                        const originalText = line.text.replace(/\n/g, '').trim();
-                        if (originalText.length === 0) return;
-                        
-                        // Try to align translation index
-                        if (lineIdx >= translatedLines.length) return;
-                        const text = translatedLines[lineIdx];
-                        lineIdx++;
-                        
-                        if (!text) return;
-                        
-                        const bbox = line.bbox; // x0, y0, x1, y1
-                        
-                        const x = bbox.x0 * scaleX;
-                        const y = pgH - (bbox.y1 * scaleY);
-                        const w = (bbox.x1 - bbox.x0) * scaleX;
-                        const h = (bbox.y1 - bbox.y0) * scaleY;
-
-                        // Draw White Box
-                        page.drawRectangle({
-                            x: x, y: y, width: w, height: h,
-                            color: rgb(1, 1, 1)
+                    console.log(`OCR Lines: ${data.lines.length}`);
+                    
+                    const linesToTranslate = data.lines.map(l => l.text.replace(/\n| /g, '').trim()).filter(t => t.length > 0);
+                    
+                    if (linesToTranslate.length > 0) {
+                         const prompt = `Translate these lines to ${targetLang}. Return a JSON object with a key "translations" containing an array of strings. \nLines:\n` + JSON.stringify(linesToTranslate);
+                         
+                         const completion = await client.chat.completions.create({
+                            model: "gpt-4o",
+                            messages: [{ role: "user", content: prompt }],
+                            response_format: { type: "json_object" }
                         });
+                        
+                        let translatedLines = [];
+                        try {
+                            const jsonRes = JSON.parse(completion.choices[0]?.message?.content);
+                            if (jsonRes.translations && Array.isArray(jsonRes.translations)) {
+                                translatedLines = jsonRes.translations;
+                            } else {
+                                const keys = Object.keys(jsonRes);
+                                if (keys.length > 0 && Array.isArray(jsonRes[keys[0]])) translatedLines = jsonRes[keys[0]];
+                            }
+                        } catch (e) { console.error("JSON parse error:", e); }
 
-                        // Draw Text (Auto-size)
-                        const fontSize = h * 0.75; 
-                        page.drawText(text, {
-                            x: x, y: y + (h * 0.1),
-                            size: fontSize,
-                            font: customFont,
-                            color: rgb(0, 0, 0),
-                            width: w 
+                        const { width: pgW, height: pgH } = page.getSize();
+                        const scaleX = pgW / imgData.width;
+                        const scaleY = pgH / imgData.height;
+
+                        let lineIdx = 0;
+                        data.lines.forEach((line) => {
+                            const originalText = line.text.replace(/\n| /g, '').trim();
+                            if (originalText.length === 0) return;
+                            
+                            if (lineIdx >= translatedLines.length) return;
+                            const text = translatedLines[lineIdx];
+                            lineIdx++;
+                            
+                            if (!text) return;
+                            
+                            const bbox = line.bbox; 
+                            
+                            const x = bbox.x0 * scaleX;
+                            const y = pgH - (bbox.y1 * scaleY);
+                            const w = (bbox.x1 - bbox.x0) * scaleX;
+                            const h = (bbox.y1 - bbox.y0) * scaleY;
+
+                            page.drawRectangle({
+                                x: x, y: y, width: w, height: h,
+                                color: rgb(1, 1, 1)
+                            });
+
+                            const fontSize = Math.min(h * 0.8, 12); 
+                            page.drawText(text, {
+                                x: x, y: y + (h * 0.1),
+                                size: fontSize,
+                                font: customFont,
+                                color: rgb(0, 0, 0),
+                                width: w 
+                            });
                         });
-                    });
+                    }
+                } catch (ocrErr) {
+                    console.error("OCR Failed:", ocrErr);
+                    const p = pdfDoc.addPage();
+                    p.drawText(`OCR Error: ${ocrErr.message}`, { x: 50, y: 700, size: 12, font: customFont });
                 }
             }
         }
