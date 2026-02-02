@@ -4,27 +4,18 @@ import OpenAI from "openai";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import pdfParse from "pdf-parse";
-import path from "path";
-import fs from "fs/promises";
+import { NotoSansJP, NotoSansSC } from "./fontAssets.js";
 
 export const config = {
     api: { bodyParser: false },
 };
 
-async function loadLocalFont(lang) {
+function loadLocalFont(lang) {
     const isZh = lang.includes("zh");
-    const fontName = isZh ? "NotoSansSC-Regular.ttf" : "NotoSansJP-Regular.ttf";
+    const base64Data = isZh ? NotoSansSC : NotoSansJP;
     
-    // Path strategy: Look in "api" folder at root (process.cwd())
-    // Since files are now in api/
-    const fontPath = path.join(process.cwd(), "api", fontName);
-    
-    try {
-        const buffer = await fs.readFile(fontPath);
-        return buffer;
-    } catch (e) {
-        return null; // Trigger debug error
-    }
+    if (!base64Data) return null;
+    return Buffer.from(base64Data, "base64");
 }
 
 export default async function handler(req, res) {
@@ -88,15 +79,9 @@ export default async function handler(req, res) {
         const pdfDoc = await PDFDocument.create();
         pdfDoc.registerFontkit(fontkit);
         
-        const fontData = await loadLocalFont(direction);
+        const fontData = loadLocalFont(direction);
         if (!fontData) {
-            // Detailed debug for 500 error
-            let listing = [];
-            try { listing = await fs.readdir(process.cwd()); } catch(e) {}
-            let apiListing = [];
-            try { apiListing = await fs.readdir(path.join(process.cwd(), "api")); } catch(e) { apiListing = [e.message]; }
-            
-            throw new Error(`Font missing. Searched: api/${fontName}. Root: ${JSON.stringify(listing)}. API dir: ${JSON.stringify(apiListing)}`);
+           throw new Error("Embedded font data missing.");
         }
         
         const font = await pdfDoc.embedFont(fontData);
@@ -104,6 +89,7 @@ export default async function handler(req, res) {
         const page = pdfDoc.addPage();
         const { height } = page.getSize();
         
+        // No filtering needed as we trust the font is loaded
         page.drawText(translated.slice(0, 500), { x: 50, y: height - 100, size: 12, font });
 
         const finalBytes = await pdfDoc.save();

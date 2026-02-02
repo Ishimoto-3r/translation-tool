@@ -1,11 +1,7 @@
 {
   "functions": {
     "api/*.js": {
-      "maxDuration": 10,
-      "includeFiles": [
-        "api/NotoSansJP-Regular.ttf",
-        "api/NotoSansSC-Regular.ttf"
-      ]
+      "maxDuration": 10
     }
   }
 }
