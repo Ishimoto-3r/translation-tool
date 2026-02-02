@@ -42,6 +42,7 @@ async function extractText(pdfBuffer) {
         }
         return fullText.normalize("NFKC").trim();
     } catch (e) {
+        console.error("Extraction error:", e.message);
         return "";
     }
 }
@@ -57,14 +58,14 @@ async function createPdf(text, lang, isError = false) {
     if (!font) font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
     let page = pdfDoc.addPage();
-    const { width, height } = page.getSize();
+    const { height } = page.getSize();
     const margin = 50;
-    const fontSize = isError ? 12 : 10;
+    const fontSize = 10;
     let y = height - margin;
 
     const lines = text.split("\n");
     for (let line of lines) {
-        const maxChars = isError ? 40 : 50;
+        const maxChars = 50;
         for (let i = 0; i < line.length; i += maxChars) {
             const subLine = line.substring(i, i + maxChars).trim();
             if (!subLine) continue;
@@ -85,7 +86,6 @@ export default async function handler(req, res) {
     if (req.method === "OPTIONS") return res.status(200).end();
 
     const debugMode = req.headers["x-debug-mode"];
-    const direction = "ja-zh";
 
     try {
         const chunks = [];
@@ -93,25 +93,38 @@ export default async function handler(req, res) {
         const bodyBuffer = Buffer.concat(chunks);
         const contentType = req.headers["content-type"] || "";
         let pdfBuffer = null;
+        let direction = "ja-zh";
 
         if (contentType.includes("application/json")) {
-            const body = JSON.parse(bodyBuffer.toString() || "{}");
+            const bodyString = bodyBuffer.toString() || "{}";
+            const body = JSON.parse(bodyString);
+            direction = body.direction || "ja-zh";
             if (body.pdfUrl) {
+                console.log("[pdftranslate] Fetching PDF:", body.pdfUrl);
                 const r = await fetch(body.pdfUrl);
-                if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
+                if (r.ok) {
+                    pdfBuffer = Buffer.from(await r.arrayBuffer());
+                    console.log("[pdftranslate] Fetch success. Bytes:", pdfBuffer.length);
+                } else {
+                    throw new Error(`PDF URL fetch failed with status ${r.status}: ${body.pdfUrl}`);
+                }
+            } else if (body.file && body.file.content) {
+                pdfBuffer = Buffer.from(body.file.content);
             }
         } 
 
-        if (!pdfBuffer) throw new Error("PDFデータが見つかりません。");
+        if (!pdfBuffer || pdfBuffer.length === 0) {
+            throw new Error(`PDFデータが特定できませんでした。(Content-Type: ${contentType}, BodyLength: ${bodyBuffer.length})`);
+        }
 
         const extractedText = await extractText(pdfBuffer);
 
         if (debugMode === "smoke") {
-            return res.status(200).json({ status: "success", textLength: extractedText.length });
+            return res.status(200).json({ status: "success", textLength: extractedText.length, bytes: pdfBuffer.length });
         }
 
         if (!extractedText || extractedText.length < 5) {
-            const warningMsg = "【抽出不可】\nこのPDFにはテキストデータが含まれていないか、スキャン画像のみの形式です。現在のツールはOCR（画像読み取り）には対応しておらず、テキストベースのPDFのみ翻訳可能です。";
+            const warningMsg = "【抽出不可】PDFにテキストが含まれていないか、画像のみの形式です。";
             const errorPdf = await createPdf(warningMsg, direction, true);
             res.setHeader("Content-Type", "application/pdf");
             return res.status(200).send(errorPdf);
@@ -119,23 +132,26 @@ export default async function handler(req, res) {
 
         const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const targetLang = direction === "ja-zh" ? "中国語（簡体字）" : "日本語";
+        const model = process.env.MODEL_TRANSLATE || "gpt-4o";
+        
         const response = await client.chat.completions.create({
-            model: process.env.MODEL_TRANSLATE || "gpt-5.1",
+            model: model,
             messages: [
-                { role: "system", content: `専門家として${targetLang}に翻訳してください。` },
+                { role: "system", content: `翻訳専門家として${targetLang}に翻訳してください。` },
                 { role: "user", content: extractedText.slice(0, 3000) }
             ],
             temperature: 0.1,
         });
-        const translated = response.choices[0]?.message?.content || "翻訳失敗";
+        const translated = response.choices[0]?.message?.content || "翻訳結果なし";
 
         const finalPdf = await createPdf(translated, direction);
         res.setHeader("Content-Type", "application/pdf");
         res.status(200).send(finalPdf);
 
     } catch (error) {
-        if (debugMode) return res.status(500).json({ error: error.message });
-        const finalPdf = await createPdf("Fatal Error: " + error.message, "ja-zh", true);
+        console.error("[pdftranslate] Error:", error.message);
+        if (debugMode) return res.status(500).json({ error: error.message, stack: error.stack });
+        const finalPdf = await createPdf("Error: " + error.message, "ja-zh", true);
         res.setHeader("Content-Type", "application/pdf").status(200).send(finalPdf);
     }
 }
