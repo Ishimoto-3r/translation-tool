@@ -184,42 +184,60 @@ export default async function handler(req, res) {
         return res.status(405).send("Method Not Allowed");
     }
 
+    console.log("[pdftranslate] Request received, method:", req.method);
+
     try {
         const parts = await parseMultipart(req);
+        console.log("[pdftranslate] Multipart parsed. keys:", Object.keys(parts));
+
         const filePart = parts.file;
         const direction = parts.direction || "ja-zh";
         const pdfUrl = parts.pdfUrl;
 
         let pdfBuffer;
         if (filePart) {
+            console.log("[pdftranslate] File detected:", filePart.filename, "size:", filePart.content.length);
             pdfBuffer = filePart.content;
         } else if (pdfUrl) {
-            // URLからの取得
+            console.log("[pdftranslate] PDF URL detected:", pdfUrl);
             const pdfRes = await fetch(pdfUrl);
             if (pdfRes.ok) {
                 pdfBuffer = Buffer.from(await pdfRes.arrayBuffer());
+                console.log("[pdftranslate] PDF fetched from URL, size:", pdfBuffer.length);
+            } else {
+                console.error("[pdftranslate] Failed to fetch PDF from URL. Status:", pdfRes.status);
             }
         }
 
         if (!pdfBuffer) {
+            console.warn("[pdftranslate] No PDF buffer available.");
             return res.status(200).setHeader("Content-Type", "application/pdf").send(generateFallbackPdf("エラー: PDFファイルが見つかりません。"));
         }
 
         // テキスト抽出
+        console.log("[pdftranslate] Starting text extraction...");
         const text = await extractText(pdfBuffer);
+        console.log("[pdftranslate] Text extracted, length:", text ? text.length : 0);
+
+        if (!text || !text.trim()) {
+            console.warn("[pdftranslate] Extracted text is empty.");
+        }
 
         // 翻訳
+        console.log("[pdftranslate] Calling OpenAI for translation... direction:", direction);
         const translated = await translateText(text, direction);
+        console.log("[pdftranslate] Translation completed, result length:", translated ? translated.length : 0);
 
         // PDF生成（別紙フォールバック）
-        // 本来的にはレイアウト維持を試みるが、ルールに従い「初期はフォールバック優先」とする
+        console.log("[pdftranslate] Generating fallback PDF...");
         const finalPdf = generateFallbackPdf(translated);
+        console.log("[pdftranslate] PDF generation completed. Sending response.");
 
         res.setHeader("Content-Type", "application/pdf");
         res.status(200).send(finalPdf);
 
     } catch (error) {
-        console.error("API Error:", error);
+        console.error("[pdftranslate] Fatal API Error:", error.stack || error);
         // エラーでもPDFを返す
         res.setHeader("Content-Type", "application/pdf");
         res.status(200).send(generateFallbackPdf("致命的なエラーが発生しました: " + error.message));
