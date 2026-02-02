@@ -9,21 +9,10 @@ import fs from "fs/promises";
 import { createWriteStream } from "fs";
 import { pipeline } from "stream/promises";
 import zlib from "zlib";
-import { createWorker } from "tesseract.js";
+// import { createWorker } from "tesseract.js"; // Removed
 
 export const config = {
     api: { bodyParser: false, maxDuration: 60 },
-};
-
-// Tesseract Paths (Explicitly use CDN for Serverless reliability)
-// Using v5 compatible paths
-const TESSERACT_CONFIG = {
-    // langPath: 'https://tessdata.projectnaptha.com/4.0.0', // Common repo
-    corePath: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@5.1.0/tesseract-core.wasm.js',
-    workerPath: 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/worker.min.js',
-    cachePath: '/tmp'
-    // Default langPath is usually fine if cachePath is writable, 
-    // but specifying it can help if default lookup fails.
 };
 
 // --- Font Management ---
@@ -98,6 +87,7 @@ export default async function handler(req, res) {
     if (req.method === "OPTIONS") return res.status(200).end();
 
     const debugMode = req.headers["x-debug-mode"];
+    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     try {
         const chunks = [];
@@ -132,7 +122,6 @@ export default async function handler(req, res) {
         pdfDoc.registerFontkit(fontkit);
         const fontBytes = await loadFontWithCache(direction);
         const customFont = await pdfDoc.embedFont(fontBytes);
-        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const targetLang = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
 
         if (extractedText.length > 50) { 
@@ -151,7 +140,7 @@ export default async function handler(req, res) {
             
         } 
         else {
-            console.log("Image-based PDF detected. Starting OCR...");
+            console.log("Image-based PDF detected. Using GPT-4o Vision for OCR & Translation...");
             const page = pdfDoc.getPages()[0];
             const imgData = await extractFirstOverlayImage(pdfDoc, 0);
 
@@ -160,80 +149,89 @@ export default async function handler(req, res) {
                 p.drawText("Error: No text and no supported image found.", { x: 50, y: 700, size: 24, font: customFont });
             } else {
                 try {
-                    const sourceLang = direction === "ja-zh" ? "jpn" : "chi_sim";
+                    // Convert image buffer to base64
+                    const base64Img = imgData.buffer.toString('base64');
+                    // Assuming JPEG (DCTDecode)
+                    const dataUrl = `data:image/jpeg;base64,${base64Img}`;
+
+                    // Vision API Call
+                    // We ask GPT-4o to "Translate the text and provide approximate bounding boxes".
+                    // Coordinates: We ask for percentages (0-100) or absolute pixels (roughly) to be safe.
+                    // GPT-4o is not pixel-perfect, but better than nothing.
                     
-                    const worker = await createWorker(sourceLang, 1, {
-                        ...TESSERACT_CONFIG,
-                        logger: m => console.log(m),
-                        errorHandler: e => console.error("Tesseract Error:", e)
-                    });
+                    const prompt = `
+                    You are a translator and layout analyzer.
+                    1. Detect all text blocks in the image.
+                    2. Translate each block to ${targetLang}.
+                    3. Estimate the bounding box for each block as percentage of image width/height: [top(%), left(%), width(%), height(%)].
                     
-                    const { data } = await worker.recognize(imgData.buffer);
-                    await worker.terminate();
-
-                    console.log(`OCR Lines: ${data.lines.length}`);
-                    
-                    const linesToTranslate = data.lines.map(l => l.text.replace(/\n| /g, '').trim()).filter(t => t.length > 0);
-                    
-                    if (linesToTranslate.length > 0) {
-                         const prompt = `Translate these lines to ${targetLang}. Return a JSON object with a key "translations" containing an array of strings. \nLines:\n` + JSON.stringify(linesToTranslate);
-                         
-                         const completion = await client.chat.completions.create({
-                            model: "gpt-4o",
-                            messages: [{ role: "user", content: prompt }],
-                            response_format: { type: "json_object" }
-                        });
-                        
-                        let translatedLines = [];
-                        try {
-                            const jsonRes = JSON.parse(completion.choices[0]?.message?.content);
-                            if (jsonRes.translations && Array.isArray(jsonRes.translations)) {
-                                translatedLines = jsonRes.translations;
-                            } else {
-                                const keys = Object.keys(jsonRes);
-                                if (keys.length > 0 && Array.isArray(jsonRes[keys[0]])) translatedLines = jsonRes[keys[0]];
-                            }
-                        } catch (e) { console.error("JSON parse error:", e); }
-
-                        const { width: pgW, height: pgH } = page.getSize();
-                        const scaleX = pgW / imgData.width;
-                        const scaleY = pgH / imgData.height;
-
-                        let lineIdx = 0;
-                        data.lines.forEach((line) => {
-                            const originalText = line.text.replace(/\n| /g, '').trim();
-                            if (originalText.length === 0) return;
-                            
-                            if (lineIdx >= translatedLines.length) return;
-                            const text = translatedLines[lineIdx];
-                            lineIdx++;
-                            
-                            if (!text) return;
-                            
-                            const bbox = line.bbox; 
-                            
-                            const x = bbox.x0 * scaleX;
-                            const y = pgH - (bbox.y1 * scaleY);
-                            const w = (bbox.x1 - bbox.x0) * scaleX;
-                            const h = (bbox.y1 - bbox.y0) * scaleY;
-
-                            page.drawRectangle({
-                                x: x, y: y, width: w, height: h,
-                                color: rgb(1, 1, 1)
-                            });
-
-                            const fontSize = Math.min(h * 0.8, 12); 
-                            page.drawText(text, {
-                                x: x, y: y + (h * 0.1),
-                                size: fontSize,
-                                font: customFont,
-                                color: rgb(0, 0, 0),
-                                width: w 
-                            });
-                        });
+                    Return a JSON object with this structure:
+                    {
+                      "blocks": [
+                        { "translated_text": "...", "bbox_pct": [10, 10, 30, 5] },
+                        ...
+                      ]
                     }
+                    Output JSON only.
+                    `;
+
+                    const completion = await client.chat.completions.create({
+                        model: "gpt-4o",
+                        messages: [
+                            { role: "user", content: [
+                                { type: "text", text: prompt },
+                                { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
+                            ]}
+                        ],
+                        response_format: { type: "json_object" },
+                        max_tokens: 4000
+                    });
+
+                    const jsonRes = JSON.parse(completion.choices[0]?.message?.content);
+                    const blocks = jsonRes.blocks || [];
+
+                    const { width: pgW, height: pgH } = page.getSize();
+                    // imgData.width/height are the intrinsic image dimensions.
+                    // page.getSize() are the PDF page dimensions.
+                    // Assuming the image fits/covers the page, we map percentages to page size directly.
+                    // If image is only part of page, this might be offset, but for scans usually Page = Image.
+                    
+                    blocks.forEach(block => {
+                        const [topPct, leftPct, widthPct, heightPct] = block.bbox_pct;
+                        const text = block.translated_text;
+                        
+                        // Parse percentages
+                        const x = (leftPct / 100) * pgW;
+                        const yTop = (topPct / 100) * pgH;
+                        
+                        // PDF Y is bottom-up. 
+                        // yTop in image is distance from top.
+                        // PDF Y = pgH - yTop - h
+                        
+                        const w = (widthPct / 100) * pgW;
+                        const h = (heightPct / 100) * pgH;
+                        const y = pgH - yTop - h;
+
+                        // Draw White Box
+                        page.drawRectangle({
+                            x: x, y: y, width: w, height: h,
+                            color: rgb(1, 1, 1)
+                        });
+
+                        // Draw Text
+                        // Auto-size font attempt
+                        const fontSize = Math.min(h * 0.8, 12); 
+                        page.drawText(text, {
+                            x: x, y: y + (h * 0.1),
+                            size: fontSize,
+                            font: customFont,
+                            color: rgb(0, 0, 0),
+                            width: w 
+                        });
+                    });
+
                 } catch (ocrErr) {
-                    console.error("OCR Failed:", ocrErr);
+                    console.error("Vision OCR Failed:", ocrErr);
                     const p = pdfDoc.addPage();
                     p.drawText(`OCR Error: ${ocrErr.message}`, { x: 50, y: 700, size: 12, font: customFont });
                 }
