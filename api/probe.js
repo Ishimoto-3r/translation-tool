@@ -1,14 +1,11 @@
 // api/probe.js
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-
-export default function handler(req, res) {
-    const results = {};
+export default async function handler(req, res) {
+    const results = { alive: true };
     const libs = ["openai", "pdf-lib", "@pdf-lib/fontkit", "pdfjs-dist", "pdf-parse"];
     
     for (const lib of libs) {
         try {
-            require(lib);
+            await import(lib);
             results[lib] = "OK";
         } catch (e) {
             results[lib] = "FAIL: " + e.message;
