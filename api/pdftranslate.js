@@ -6,6 +6,7 @@ import fontkit from "@pdf-lib/fontkit";
 import pdfParse from "pdf-parse";
 import path from "path";
 import fs from "fs/promises";
+import { fileURLToPath } from 'url';
 
 export const config = {
     api: { bodyParser: false },
@@ -13,11 +14,12 @@ export const config = {
 
 async function loadLocalFont(lang) {
     const isZh = lang.includes("zh");
-    // フォントファイル名を正確に指定
     const fontName = isZh ? "NotoSansSC-Regular.ttf" : "NotoSansJP-Regular.ttf";
     
-    // assetsフォルダがルートにあるため、process.cwd() から直接結合
-    const fontPath = path.join(process.cwd(), "assets", fontName);
+    // Resolve path relative to THIS file (ESM)
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const fontPath = path.join(__dirname, fontName);
     
     try {
         const fontBuffer = await fs.readFile(fontPath);
@@ -99,7 +101,6 @@ export default async function handler(req, res) {
         const page = pdfDoc.addPage();
         const { height } = page.getSize();
         
-        // フォントデータがあればフィルタ不要、なければASCIIのみ許可
         const safeText = translated.split("").filter(c => {
             if (!fontData) return c.charCodeAt(0) < 128;
             return true;
