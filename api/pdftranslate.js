@@ -5,12 +5,13 @@ import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
 
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
 export const config = {
     api: { bodyParser: false },
 };
 
 async function extractText(pdfBuffer) {
-    console.log("[pdftranslate] extractText entry. Buffer size:", pdfBuffer.length);
     try {
         const data = new Uint8Array(pdfBuffer);
         const loadingTask = pdfjsLib.getDocument({
@@ -32,7 +33,6 @@ async function extractText(pdfBuffer) {
         }
         return fullText.normalize("NFKC").trim();
     } catch (e) {
-        console.error("Extraction error:", e.message);
         return "ERROR: " + e.message;
     }
 }
@@ -99,7 +99,7 @@ export default async function handler(req, res) {
         }
 
         if (!extractedText || extractedText.length < 2 || extractedText.startsWith("ERROR")) {
-            const pdf = await createPdf("Extraction failed or text empty: " + extractedText, "en", true);
+            const pdf = await createPdf("Extraction failed: " + extractedText, "en", true);
             return res.setHeader("Content-Type", "application/pdf").status(200).send(pdf);
         }
 
