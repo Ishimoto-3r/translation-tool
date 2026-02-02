@@ -125,30 +125,29 @@ async function parseRequest(req) {
 export default async function handler(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-debug-mode");
     if (req.method === "OPTIONS") return res.status(200).end();
 
+    const debugMode = req.headers["x-debug-mode"]; // smoke | verbose
+
     try {
-        console.log("[pdftranslate] Handler started.");
+        console.log("[pdftranslate] Handler started. Debug:", debugMode);
         const data = await parseRequest(req);
         const direction = data.direction || "ja-zh";
         let pdfBuffer = null;
 
         if (data.file) {
             pdfBuffer = data.file.content;
-            console.log("[pdftranslate] Received multipart file.");
         } else if (data.pdfUrl) {
-            console.log("[pdftranslate] Fetching URL:", data.pdfUrl);
             const r = await fetch(data.pdfUrl);
             if (r.ok) {
                 pdfBuffer = Buffer.from(await r.arrayBuffer());
-                console.log("[pdftranslate] URL fetch success. Size:", pdfBuffer.length);
             } else {
                 throw new Error("URL fetch failed: " + r.status);
             }
         }
 
-        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("No PDF data content.");
+        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("No PDF data found.");
 
         let extractedText = "";
         try {
@@ -157,11 +156,21 @@ export default async function handler(req, res) {
             console.log("[pdftranslate] pdf-parse finished. Chars:", extractedText.length);
         } catch (pe) {
             console.error("[pdftranslate] pdf-parse error:", pe.message);
-            throw new Error("PDF parsing engine failed.");
+            throw new Error(`PDF parsing failed: ${pe.message}`);
         }
 
-        if (!extractedText || extractedText.length < 5) {
-            extractedText = "【警告】スキャン画像のみのPDF、またはテキストを抽出できない形式です。OCR(文字認識)機能が必要ですが、現在はテキストベースのPDFのみ対応しています。";
+        // スモークテストモード: 抽出のみ確認して終了
+        if (debugMode === "smoke") {
+            return res.status(200).json({
+                status: "success",
+                stage: "extraction",
+                length: extractedText.length,
+                sample: extractedText.slice(0, 200)
+            });
+        }
+
+        if (!extractedText || extractedText.length < 10) {
+            extractedText = "【警告】スキャン画像のみのPDF、またはテキストを抽出できない形式です。OCRが必要ですが現在は未対応です。";
         }
 
         const isToZh = direction === "ja-zh";
@@ -186,11 +195,20 @@ export default async function handler(req, res) {
 
     } catch (error) {
         console.error("[pdftranslate] Fatal Error:", error.message);
+        
+        if (debugMode) {
+            return res.status(500).json({ 
+                error: error.message, 
+                stack: error.stack,
+                tip: "タイムアウト、またはライブラリの読み込み不良の可能性があります。"
+            });
+        }
+
         try {
             const pdfDoc = await PDFDocument.create();
             const page = pdfDoc.addPage();
             const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-            page.drawText("Operation Failed: " + error.message, { x: 50, y: 700, size: 12, font });
+            page.drawText("Operation Failed: " + error.message, { x: 50, y: 700, size: 10, font });
             res.setHeader("Content-Type", "application/pdf").status(200).send(Buffer.from(await pdfDoc.save()));
         } catch (e) {
             res.status(500).send("Critical error during error handling.");
