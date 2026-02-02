@@ -14,9 +14,13 @@ async function loadFontData(lang) {
     const urls = isZh 
         ? ["https://github.com/asfadmin/noto-sans-sc-subset/raw/master/fonts/NotoSansSC-Regular.ttf"]
         : ["https://github.com/mizdra/noto-sans-jp-subset-for-vercel/raw/main/public/NotoSansJP-Regular.ttf"];
+    
     for (const url of urls) {
         try {
-            const res = await fetch(url);
+            const controller = new AbortController();
+            const id = setTimeout(() => controller.abort(), 3000);
+            const res = await fetch(url, { signal: controller.signal });
+            clearTimeout(id);
             if (res.ok) return await res.arrayBuffer();
         } catch (e) {}
     }
@@ -47,12 +51,13 @@ export default async function handler(req, res) {
             if (body.pdfUrl) {
                 const r = await fetch(body.pdfUrl);
                 if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
+                else throw new Error("Fetch failed: " + r.status);
             }
         } else {
             pdfBuffer = bodyBuffer;
         }
 
-        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("PDFデータなし");
+        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("No PDF");
 
         let extractedText = "";
         try {
@@ -66,19 +71,16 @@ export default async function handler(req, res) {
             return res.status(200).json({ status: "success", length: extractedText.length });
         }
 
-        if (!extractedText || extractedText.length < 5) {
-             throw new Error("テキスト抽出失敗：内容が空かスキャンの可能性があります");
+        if (!extractedText || extractedText.length < 2) {
+             throw new Error("Extraction empty");
         }
 
         const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const targetDesc = direction === "ja-zh" ? "中国語（簡体字）" : "日本語";
+        const targetDesc = direction === "ja-zh" ? "Chinese" : "Japanese";
         const completion = await client.chat.completions.create({
             model: "gpt-4o",
-            messages: [
-                { role: "system", content: `マニュアル翻訳家として${targetDesc}に翻訳してください。` },
-                { role: "user", content: extractedText.slice(0, 3000) }
-            ],
-            temperature: 0.1,
+            messages: [{ role: "user", content: `Translate to ${targetDesc}: ${extractedText.slice(0, 500)}` }],
+            max_tokens: 500
         });
         const translated = completion.choices[0]?.message?.content || "No translation";
 
@@ -88,36 +90,26 @@ export default async function handler(req, res) {
         const fontData = await loadFontData(direction);
         let font;
         if (fontData) {
-            try { font = await pdfDoc.embedFont(fontData); } catch (fe) {}
+            try { font = await pdfDoc.embedFont(fontData); } catch (e) {}
         }
         if (!font) font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-        let page = pdfDoc.addPage();
+        const page = pdfDoc.addPage();
         const { height } = page.getSize();
-        const margin = 50;
-        const fontSize = 11;
-        let y = height - margin;
+        
+        const safeText = translated.split("").filter(c => {
+            if (!fontData) return c.charCodeAt(0) < 128; // fallback for ASCII
+            return true;
+        }).join("");
 
-        const lines = translated.split("\n");
-        for (let line of lines) {
-            const maxChars = 45;
-            for (let i = 0; i < line.length; i += maxChars) {
-                const subLine = line.substring(i, i + maxChars).trim();
-                if (!subLine) continue;
-                if (y < 50) { page = pdfDoc.addPage(); y = height - margin; }
-                try {
-                    page.drawText(subLine, { x: margin, y, size: fontSize, font });
-                } catch(e) {}
-                y -= fontSize * 1.5;
-            }
-        }
+        page.drawText(safeText.slice(0, 500), { x: 50, y: height - 100, size: 12, font });
 
         const finalBytes = await pdfDoc.save();
         res.setHeader("Content-Type", "application/pdf");
         return res.status(200).send(Buffer.from(finalBytes));
 
     } catch (err) {
-        if (debugMode) return res.status(500).json({ error: err.message, stack: err.stack });
+        if (debugMode) return res.status(500).json({ error: err.message });
         res.status(500).send("Error: " + err.message);
     }
 }
