@@ -3,9 +3,9 @@
 import OpenAI from "openai";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+import { createRequire } from "module";
 
-// Vercel(Node.js)では外部URLのworkerSrcは不正。メインスレッド動作を強制。
+const require = createRequire(import.meta.url);
 
 export const config = {
     api: { bodyParser: false },
@@ -13,6 +13,13 @@ export const config = {
 
 async function extractText(pdfBuffer) {
     try {
+        const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+        try {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve("pdfjs-dist/legacy/build/pdf.worker.js");
+        } catch (e) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = null;
+        }
+
         const data = new Uint8Array(pdfBuffer);
         const loadingTask = pdfjsLib.getDocument({
             data: data,
@@ -38,31 +45,27 @@ async function extractText(pdfBuffer) {
 }
 
 async function createPdf(text, lang, isError = false) {
-    try {
-        const pdfDoc = await PDFDocument.create();
-        pdfDoc.registerFontkit(fontkit);
-        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-        let page = pdfDoc.addPage();
-        const { height } = page.getSize();
-        const margin = 50;
-        const fontSize = 10;
-        let y = height - margin;
+    const pdfDoc = await PDFDocument.create();
+    pdfDoc.registerFontkit(fontkit);
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    let page = pdfDoc.addPage();
+    const { height } = page.getSize();
+    const margin = 50;
+    const fontSize = 10;
+    let y = height - margin;
 
-        const lines = text.split("\n");
-        for (let line of lines) {
-            const maxChars = 60;
-            for (let i = 0; i < line.length; i += maxChars) {
-                const subLine = line.substring(i, i + maxChars).trim();
-                if (!subLine) continue;
-                if (y < 40) { page = pdfDoc.addPage(); y = height - margin; }
-                page.drawText(subLine, { x: margin, y, size: fontSize, font });
-                y -= fontSize * 1.5;
-            }
+    const lines = text.split("\n");
+    for (let line of lines) {
+        const maxChars = 60;
+        for (let i = 0; i < line.length; i += maxChars) {
+            const subLine = line.substring(i, i + maxChars).trim();
+            if (!subLine) continue;
+            if (y < 40) { page = pdfDoc.addPage(); y = height - margin; }
+            page.drawText(subLine, { x: margin, y, size: fontSize, font });
+            y -= fontSize * 1.5;
         }
-        return Buffer.from(await pdfDoc.save());
-    } catch (e) {
-        throw new Error("PDF Generation failed: " + e.message);
     }
+    return Buffer.from(await pdfDoc.save());
 }
 
 export default async function handler(req, res) {
@@ -87,13 +90,13 @@ export default async function handler(req, res) {
             if (body.pdfUrl) {
                 const r = await fetch(body.pdfUrl);
                 if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
-                else throw new Error("JSON pdfUrl fetch failed: " + r.status);
+                else throw new Error("PDF URL fetch failed: " + r.status);
             }
         } else {
             pdfBuffer = bodyBuffer;
         }
 
-        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("PDFデータが見つかりません。");
+        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("PDF data not identified");
 
         const extractedText = await extractText(pdfBuffer);
 
@@ -106,34 +109,31 @@ export default async function handler(req, res) {
         }
 
         if (!extractedText || extractedText.length < 2 || extractedText.startsWith("ERROR")) {
-            const fatalMsg = "抽出エラー: " + extractedText;
-            const errorPdf = await createPdf(fatalMsg, "en", true);
-            return res.setHeader("Content-Type", "application/pdf").status(200).send(errorPdf);
+            const warningMsg = "抽出失敗: " + extractedText + "\nスキャン画像PDFの可能性があります。";
+            const errPdf = await createPdf(warningMsg, direction, true);
+            return res.setHeader("Content-Type", "application/pdf").status(200).send(errPdf);
         }
 
         const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const targetLang = direction === "ja-zh" ? "中国語（簡体字）" : "日本語";
         const model = process.env.MODEL_TRANSLATE || "gpt-4o";
+        const targetLang = direction === "ja-zh" ? "Chinese (Simplified)" : "Japanese";
         
         const response = await client.chat.completions.create({
             model: model,
             messages: [
-                { role: "system", content: `マニュアル翻訳家として${targetLang}に翻訳してください。` },
+                { role: "system", content: `You are a translator specialist. Translate this to ${targetLang}.` },
                 { role: "user", content: extractedText.slice(0, 3000) }
             ],
             temperature: 0.1,
         });
-        const translated = response.choices[0]?.message?.content || "翻訳失敗";
+        const translated = response.choices[0]?.message?.content || "Translation empty";
 
         const finalPdf = await createPdf(translated, direction);
-        res.setHeader("Content-Type", "application/pdf");
-        res.status(200).send(finalPdf);
+        res.setHeader("Content-Type", "application/pdf").status(200).send(finalPdf);
 
-    } catch (error) {
-        console.error("[pdftranslate] Global Catch:", error.message);
-        if (debugMode) return res.status(500).json({ status: "fatal", error: error.message });
-        
-        const errDoc = await createPdf("Operation Error: " + error.message, "en", true);
-        res.setHeader("Content-Type", "application/pdf").status(200).send(errDoc);
+    } catch (err) {
+        if (debugMode) return res.status(500).json({ error: err.message, stack: err.stack });
+        const errPdf = await createPdf("Fatal Error: " + err.message, "en", true);
+        res.setHeader("Content-Type", "application/pdf").status(200).send(errPdf);
     }
 }
