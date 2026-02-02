@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="ja">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>マニュアル中国語化（pdftranslate）</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="pdftranslate.js" defer></script>
+
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        .tool-nav {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: #374151;
+            padding: 10px 16px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, .12);
+            display: flex;
+            justify-content: center;
+            gap: 14px;
+            align-items: center;
+            flex-wrap: wrap
+        }
+
+        .nav-groupbox {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 10px;
+            border: 1px solid rgba(255, 255, 255, .14);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, .04)
+        }
+
+        .nav-heading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            width: 100%;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: .08em;
+            color: rgba(243, 244, 246, .85)
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap
+        }
+
+        .tool-nav a {
+            color: #f3f4f6;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 14px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, .06)
+        }
+
+        .tool-nav a:hover {
+            background: rgba(255, 255, 255, .12)
+        }
+
+        .tool-nav a.active {
+            background: #172554;
+            color: #fff
+        }
+
+        /* overlay */
+        .overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            background: rgba(17, 24, 39, .45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+        }
+
+        .overlay.show {
+            display: flex;
+        }
+
+        .overlay-card {
+            width: min(560px, 100%);
+            background: #111827;
+            color: #fff;
+            border-radius: 14px;
+            padding: 18px 18px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+            border: 1px solid rgba(255, 255, 255, .12);
+        }
+
+        .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-100 text-gray-800">
+    <nav class="tool-nav">
+        <div class="nav-groupbox">
+            <div class="nav-heading">🌐 翻訳</div>
+            <div class="nav-links">
+                <a href="/index.html">翻訳ツール</a>
+                <a href="/verify.html">検証結果翻訳</a>
+                <a href="/column-translate.html">列指定翻訳</a>
+                <a href="/sheet-translate.html">シート翻訳</a>
+                <a href="/word-translate.html">Word翻訳</a>
+                <a href="/pdftranslate.html" class="active">マニュアル中国語化</a>
+            </div>
+        </div>
+
+        <div class="nav-groupbox">
+            <div class="nav-heading">📝 マニュアル</div>
+            <div class="nav-links">
+                <a href="/manual.html">原稿作成（AIチェック）</a>
+                <a href="/media-manual.html">動画から原稿作成</a>
+            </div>
+        </div>
+
+        <div class="nav-groupbox">
+            <div class="nav-heading">★ その他</div>
+            <div class="nav-links">
+                <a href="/report.html">修理レポート</a>
+                <a href="/kensho.html">検証項目作成</a>
+                <a href="/prompt.html">単発プロンプト</a>
+                <a href="/inspection.html">検品リスト作成</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- overlay -->
+    <div id="overlay" class="overlay" aria-hidden="true">
+        <div class="overlay-card">
+            <div class="flex items-center justify-between gap-3">
+                <div class="font-bold text-lg" id="overlayTitle">処理中</div>
+                <div class="text-xs text-gray-300 mono" id="overlayStep">...</div>
+            </div>
+            <div class="mt-3 text-sm text-gray-200 leading-relaxed" id="overlayMsg">処理しています。画面は操作できません。</div>
+            <div class="mt-4 w-full bg-gray-700/60 rounded-full h-2 overflow-hidden">
+                <div id="overlayBar" class="h-2 bg-blue-400 w-1/3 rounded-full"></div>
+            </div>
+            <div class="mt-3 text-xs text-gray-300 mono" id="overlayHint"></div>
+        </div>
+    </div>
+
+    <main class="max-w-5xl mx-auto px-4 py-8">
+        <div class="bg-white rounded-2xl shadow p-6 border border-gray-200">
+            <h1 class="text-2xl font-bold">マニュアル中国語化（pdftranslate）</h1>
+
+            <!-- 入力 -->
+            <section class="mt-6">
+                <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6">
+                    <div class="font-bold text-base">入力</div>
+
+                    <div id="dropzone"
+                        class="mt-4 border-2 border-dashed border-gray-300 rounded-xl p-8 bg-white hover:bg-gray-50 transition cursor-pointer">
+                        <div class="text-center">
+                            <div class="font-semibold text-lg">PDFファイルを選択してください</div>
+                            <div class="mt-2 text-sm text-gray-500">ここにファイルをドロップ（またはクリックで選択）</div>
+                        </div>
+                        <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
+                    </div>
+
+                    <!-- URL入力（容量が大きいファイルはURL推奨） -->
+                    <div class="mt-4">
+                        <label class="block text-sm font-bold">マニュアルURL（容量が大きい場合はこちら）</label>
+                        <div class="text-xs text-gray-500 mt-1">
+                            ※ドラッグ＆ドロップは4MBまで。超える場合はURLを貼り付けてください（ファイル直リンクのみ）。
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1">
+                            <a href="https://3rrr-btob.jp/manual/" target="_blank" rel="noopener noreferrer"
+                                class="text-blue-600 underline">マニュアル検索はこちら</a>
+                        </div>
+                        <input id="pdfUrlInput" type="url"
+                            class="mt-2 w-full border border-gray-300 rounded-xl px-3 py-2"
+                            placeholder="例：https://www.example.com/manual" />
+                    </div>
+
+                    <div class="mt-6">
+                        <label class="block text-sm font-bold mb-2">翻訳方向</label>
+                        <select id="directionSelect"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 bg-white">
+                            <option value="ja-zh" selected>日本語 → 中国語</option>
+                            <option value="zh-ja">中国語 → 日本語</option>
+                        </select>
+                    </div>
+
+                    <div class="mt-8 flex items-center justify-end">
+                        <button id="btnExecute"
+                            class="px-8 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition">
+                            翻訳を実行する
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 結果表示 -->
+            <section class="mt-8">
+                <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6">
+                    <div class="font-bold text-base">結果表示</div>
+                    <div id="resultArea"
+                        class="mt-4 p-8 bg-white border border-gray-200 rounded-xl min-h-[150px] flex items-center justify-center text-gray-500 border-dashed">
+                        ここに翻訳後のファイルが表示されます
+                    </div>
+                </div>
+            </section>
+
+            <!-- エラー表示 -->
+            <section class="mt-4">
+                <div id="errorBox" class="hidden border border-red-200 bg-red-50 text-red-800 rounded-xl p-3 text-sm">
+                </div>
+            </section>
+        </div>
+    </main>
+</body>
+
+</html>
