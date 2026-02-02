@@ -30,19 +30,12 @@ async function loadFontData(lang) {
 
     for (const url of urls) {
         try {
-            console.log(`[pdftranslate] Fetching ${isZh ? 'Chinese' : 'Japanese'} font:`, url);
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000); 
             const res = await fetch(url, { signal: controller.signal });
             clearTimeout(timeoutId);
-            if (res.ok) {
-                const data = await res.arrayBuffer();
-                console.log("[pdftranslate] Font loaded:", data.byteLength);
-                return data;
-            }
-        } catch (e) {
-            console.warn("[pdftranslate] Font download fail:", url, e.message);
-        }
+            if (res.ok) return await res.arrayBuffer();
+        } catch (e) {}
     }
     return null;
 }
@@ -51,24 +44,29 @@ async function loadFontData(lang) {
  * PDFからテキスト抽出 (pdfjs使用)
  */
 async function extractText(pdfBuffer) {
+    console.log("[pdftranslate] Extraction start. Buffer size:", pdfBuffer.length);
     try {
+        const data = new Uint8Array(pdfBuffer);
         const loadingTask = pdfjsLib.getDocument({
-            data: pdfBuffer,
+            data: data,
             disableWorker: true,
             useSystemFonts: true,
+            isEvalSupported: false,
         });
+        
         const pdf = await loadingTask.promise;
-        console.log("[pdftranslate] PDF loaded. Pages:", pdf.numPages);
+        console.log("[pdftranslate] Pages:", pdf.numPages);
+        
         let fullText = "";
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            const pageText = content.items.map(item => item.str).join(" ");
-            fullText += pageText + "\n";
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(" ");
+            if (pageText.trim()) fullText += pageText + "\n";
         }
-        return fullText.normalize("NFKC");
+        return fullText.normalize("NFKC").trim();
     } catch (e) {
-        console.error("[pdftranslate] Extraction error:", e);
+        console.error("[pdftranslate] PDFJS error:", e.message);
         return "";
     }
 }
@@ -77,97 +75,62 @@ async function extractText(pdfBuffer) {
  * OpenAI翻訳
  */
 async function translateText(text, direction) {
-    if (!text || !text.trim()) return "Translation failed: No text extracted.";
+    if (!text) return "Translation failed: No text extracted.";
     const isToZh = direction === "ja-zh";
     const targetLang = isToZh ? "中国語（簡体字）" : "日本語";
-
-    console.log("[pdftranslate] Sending to OpenAI. Sample length:", text.length);
 
     try {
         const response = await client.chat.completions.create({
             model: process.env.MODEL_TRANSLATE || "gpt-5.1",
             messages: [
-                { 
-                    role: "system", 
-                    content: `あなたはオフィス機器やスキャナーのマニュアルを翻訳する専門家です。
-原文のテキストを${targetLang}に正確に翻訳してください。
-【重要】
-- 専門用語、製品名、数値、記号（例: USB, mfxs50, 設定）などは翻訳せずそのまま保持するか、適切に扱ってください。
-- 翻訳結果のみを出力してください。解説は不要です。` 
-                },
-                { role: "user", content: text.slice(0, 3500) }
+                { role: "system", content: `あなたはプロの翻訳者です。原文を${targetLang}に翻訳してください。` },
+                { role: "user", content: text.slice(0, 3000) }
             ],
             temperature: 0.1,
         });
         return response.choices[0]?.message?.content || "";
     } catch (e) {
-        console.error("[pdftranslate] OpenAI error:", e);
-        return "Error during translation: " + e.message;
+        console.error("[pdftranslate] OpenAI error:", e.message);
+        return "Error: " + e.message;
     }
 }
 
 /**
- * 多言語PDF出力 (pdf-lib)
+ * PDF生成
  */
-async function createPdfResponse(text, lang) {
-    console.log("[pdftranslate] Creating final PDF...");
+async function createPdf(text, lang) {
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit);
-
     const fontData = await loadFontData(lang);
     let font;
     if (fontData) {
-        try {
-            font = await pdfDoc.embedFont(fontData);
-        } catch (e) {
-            console.error("[pdftranslate] Font embed error:", e.message);
-        }
+        try { font = await pdfDoc.embedFont(fontData); } catch (e) {}
     }
-
-    if (!font) {
-        console.warn("[pdftranslate] Using Helvetica fallback.");
-        font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    }
+    if (!font) font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
     let page = pdfDoc.addPage();
     const { width, height } = page.getSize();
     const margin = 50;
     const fontSize = 10;
     const lineHeight = fontSize * 1.5;
-    
     let y = height - margin;
-    const lines = text.split("\n");
 
+    const lines = text.split("\n");
     for (let line of lines) {
         const maxChars = 50;
         for (let i = 0; i < line.length; i += maxChars) {
             const subLine = line.substring(i, i + maxChars).trim();
             if (!subLine) continue;
-
-            if (y < margin + lineHeight) {
-                page = pdfDoc.addPage();
-                y = height - margin;
-            }
-
-            try {
-                page.drawText(subLine, {
-                    x: margin,
-                    y: y,
-                    size: fontSize,
-                    font,
-                    color: rgb(0, 0, 0),
-                });
-            } catch (e) {}
+            if (y < margin + lineHeight) { page = pdfDoc.addPage(); y = height - margin; }
+            try { page.drawText(subLine, { x: margin, y, size: fontSize, font, color: rgb(0, 0, 0) }); } catch (e) {}
             y -= lineHeight;
         }
     }
-
-    const pdfBytes = await pdfDoc.save();
-    return Buffer.from(pdfBytes);
+    return Buffer.from(await pdfDoc.save());
 }
 
 /**
- * ボディ解析
+ * マルチパートパース
  */
 async function parseMultipart(req) {
     const contentType = req.headers["content-type"] || "";
@@ -206,11 +169,7 @@ export default async function handler(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
     if (req.method === "OPTIONS") return res.status(200).end();
-    if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
-
-    console.log("[pdftranslate] Request start:", new Date().toISOString());
 
     try {
         const parts = await parseMultipart(req);
@@ -219,33 +178,29 @@ export default async function handler(req, res) {
         const pdfUrl = parts.pdfUrl;
 
         let pdfBuffer;
-        if (filePart) {
-            pdfBuffer = filePart.content;
-            console.log("[pdftranslate] Incoming file:", filePart.filename);
-        } else if (pdfUrl) {
-            console.log("[pdftranslate] Incoming URL:", pdfUrl);
+        if (filePart) pdfBuffer = filePart.content;
+        else if (pdfUrl) {
             const r = await fetch(pdfUrl);
-            if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
-            else throw new Error("Could not fetch PDF from URL: " + r.status);
+            if (!r.ok) throw new Error("Fetch failed: " + r.status);
+            pdfBuffer = Buffer.from(await r.arrayBuffer());
         }
 
-        if (!pdfBuffer) throw new Error("No PDF data provided.");
+        if (!pdfBuffer) throw new Error("Missing PDF data.");
 
         const text = await extractText(pdfBuffer);
         const translated = await translateText(text, direction);
-        const finalPdf = await createPdfResponse(translated, direction);
+        const finalPdf = await createPdf(translated, direction);
 
-        console.log("[pdftranslate] Success. Sending PDF.");
         res.setHeader("Content-Type", "application/pdf");
         res.status(200).send(finalPdf);
 
     } catch (error) {
-        console.error("[pdftranslate] Error caught:", error.message);
+        console.error("[pdftranslate] Fatal:", error.message);
         try {
             const pdfDoc = await PDFDocument.create();
             const page = pdfDoc.addPage();
             const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-            page.drawText("An error occurred: " + error.message, { x: 50, y: 700, size: 12, font });
+            page.drawText("Error: " + error.message, { x: 50, y: 700, size: 12, font });
             const bytes = await pdfDoc.save();
             res.setHeader("Content-Type", "application/pdf").status(200).send(Buffer.from(bytes));
         } catch (e) {
