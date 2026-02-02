@@ -41,10 +41,9 @@ async function loadFontData(lang) {
 }
 
 /**
- * PDFからテキスト抽出 (pdfjs使用)
+ * PDFからテキスト抽出
  */
 async function extractText(pdfBuffer) {
-    console.log("[pdftranslate] Extraction start. Buffer size:", pdfBuffer.length);
     try {
         const data = new Uint8Array(pdfBuffer);
         const loadingTask = pdfjsLib.getDocument({
@@ -53,10 +52,7 @@ async function extractText(pdfBuffer) {
             useSystemFonts: true,
             isEvalSupported: false,
         });
-        
         const pdf = await loadingTask.promise;
-        console.log("[pdftranslate] Pages:", pdf.numPages);
-        
         let fullText = "";
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
@@ -75,7 +71,7 @@ async function extractText(pdfBuffer) {
  * OpenAI翻訳
  */
 async function translateText(text, direction) {
-    if (!text) return "Translation failed: No text extracted.";
+    if (!text) return "Extraction failed.";
     const isToZh = direction === "ja-zh";
     const targetLang = isToZh ? "中国語（簡体字）" : "日本語";
 
@@ -90,7 +86,6 @@ async function translateText(text, direction) {
         });
         return response.choices[0]?.message?.content || "";
     } catch (e) {
-        console.error("[pdftranslate] OpenAI error:", e.message);
         return "Error: " + e.message;
     }
 }
@@ -172,20 +167,31 @@ export default async function handler(req, res) {
     if (req.method === "OPTIONS") return res.status(200).end();
 
     try {
-        const parts = await parseMultipart(req);
-        const direction = parts.direction || "ja-zh";
-        const filePart = parts.file;
-        const pdfUrl = parts.pdfUrl;
+        let direction = "ja-zh";
+        let pdfBuffer = null;
 
-        let pdfBuffer;
-        if (filePart) pdfBuffer = filePart.content;
-        else if (pdfUrl) {
-            const r = await fetch(pdfUrl);
-            if (!r.ok) throw new Error("Fetch failed: " + r.status);
-            pdfBuffer = Buffer.from(await r.arrayBuffer());
+        const contentType = req.headers["content-type"] || "";
+        if (contentType.includes("multipart/form-data")) {
+            const parts = await parseMultipart(req);
+            direction = parts.direction || "ja-zh";
+            if (parts.file) pdfBuffer = parts.file.content;
+            else if (parts.pdfUrl) {
+                const r = await fetch(parts.pdfUrl);
+                if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
+            }
+        } else {
+            const chunks = [];
+            for await (const chunk of req) chunks.push(chunk);
+            const rawBody = Buffer.concat(chunks).toString();
+            const body = JSON.parse(rawBody || "{}");
+            direction = body.direction || "ja-zh";
+            if (body.pdfUrl) {
+                const r = await fetch(body.pdfUrl);
+                if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
+            }
         }
 
-        if (!pdfBuffer) throw new Error("Missing PDF data.");
+        if (!pdfBuffer) throw new Error("No PDF source.");
 
         const text = await extractText(pdfBuffer);
         const translated = await translateText(text, direction);
@@ -195,14 +201,13 @@ export default async function handler(req, res) {
         res.status(200).send(finalPdf);
 
     } catch (error) {
-        console.error("[pdftranslate] Fatal:", error.message);
+        console.error("[pdftranslate] Error:", error.message);
         try {
             const pdfDoc = await PDFDocument.create();
             const page = pdfDoc.addPage();
             const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
             page.drawText("Error: " + error.message, { x: 50, y: 700, size: 12, font });
-            const bytes = await pdfDoc.save();
-            res.setHeader("Content-Type", "application/pdf").status(200).send(Buffer.from(bytes));
+            res.setHeader("Content-Type", "application/pdf").status(200).send(Buffer.from(await pdfDoc.save()));
         } catch (e) {
             res.status(500).send("Critical error");
         }
