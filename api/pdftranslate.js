@@ -14,7 +14,6 @@ async function loadFontData(lang) {
     const urls = isZh 
         ? ["https://github.com/asfadmin/noto-sans-sc-subset/raw/master/fonts/NotoSansSC-Regular.ttf"]
         : ["https://github.com/mizdra/noto-sans-jp-subset-for-vercel/raw/main/public/NotoSansJP-Regular.ttf"];
-
     for (const url of urls) {
         try {
             const res = await fetch(url);
@@ -25,7 +24,6 @@ async function loadFontData(lang) {
 }
 
 async function extractText(pdfBuffer) {
-    console.log("[pdftranslate] Starting extraction.");
     try {
         const data = new Uint8Array(pdfBuffer);
         const loadingTask = pdfjsLib.getDocument({
@@ -34,26 +32,21 @@ async function extractText(pdfBuffer) {
             useSystemFonts: true,
             isEvalSupported: false,
         });
-        
         const pdf = await loadingTask.promise;
         let fullText = "";
         for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const textContent = await page.getTextContent();
-            const pageText = textContent.items
-                .map(item => item.str)
-                .join(" ")
-                .replace(/\s+/g, " ");
+            const pageText = textContent.items.map(item => item.str).join(" ");
             if (pageText.trim()) fullText += pageText + "\n";
         }
         return fullText.normalize("NFKC").trim();
     } catch (e) {
-        console.error("[pdftranslate] Extraction error:", e.message);
         return "";
     }
 }
 
-async function createPdf(text, lang) {
+async function createPdf(text, lang, isError = false) {
     const pdfDoc = await PDFDocument.create();
     pdfDoc.registerFontkit(fontkit);
     const fontData = await loadFontData(lang);
@@ -64,21 +57,20 @@ async function createPdf(text, lang) {
     if (!font) font = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
     let page = pdfDoc.addPage();
-    const { height } = page.getSize();
+    const { width, height } = page.getSize();
     const margin = 50;
-    const fontSize = 10;
-    const lineHeight = fontSize * 1.5;
+    const fontSize = isError ? 12 : 10;
     let y = height - margin;
 
     const lines = text.split("\n");
     for (let line of lines) {
-        const maxChars = 50;
+        const maxChars = isError ? 40 : 50;
         for (let i = 0; i < line.length; i += maxChars) {
             const subLine = line.substring(i, i + maxChars).trim();
             if (!subLine) continue;
-            if (y < margin + lineHeight) { page = pdfDoc.addPage(); y = height - margin; }
-            try { page.drawText(subLine, { x: margin, y, size: fontSize, font, color: rgb(0, 0, 0) }); } catch (e) {}
-            y -= lineHeight;
+            if (y < margin + 20) { page = pdfDoc.addPage(); y = height - margin; }
+            page.drawText(subLine, { x: margin, y, size: fontSize, font });
+            y -= fontSize * 1.5;
         }
     }
     return Buffer.from(await pdfDoc.save());
@@ -89,79 +81,61 @@ export default async function handler(req, res) {
 
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-debug-mode");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-debug-mode, x-vercel-protection-bypass");
     if (req.method === "OPTIONS") return res.status(200).end();
 
     const debugMode = req.headers["x-debug-mode"];
+    const direction = "ja-zh";
 
     try {
         const chunks = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
         const bodyBuffer = Buffer.concat(chunks);
-        
         const contentType = req.headers["content-type"] || "";
         let pdfBuffer = null;
-        let direction = "ja-zh";
 
         if (contentType.includes("application/json")) {
             const body = JSON.parse(bodyBuffer.toString() || "{}");
-            direction = body.direction || "ja-zh";
             if (body.pdfUrl) {
                 const r = await fetch(body.pdfUrl);
                 if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
-                else throw new Error("URL fetch failed: " + r.status);
             }
         } 
 
-        if (!pdfBuffer) throw new Error("No PDF source identified.");
+        if (!pdfBuffer) throw new Error("PDFデータが見つかりません。");
 
         const extractedText = await extractText(pdfBuffer);
-        
+
         if (debugMode === "smoke") {
-            return res.status(200).json({
-                status: "success",
-                bytes: pdfBuffer.length,
-                textLength: extractedText.length,
-                sample: extractedText.slice(0, 200)
-            });
+            return res.status(200).json({ status: "success", textLength: extractedText.length });
         }
 
         if (!extractedText || extractedText.length < 5) {
-            throw new Error("Text extraction resulted in empty string.");
+            const warningMsg = "【抽出不可】\nこのPDFにはテキストデータが含まれていないか、スキャン画像のみの形式です。現在のツールはOCR（画像読み取り）には対応しておらず、テキストベースのPDFのみ翻訳可能です。";
+            const errorPdf = await createPdf(warningMsg, direction, true);
+            res.setHeader("Content-Type", "application/pdf");
+            return res.status(200).send(errorPdf);
         }
 
-        const apiKey = process.env.OPENAI_API_KEY;
-        const client = new OpenAI({ apiKey });
-        const isToZh = direction === "ja-zh";
-        const targetLang = isToZh ? "中国語（簡体字）" : "日本語";
-
+        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const targetLang = direction === "ja-zh" ? "中国語（簡体字）" : "日本語";
         const response = await client.chat.completions.create({
             model: process.env.MODEL_TRANSLATE || "gpt-5.1",
             messages: [
-                { role: "system", content: `あなたはマニュアル翻訳の専門家です。原文を${targetLang}に翻訳してください。` },
+                { role: "system", content: `専門家として${targetLang}に翻訳してください。` },
                 { role: "user", content: extractedText.slice(0, 3000) }
             ],
             temperature: 0.1,
         });
-        const translated = response.choices[0]?.message?.content || "";
+        const translated = response.choices[0]?.message?.content || "翻訳失敗";
 
         const finalPdf = await createPdf(translated, direction);
         res.setHeader("Content-Type", "application/pdf");
         res.status(200).send(finalPdf);
 
     } catch (error) {
-        console.error("[pdftranslate] Fatal:", error.message);
-        if (debugMode) {
-            return res.status(500).json({ error: error.message, stack: error.stack });
-        }
-        try {
-            const pdfDoc = await PDFDocument.create();
-            const page = pdfDoc.addPage();
-            const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-            page.drawText("Error: " + error.message, { x: 50, y: 700, size: 10, font });
-            res.setHeader("Content-Type", "application/pdf").status(200).send(Buffer.from(await pdfDoc.save()));
-        } catch (e) {
-            res.status(500).send("Critical error");
-        }
+        if (debugMode) return res.status(500).json({ error: error.message });
+        const finalPdf = await createPdf("Fatal Error: " + error.message, "ja-zh", true);
+        res.setHeader("Content-Type", "application/pdf").status(200).send(finalPdf);
     }
 }
