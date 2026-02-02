@@ -13,8 +13,11 @@ export const config = {
 
 async function loadLocalFont(lang) {
     const isZh = lang.includes("zh");
+    // フォントファイル名を正確に指定
     const fontName = isZh ? "NotoSansSC-Regular.ttf" : "NotoSansJP-Regular.ttf";
-    const fontPath = path.join(process.cwd(), "api", "fonts", fontName);
+    
+    // assetsフォルダがルートにあるため、process.cwd() から直接結合
+    const fontPath = path.join(process.cwd(), "assets", fontName);
     
     try {
         const fontBuffer = await fs.readFile(fontPath);
@@ -96,6 +99,7 @@ export default async function handler(req, res) {
         const page = pdfDoc.addPage();
         const { height } = page.getSize();
         
+        // フォントデータがあればフィルタ不要、なければASCIIのみ許可
         const safeText = translated.split("").filter(c => {
             if (!fontData) return c.charCodeAt(0) < 128;
             return true;
