@@ -1,72 +1,8 @@
 // api/pdftranslate.js
 
-import OpenAI from "openai";
-import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
-import fontkit from "@pdf-lib/fontkit";
-import { createRequire } from "module";
-
-const require = createRequire(import.meta.url);
-
 export const config = {
     api: { bodyParser: false },
 };
-
-async function extractText(pdfBuffer) {
-    try {
-        const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-        try {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = require.resolve("pdfjs-dist/legacy/build/pdf.worker.js");
-        } catch (e) {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = null;
-        }
-
-        const data = new Uint8Array(pdfBuffer);
-        const loadingTask = pdfjsLib.getDocument({
-            data: data,
-            disableWorker: true,
-            useSystemFonts: true,
-            isEvalSupported: false,
-        });
-        
-        const pdf = await loadingTask.promise;
-        let fullText = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const textContent = await page.getTextContent();
-            const pageText = textContent.items
-                .map(item => item.str)
-                .join(" ");
-            if (pageText.trim()) fullText += pageText + "\n";
-        }
-        return fullText.normalize("NFKC").trim();
-    } catch (e) {
-        return "ERROR_EXTRACTION: " + e.message;
-    }
-}
-
-async function createPdf(text, lang, isError = false) {
-    const pdfDoc = await PDFDocument.create();
-    pdfDoc.registerFontkit(fontkit);
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    let page = pdfDoc.addPage();
-    const { height } = page.getSize();
-    const margin = 50;
-    const fontSize = 10;
-    let y = height - margin;
-
-    const lines = text.split("\n");
-    for (let line of lines) {
-        const maxChars = 60;
-        for (let i = 0; i < line.length; i += maxChars) {
-            const subLine = line.substring(i, i + maxChars).trim();
-            if (!subLine) continue;
-            if (y < 40) { page = pdfDoc.addPage(); y = height - margin; }
-            page.drawText(subLine, { x: margin, y, size: fontSize, font });
-            y -= fontSize * 1.5;
-        }
-    }
-    return Buffer.from(await pdfDoc.save());
-}
 
 export default async function handler(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -77,63 +13,85 @@ export default async function handler(req, res) {
     const debugMode = req.headers["x-debug-mode"];
 
     try {
+        const { default: OpenAI } = await import("openai");
+        const { PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
+        const { default: fontkit } = await import("@pdf-lib/fontkit");
+        const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.js");
+
+        pdfjsLib.GlobalWorkerOptions.workerSrc = ""; 
+
         const chunks = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
         const bodyBuffer = Buffer.concat(chunks);
         const contentType = req.headers["content-type"] || "";
+        
         let pdfBuffer = null;
         let direction = "ja-zh";
 
         if (contentType.includes("application/json")) {
-            const body = JSON.parse(bodyBuffer.toString() || "{}");
+            const bodyString = bodyBuffer.toString() || "{}";
+            const body = JSON.parse(bodyString);
             direction = body.direction || "ja-zh";
             if (body.pdfUrl) {
                 const r = await fetch(body.pdfUrl);
                 if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
-                else throw new Error("PDF URL fetch failed: " + r.status);
+                else throw new Error("PDF fetch failed: " + r.status);
             }
         } else {
             pdfBuffer = bodyBuffer;
         }
 
-        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("PDF data not identified");
+        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("No PDF source");
 
-        const extractedText = await extractText(pdfBuffer);
+        let extractedText = "";
+        try {
+            const loadingTask = pdfjsLib.getDocument({
+                data: new Uint8Array(pdfBuffer),
+                disableWorker: true,
+                useSystemFonts: true,
+            });
+            const pdf = await loadingTask.promise;
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                extractedText += textContent.items.map(s => s.str).join(" ") + "\n";
+            }
+            extractedText = extractedText.trim();
+        } catch (ee) {
+            extractedText = "ERROR_ENGINE: " + ee.message;
+        }
 
         if (debugMode === "smoke") {
             return res.status(200).json({ 
                 status: extractedText.startsWith("ERROR") ? "failed" : "success",
-                textLength: extractedText.length,
-                info: extractedText
+                length: extractedText.length,
+                info: extractedText.slice(0, 100)
             });
         }
 
         if (!extractedText || extractedText.length < 2 || extractedText.startsWith("ERROR")) {
-            const warningMsg = "抽出失敗: " + extractedText + "\nスキャン画像PDFの可能性があります。";
-            const errPdf = await createPdf(warningMsg, direction, true);
-            return res.setHeader("Content-Type", "application/pdf").status(200).send(errPdf);
+            return res.status(200).json({ status: "extraction_failed", error: extractedText });
         }
 
         const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const model = process.env.MODEL_TRANSLATE || "gpt-4o";
-        const targetLang = direction === "ja-zh" ? "Chinese (Simplified)" : "Japanese";
-        
         const response = await client.chat.completions.create({
-            model: model,
-            messages: [
-                { role: "system", content: `You are a translator specialist. Translate this to ${targetLang}.` },
-                { role: "user", content: extractedText.slice(0, 3000) }
-            ],
-            temperature: 0.1,
+            model: process.env.MODEL_TRANSLATE || "gpt-4o",
+            messages: [{ role: "user", content: "Translate this to Chinese: " + extractedText.slice(0, 2000) }]
         });
         const translated = response.choices[0]?.message?.content || "Translation empty";
 
-        const finalPdf = await createPdf(translated, direction);
-        res.setHeader("Content-Type", "application/pdf").status(200).send(finalPdf);
+        const pdfDoc = await PDFDocument.create();
+        pdfDoc.registerFontkit(fontkit);
+        const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        const page = pdfDoc.addPage();
+        page.drawText(translated.slice(0, 1000), { x: 50, y: 700, size: 10, font });
+        const finalPdf = await pdfDoc.save();
+
+        res.setHeader("Content-Type", "application/pdf");
+        return res.status(200).send(Buffer.from(finalPdf));
 
     } catch (err) {
         if (debugMode) return res.status(500).json({ error: err.message, stack: err.stack });
-        const errPdf = await createPdf("Fatal Error: " + err.message, "en", true);
-        res.setHeader("Content-Type", "application/pdf").status(200).send(errPdf);
+        res.status(500).send("Critical Error: " + err.message);
     }
 }
