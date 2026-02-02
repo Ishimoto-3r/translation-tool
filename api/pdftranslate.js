@@ -3,7 +3,10 @@
 import OpenAI from "openai";
 import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
-import pdfParse from "pdf-parse";
+import { createRequire } from "module";
+
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -31,36 +34,13 @@ async function loadFontData(lang) {
     for (const url of urls) {
         try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000); 
+            const timeoutId = setTimeout(() => controller.abort(), 12000); 
             const res = await fetch(url, { signal: controller.signal });
             clearTimeout(timeoutId);
             if (res.ok) return await res.arrayBuffer();
         } catch (e) {}
     }
     return null;
-}
-
-/**
- * OpenAI翻訳
- */
-async function translateText(text, direction) {
-    if (!text || text.length < 5) return "Extraction failed or text too short.";
-    const isToZh = direction === "ja-zh";
-    const targetLang = isToZh ? "中国語（簡体字）" : "日本語";
-
-    try {
-        const response = await client.chat.completions.create({
-            model: process.env.MODEL_TRANSLATE || "gpt-5.1",
-            messages: [
-                { role: "system", content: `あなたはマニュアル翻訳の専門家です。原文を${targetLang}に簡潔かつ正確に翻訳してください。出力は翻訳結果のみとしてください。` },
-                { role: "user", content: text.slice(0, 3000) }
-            ],
-            temperature: 0.1,
-        });
-        return response.choices[0]?.message?.content || "";
-    } catch (e) {
-        return "Translation Error: " + e.message;
-    }
 }
 
 /**
@@ -149,39 +129,71 @@ export default async function handler(req, res) {
     if (req.method === "OPTIONS") return res.status(200).end();
 
     try {
+        console.log("[pdftranslate] Handler started.");
         const data = await parseRequest(req);
         const direction = data.direction || "ja-zh";
         let pdfBuffer = null;
 
-        if (data.file) pdfBuffer = data.file.content;
-        else if (data.pdfUrl) {
+        if (data.file) {
+            pdfBuffer = data.file.content;
+            console.log("[pdftranslate] Received multipart file.");
+        } else if (data.pdfUrl) {
+            console.log("[pdftranslate] Fetching URL:", data.pdfUrl);
             const r = await fetch(data.pdfUrl);
-            if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
+            if (r.ok) {
+                pdfBuffer = Buffer.from(await r.arrayBuffer());
+                console.log("[pdftranslate] URL fetch success. Size:", pdfBuffer.length);
+            } else {
+                throw new Error("URL fetch failed: " + r.status);
+            }
         }
 
-        if (!pdfBuffer) throw new Error("No PDF source found.");
+        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("No PDF data content.");
 
-        const pdfData = await pdfParse(pdfBuffer);
-        const extractedText = pdfData.text.normalize("NFKC").trim();
+        let extractedText = "";
+        try {
+            const pdfData = await pdfParse(pdfBuffer);
+            extractedText = (pdfData.text || "").normalize("NFKC").trim();
+            console.log("[pdftranslate] pdf-parse finished. Chars:", extractedText.length);
+        } catch (pe) {
+            console.error("[pdftranslate] pdf-parse error:", pe.message);
+            throw new Error("PDF parsing engine failed.");
+        }
+
+        if (!extractedText || extractedText.length < 5) {
+            extractedText = "【警告】スキャン画像のみのPDF、またはテキストを抽出できない形式です。OCR(文字認識)機能が必要ですが、現在はテキストベースのPDFのみ対応しています。";
+        }
+
+        const isToZh = direction === "ja-zh";
+        const targetLang = isToZh ? "中国語（簡体字）" : "日本語";
+
+        console.log("[pdftranslate] Translating...");
+        const response = await client.chat.completions.create({
+            model: process.env.MODEL_TRANSLATE || "gpt-5.1",
+            messages: [
+                { role: "system", content: `あなたはマニュアル翻訳の専門家です。原文を${targetLang}に簡潔に翻訳してください。` },
+                { role: "user", content: extractedText.slice(0, 3000) }
+            ],
+            temperature: 0.1,
+        });
+        const translated = response.choices[0]?.message?.content || "Translation empty.";
         
-        console.log("[pdftranslate] Extracted length:", extractedText.length);
-
-        const translated = await translateText(extractedText, direction);
+        console.log("[pdftranslate] Generating PDF response.");
         const finalPdf = await createPdf(translated, direction);
 
         res.setHeader("Content-Type", "application/pdf");
         res.status(200).send(finalPdf);
 
     } catch (error) {
-        console.error("[pdftranslate] Fatal:", error.message);
+        console.error("[pdftranslate] Fatal Error:", error.message);
         try {
             const pdfDoc = await PDFDocument.create();
             const page = pdfDoc.addPage();
             const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-            page.drawText("Error: " + error.message, { x: 50, y: 700, size: 12, font });
+            page.drawText("Operation Failed: " + error.message, { x: 50, y: 700, size: 12, font });
             res.setHeader("Content-Type", "application/pdf").status(200).send(Buffer.from(await pdfDoc.save()));
         } catch (e) {
-            res.status(500).send("Critical error");
+            res.status(500).send("Critical error during error handling.");
         }
     }
 }
