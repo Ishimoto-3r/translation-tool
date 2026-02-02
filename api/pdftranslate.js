@@ -1,12 +1,9 @@
 // api/pdftranslate.js
 
-import { createRequire } from "module";
-const require = createRequire(import.meta.url);
-
-const OpenAI = require("openai");
-const { PDFDocument, StandardFonts } = require("pdf-lib");
-const fontkit = require("@pdf-lib/fontkit");
-const pdfParse = require("pdf-parse");
+import OpenAI from "openai";
+import { PDFDocument, StandardFonts } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+import pdfParse from "pdf-parse";
 
 export const config = {
     api: { bodyParser: false },
@@ -36,52 +33,60 @@ export default async function handler(req, res) {
             if (body.pdfUrl) {
                 const r = await fetch(body.pdfUrl);
                 if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
+                else throw new Error("Fetch failed: " + r.status);
             }
         } else {
             pdfBuffer = bodyBuffer;
         }
 
-        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("No PDF source");
+        if (!pdfBuffer || pdfBuffer.length === 0) throw new Error("PDFデータがありません");
 
         let extractedText = "";
         try {
-            const data = await pdfParse(pdfBuffer);
-            extractedText = (data.text || "").trim();
+            const parsed = await pdfParse(pdfBuffer);
+            extractedText = (parsed.text || "").trim();
         } catch (e) {
-            extractedText = "ERROR_PARSE: " + e.message;
+            extractedText = "ERROR_ENGINE: " + e.message;
         }
 
         if (debugMode === "smoke") {
             return res.status(200).json({ 
-                status: extractedText.startsWith("ERROR") ? "failed" : "success",
+                status: extractedText.length > 5 ? "success" : "failed",
                 length: extractedText.length,
-                sample: extractedText.slice(0, 50)
+                sample: extractedText.slice(0, 100)
             });
         }
 
         if (!extractedText || extractedText.length < 5 || extractedText.startsWith("ERROR")) {
-            return res.status(200).json({ status: "extraction_failed", error: extractedText });
+            return res.status(200).json({ 
+                status: "error", 
+                message: "テキストが抽出できませんでした。" 
+            });
         }
 
         const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const response = await client.chat.completions.create({
+        const completion = await client.chat.completions.create({
             model: process.env.MODEL_TRANSLATE || "gpt-4o",
-            messages: [{ role: "user", content: "Translate: " + extractedText.slice(0, 1000) }]
+            messages: [
+                { role: "system", content: "Translate this to Chinese." },
+                { role: "user", content: extractedText.slice(0, 2000) }
+            ],
+            temperature: 0.1,
         });
-        const translated = response.choices[0]?.message?.content || "No translation";
+        const translatedContent = completion.choices[0]?.message?.content || "EmptyResult";
 
         const pdfDoc = await PDFDocument.create();
         pdfDoc.registerFontkit(fontkit);
         const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
         const page = pdfDoc.addPage();
-        page.drawText(translated.slice(0, 500), { x: 50, y: 700, size: 10, font });
-        const finalPdf = await pdfDoc.save();
+        page.drawText(translatedContent.slice(0, 1000), { x: 50, y: 700, size: 10, font });
+        const finalPdfBytes = await pdfDoc.save();
 
         res.setHeader("Content-Type", "application/pdf");
-        return res.status(200).send(Buffer.from(finalPdf));
+        return res.status(200).send(Buffer.from(finalPdfBytes));
 
     } catch (err) {
-        if (debugMode) return res.status(500).json({ error: err.message });
-        res.status(500).send("Critical: " + err.message);
+        if (debugMode) return res.status(500).json({ error: err.message, stack: err.stack });
+        res.status(500).send("Server Error: " + err.message);
     }
 }
