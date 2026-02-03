@@ -156,7 +156,7 @@ module.exports = async (req, res) => {
         if (extractedText.length > 50) {
             // Text Mode
             const completion = await client.chat.completions.create({
-                model: "gpt-5.1",
+                model: "gpt-4o",
                 messages: [
                     { role: "system", content: `Translate to ${targetLang}.` },
                     { role: "user", content: extractedText.slice(0, 3000) }
@@ -206,7 +206,7 @@ module.exports = async (req, res) => {
                     `;
 
                     const completion = await client.chat.completions.create({
-                        model: "gpt-5.1",
+                        model: "gpt-4o",
                         messages: [
                             {
                                 role: "user", content: [
