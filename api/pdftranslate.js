@@ -152,16 +152,6 @@ module.exports = async (req, res) => {
             customFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
         }
 
-        // === DEBUG: Show processing info on first page ===
-        const debugInfoPage = pdfDoc.getPages()[0];
-        const debugFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-        debugInfoPage.drawText(`[DEBUG] ExtractedText Length: ${extractedText.length}`, {
-            x: 20, y: 20, size: 10, font: debugFont, color: rgb(1, 0, 0)
-        });
-        debugInfoPage.drawText(`[DEBUG] Direction: ${direction}, Target: ${targetLang}`, {
-            x: 20, y: 35, size: 10, font: debugFont, color: rgb(1, 0, 0)
-        });
-        // === END DEBUG ===
 
         // 8. Translation Logic
         if (extractedText.length > 50) {
@@ -189,33 +179,19 @@ module.exports = async (req, res) => {
         } else {
             // Vision Mode
             console.log("Image-based PDF detected. Using GPT-4o Vision...");
-            debugInfoPage.drawText(`[DEBUG] Vision Mode Started`, {
-                x: 20, y: 50, size: 10, font: debugFont, color: rgb(0, 0, 1)
-            });
+
+
 
             const page = pdfDoc.getPages()[0]; // Only 1st page for MVP
             const imgData = await extractFirstOverlayImage(pdfDoc, 0);
 
-            debugInfoPage.drawText(`[DEBUG] Image extraction result: ${imgData ? 'SUCCESS' : 'FAILED'}`, {
-                x: 20, y: 65, size: 10, font: debugFont, color: rgb(0, 0, 1)
-            });
-
             if (!imgData) {
                 console.error("Image extraction failed - no supported image found");
-                debugInfoPage.drawText(`[DEBUG] Error: No supported image found in PDF`, {
-                    x: 20, y: 80, size: 10, font: debugFont, color: rgb(1, 0, 0)
-                });
                 const p = pdfDoc.addPage();
                 p.drawText("Error: No text and no supported image found. PDF may be text-based or use unsupported compression.", { x: 50, y: 700, size: 12, font: customFont });
             } else {
                 console.log(`Image extracted: ${imgData.width}x${imgData.height}, buffer size: ${imgData.buffer.length}`);
-                debugInfoPage.drawText(`[DEBUG] Image: ${imgData.width}x${imgData.height}, ${imgData.buffer.length} bytes`, {
-                    x: 20, y: 80, size: 10, font: debugFont, color: rgb(0, 0, 1)
-                });
                 try {
-                    debugInfoPage.drawText(`[DEBUG] Calling GPT Vision API...`, {
-                        x: 20, y: 95, size: 10, font: debugFont, color: rgb(0, 0, 1)
-                    });
                     const base64Img = imgData.buffer.toString('base64');
                     const dataUrl = `data:image/jpeg;base64,${base64Img}`;
 
