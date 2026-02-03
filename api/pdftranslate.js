@@ -152,6 +152,17 @@ module.exports = async (req, res) => {
             customFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
         }
 
+        // === DEBUG: Show processing info on first page ===
+        const debugInfoPage = pdfDoc.getPages()[0];
+        const debugFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        debugInfoPage.drawText(`[DEBUG] ExtractedText Length: ${extractedText.length}`, {
+            x: 20, y: 20, size: 10, font: debugFont, color: rgb(1, 0, 0)
+        });
+        debugInfoPage.drawText(`[DEBUG] Direction: ${direction}, Target: ${targetLang}`, {
+            x: 20, y: 35, size: 10, font: debugFont, color: rgb(1, 0, 0)
+        });
+        // === END DEBUG ===
+
         // 8. Translation Logic
         if (extractedText.length > 50) {
             // Text Mode
