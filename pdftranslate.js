@@ -90,25 +90,42 @@ async function handleExecute() {
     setBusy(true);
 
     try {
-        const formData = new FormData();
-        if (pdfFile) {
-            formData.append("file", pdfFile);
-        }
-        if (pdfUrl) {
-            formData.append("pdfUrl", pdfUrl);
-        }
-
         const direction = $("directionSelect").value;
-        formData.append("direction", direction);
+        let response;
 
-        // Step 2時点ではAPI未実装のため404等が返ることを想定
-        const response = await fetch("/api/pdftranslate", {
-            method: "POST",
-            body: formData
-        });
+        if (pdfFile) {
+            // PDFファイル（Raw Binary送信）
+            response = await fetch(`/api/pdftranslate?direction=${encodeURIComponent(direction)}`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/pdf"
+                },
+                body: pdfFile
+            });
+        } else {
+            // URL指定（JSON送信）
+            response = await fetch("/api/pdftranslate", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    pdfUrl: pdfUrl,
+                    direction: direction
+                })
+            });
+        }
 
         if (!response.ok) {
-            throw new Error(`APIエラー: ${response.status} ${response.statusText}`);
+            // エラーメッセージがあれば取得して表示に含める
+            let errDetail = response.statusText;
+            try {
+                const errJson = await response.json();
+                if (errJson.error) errDetail += ` (${errJson.error})`;
+            } catch (e) {
+                // JSONでない場合はテキスト取得を試みる、または無視
+            }
+            throw new Error(`APIエラー: ${response.status} ${errDetail}`);
         }
 
         // 成功時はBlob（PDF）として受け取りダウンロード

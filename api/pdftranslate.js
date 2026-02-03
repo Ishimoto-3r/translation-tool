@@ -17,7 +17,7 @@ async function fetchFont(lang) {
         const fontUrl = lang === "zh"
             ? "https://fonts.gstatic.com/s/notosanssc/v36/k3kXo84MPvpLmixcA63oeALhL4iJ-Q7m8w.ttf"
             : "https://fonts.gstatic.com/s/notosansjp/v52/-F6jfjtqLzI2JPCgQBnw7HFyzSD-AsregP8VFBEj75vY0rw-oME.ttf";
-        
+
         const response = await fetch(fontUrl);
         if (!response.ok) throw new Error(`Font fetch failed: ${response.status}`);
         return Buffer.from(await response.arrayBuffer());
@@ -87,7 +87,15 @@ export default async function handler(req, res) {
         const contentType = req.headers["content-type"] || "";
 
         let pdfBuffer = bodyBuffer;
+        // Query Paramsからdirection取得
         let direction = "ja-zh";
+        try {
+            const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+            direction = urlObj.searchParams.get("direction") || "ja-zh";
+        } catch (e) { 
+            // URL parse error無視
+        }
+
         let pdfUrl = null;
 
         if (contentType.includes("application/json")) {
