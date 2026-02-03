@@ -3,13 +3,15 @@ const { PDFDocument, PDFName, PDFStream, rgb, StandardFonts } = require("pdf-lib
 const pdfParse = require("pdf-parse");
 const zlib = require("zlib");
 
+// Vercel Serverless Function Config
 module.exports.config = {
     api: {
-        bodyParser: false,
-        maxDuration: 60
+        bodyParser: false, // Disallow Vercel's default body parsing to handle raw binary
+        maxDuration: 60    // Attempt to set 60s (might be ignored on Hobby plan)
     },
 };
 
+// Helper Functions
 async function fetchFont(lang) {
     try {
         const fontUrl = lang === "zh"
@@ -65,7 +67,9 @@ async function extractFirstOverlayImage(doc, pageIndex = 0) {
     return null;
 }
 
+// Main Handler
 module.exports = async (req, res) => {
+    // CORS Headers
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-debug-mode, x-vercel-protection-bypass");
@@ -75,21 +79,26 @@ module.exports = async (req, res) => {
     const debugMode = req.headers["x-debug-mode"];
 
     try {
+        // 1. Check API Key
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {
             throw new Error("OpenAI API Key is missing in server environment.");
         }
 
+        // 2. Initialize OpenAI (inside try block)
         const client = new OpenAI({ apiKey });
 
+        // 3. Read Body (Raw Buffer)
         const chunks = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
         const bodyBuffer = Buffer.concat(chunks);
         const contentType = req.headers["content-type"] || "";
 
+        // 4. Determine Input (PDF Binary or JSON URL)
         let pdfBuffer = bodyBuffer;
         let direction = "ja-zh";
         try {
+            // Parse Query Params
             const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
             if (urlObj.searchParams.has("direction")) {
                 direction = urlObj.searchParams.get("direction");
@@ -115,6 +124,7 @@ module.exports = async (req, res) => {
             throw new Error("No PDF content provided.");
         }
 
+        // 5. Extract Text (Helper)
         let extractedText = "";
         try {
             const parsed = await pdfParse(pdfBuffer);
@@ -123,11 +133,13 @@ module.exports = async (req, res) => {
             console.error("PDF Parsing error (pdf-parse):", e);
         }
 
+        // 6. Load PDF Document (pdf-lib)
         const pdfDoc = await PDFDocument.load(pdfBuffer);
         
         const targetLang = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
         const fontLang = direction === "ja-zh" ? "zh" : "ja";
 
+        // 7. Load Fonts
         const fontBuffer = await fetchFont(fontLang);
         let customFont;
         if (fontBuffer) {
@@ -137,7 +149,9 @@ module.exports = async (req, res) => {
             customFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
         }
 
+        // 8. Translation Logic
         if (extractedText.length > 50) {
+            // Text Mode
             const completion = await client.chat.completions.create({
                 model: "gpt-5.1",
                 messages: [
@@ -149,6 +163,7 @@ module.exports = async (req, res) => {
 
             const page = pdfDoc.addPage();
             const { width, height } = page.getSize();
+            // Simple text rendering
             page.drawText(translated, {
                  x: 50, y: height - 50,
                  size: 10, font: customFont,
@@ -158,8 +173,9 @@ module.exports = async (req, res) => {
             });
 
         } else {
+            // Vision Mode
             console.log("Image-based PDF detected. Using GPT-4o Vision...");
-            const page = pdfDoc.getPages()[0];
+            const page = pdfDoc.getPages()[0]; // Only 1st page for MVP
             const imgData = await extractFirstOverlayImage(pdfDoc, 0);
 
             if (!imgData) {
@@ -197,7 +213,7 @@ module.exports = async (req, res) => {
                             }
                         ],
                         response_format: { type: "json_object" },
-                        max_tokens: 4000
+                        max_completion_tokens: 4000
                     });
 
                     const jsonRes = JSON.parse(completion.choices[0]?.message?.content || "{}");
@@ -213,13 +229,15 @@ module.exports = async (req, res) => {
                         const yTop = (topPct / 100) * pgH;
                         const w = (widthPct / 100) * pgW;
                         const h = (heightPct / 100) * pgH;
-                        const y = pgH - yTop - h;
+                        const y = pgH - yTop - h; // PDF coordinates (bottom-left origin)
 
+                        // Draw background box
                         page.drawRectangle({
                             x: x, y: y, width: w, height: h,
                             color: rgb(1, 1, 1)
                         });
 
+                        // Draw text
                         const fontSize = Math.min(h * 0.8, 12);
                         page.drawText(text, {
                             x: x, y: y + (h * 0.1),
@@ -238,6 +256,7 @@ module.exports = async (req, res) => {
             }
         }
 
+        // 9. Response
         const finalBytes = await pdfDoc.save();
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="translated_result.pdf"`);
@@ -245,10 +264,14 @@ module.exports = async (req, res) => {
 
     } catch (err) {
         console.error("Handler Error:", err);
+        // Error Response (JSON)
+        // If client accepts text (e.g. Browser default), it might render JSON, which is fine.
+        // If debugMode is on, send stack.
         const errorBody = {
             error: err.message || "Unknown Error",
             stack: debugMode ? err.stack : undefined
         };
+        
         return res.status(500).json(errorBody);
     }
 };
