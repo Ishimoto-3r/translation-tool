@@ -1,9 +1,15 @@
 {
+    "buildCommand": "echo 'No build needed for static files'",
+    "outputDirectory": ".",
     "functions": {
         "api/*.js": {
-            "maxDuration": 10
+            "maxDuration": 60
         }
     },
-    "cleanUrls": true,
-    "trailingSlash": false
+    "routes": [
+        {
+            "src": "/(.*)",
+            "dest": "/$1"
+        }
+    ]
 }
