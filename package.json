@@ -3,6 +3,7 @@
     "node": "20.x"
   },
   "dependencies": {
+    "@fontsource/noto-sans-sc": "^5.2.9",
     "@pdf-lib/fontkit": "^1.1.1",
     "exceljs": "^4.4.0",
     "openai": "^6.17.0",

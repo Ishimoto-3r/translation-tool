@@ -1,5 +1,6 @@
 const OpenAI = require("openai");
 const { PDFDocument, PDFName, PDFStream, rgb, StandardFonts } = require("pdf-lib");
+const fontkit = require("@pdf-lib/fontkit"); // 追加
 const pdfParse = require("pdf-parse");
 const zlib = require("zlib");
 
@@ -12,16 +13,17 @@ module.exports.config = {
 };
 
 // Helper Functions
+const path = require("path");
+const fs = require("fs");
+
 async function fetchFont(lang) {
     try {
-        const fontUrl = lang === "zh"
-            ? "https://fonts.gstatic.com/s/notosanssc/v36/k3kXo84MPvpLmixcA63oeALhL4iJ-Q7m8w.ttf"
-            : "https://fonts.gstatic.com/s/notosansjp/v52/-F6jfjtqLzI2JPCgQBnw7HFyzSD-AsregP8VFBEj75vY0rw-oME.ttf";
-        const response = await fetch(fontUrl);
-        if (!response.ok) throw new Error(`Font fetch failed: ${response.status}`);
-        return Buffer.from(await response.arrayBuffer());
+        const fontName = lang === "zh" ? "NotoSansSC-Regular.woff2" : "NotoSansJP-Regular.ttf";
+        const fontPath = path.join(__dirname, "fonts", fontName);
+        console.log(`Loading font from: ${fontPath}`);
+        return fs.readFileSync(fontPath);
     } catch (e) {
-        console.error("Font fetch error:", e);
+        console.error("Local font read error:", e);
         return null;
     }
 }
@@ -73,7 +75,7 @@ module.exports = async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-debug-mode, x-vercel-protection-bypass");
-    
+
     if (req.method === "OPTIONS") return res.status(200).end();
 
     const debugMode = req.headers["x-debug-mode"];
@@ -103,7 +105,7 @@ module.exports = async (req, res) => {
             if (urlObj.searchParams.has("direction")) {
                 direction = urlObj.searchParams.get("direction");
             }
-        } catch (e) {}
+        } catch (e) { }
 
         let pdfUrl = null;
 
@@ -112,7 +114,7 @@ module.exports = async (req, res) => {
             const body = JSON.parse(bodyStr);
             if (body.direction) direction = body.direction;
             pdfUrl = body.pdfUrl;
-            
+
             if (pdfUrl) {
                 const r = await fetch(pdfUrl);
                 if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
@@ -135,7 +137,8 @@ module.exports = async (req, res) => {
 
         // 6. Load PDF Document (pdf-lib)
         const pdfDoc = await PDFDocument.load(pdfBuffer);
-        
+        pdfDoc.registerFontkit(fontkit); // 追加
+
         const targetLang = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
         const fontLang = direction === "ja-zh" ? "zh" : "ja";
 
@@ -152,7 +155,7 @@ module.exports = async (req, res) => {
         // デバッグ用：強制描画テスト
         const debugPage = pdfDoc.getPages()[0];
         const { width: debugW, height: debugH } = debugPage.getSize();
-        
+
         // 1. ASCII Test (Red) - Bottom Left area
         debugPage.drawText('DEBUG_ASCII_OK', {
             x: 20, y: 20,
@@ -192,11 +195,11 @@ module.exports = async (req, res) => {
             const { width, height } = page.getSize();
             // Simple text rendering
             page.drawText(translated, {
-                 x: 50, y: height - 50,
-                 size: 10, font: customFont,
-                 maxWidth: width - 100,
-                 lineHeight: 14,
-                 color: rgb(0,0,0)
+                x: 50, y: height - 50,
+                size: 10, font: customFont,
+                maxWidth: width - 100,
+                lineHeight: 14,
+                color: rgb(0, 0, 0)
             });
 
         } else {
@@ -212,7 +215,7 @@ module.exports = async (req, res) => {
                 try {
                     const base64Img = imgData.buffer.toString('base64');
                     const dataUrl = `data:image/jpeg;base64,${base64Img}`;
-                    
+
                     const prompt = `
                     You are a translator and layout analyzer.
                     1. Detect all text blocks in the image.
@@ -298,7 +301,7 @@ module.exports = async (req, res) => {
             error: err.message || "Unknown Error",
             stack: debugMode ? err.stack : undefined
         };
-        
+
         return res.status(500).json(errorBody);
     }
 };

@@ -11,24 +11,15 @@ Write-Output "Testing URL: $uri"
 Write-Output "Sending PDF: $filePath"
 
 try {
-    $response = Invoke-WebRequest -Uri $uri -Method Post -InFile $filePath -ContentType "application/pdf" -Headers $headers -TimeoutSec 120
-    Write-Output "Status: $($response.StatusCode)"
-    Write-Output "Headers: $($response.Headers)"
-    
-    # Bodyの先頭だけ表示（PDFバイナリかもしれないので）
-    if ($response.Content.Length -gt 0) {
-        $preview = [System.Text.Encoding]::UTF8.GetString($response.Content)
-        if ($preview.Length -gt 200) { $preview = $preview.Substring(0, 200) + "..." }
-        Write-Output "Body Preview: $preview"
-    }
-    
-    # 成功したらPDFとして保存
-    [System.IO.File]::WriteAllBytes("verify_result.pdf", $response.Content)
-    Write-Output "Saved response to verify_result.pdf"
-
-} catch {
-    Write-Output "Error StatusCode: $($_.Exception.Response.StatusCode.value__)"
+    # Invoke-RestMethod はデフォルトでJSONをパースしようとするが、PDFが返る場合はエラーになるかも。
+    # Invoke-WebRequest を使う
+    $response = Invoke-WebRequest -Uri $uri -Method Post -InFile $filePath -Headers $headers -ContentType "application/pdf"
+    Write-Output "Success: Received statusCode $($response.StatusCode)"
+    Write-Output "Content-Type: $($response.Headers['Content-Type'])"
+}
+catch {
     if ($_.Exception.Response) {
+        Write-Output "Error StatusCode: $($_.Exception.Response.StatusCode.value__)"
         $stream = $_.Exception.Response.GetResponseStream()
         if ($stream) {
             $reader = New-Object System.IO.StreamReader($stream)
@@ -36,5 +27,7 @@ try {
             Write-Output "Error Body: $body"
         }
     }
-    exit 1
+    else {
+        Write-Output "Connection Error: $($_.Exception.Message)"
+    }
 }
