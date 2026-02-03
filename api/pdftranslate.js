@@ -152,33 +152,6 @@ module.exports = async (req, res) => {
             customFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
         }
 
-        // デバッグ用：強制描画テスト
-        const debugPage = pdfDoc.getPages()[0];
-        const { width: debugW, height: debugH } = debugPage.getSize();
-
-        // 1. ASCII Test (Red) - Bottom Left area
-        debugPage.drawText('DEBUG_ASCII_OK', {
-            x: 20, y: 20,
-            size: 20,
-            font: await pdfDoc.embedFont(StandardFonts.Helvetica),
-            color: rgb(1, 0, 0)
-        });
-
-        // 2. CJK Test (Blue) - Bottom Left (above ASCII)
-        debugPage.drawText('DEBUG_日本語(CJK)_OK', {
-            x: 20, y: 50,
-            size: 20,
-            font: customFont, // ここが重要。豆腐ならフォント読み込み失敗またはグリフ欠落
-            color: rgb(0, 0, 1)
-        });
-
-        // 3. Coordinate Marker (Green) - Top Left
-        debugPage.drawCircle({
-            x: 20, y: debugH - 20,
-            size: 10,
-            color: rgb(0, 1, 0)
-        });
-
         // 8. Translation Logic
         if (extractedText.length > 50) {
             // Text Mode
