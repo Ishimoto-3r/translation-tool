@@ -156,7 +156,7 @@ module.exports = async (req, res) => {
         if (extractedText.length > 50) {
             // Text Mode
             const completion = await client.chat.completions.create({
-                model: "gpt-4o",
+                model: "gpt-5.1",
                 messages: [
                     { role: "system", content: `Translate to ${targetLang}.` },
                     { role: "user", content: extractedText.slice(0, 3000) }
@@ -182,9 +182,11 @@ module.exports = async (req, res) => {
             const imgData = await extractFirstOverlayImage(pdfDoc, 0);
 
             if (!imgData) {
+                console.error("Image extraction failed - no supported image found");
                 const p = pdfDoc.addPage();
-                p.drawText("Error: No text and no supported image found.", { x: 50, y: 700, size: 24, font: customFont });
+                p.drawText("Error: No text and no supported image found. PDF may be text-based or use unsupported compression.", { x: 50, y: 700, size: 12, font: customFont });
             } else {
+                console.log(`Image extracted: ${imgData.width}x${imgData.height}, buffer size: ${imgData.buffer.length}`);
                 try {
                     const base64Img = imgData.buffer.toString('base64');
                     const dataUrl = `data:image/jpeg;base64,${base64Img}`;
@@ -206,7 +208,7 @@ module.exports = async (req, res) => {
                     `;
 
                     const completion = await client.chat.completions.create({
-                        model: "gpt-4o",
+                        model: "gpt-5.1",
                         messages: [
                             {
                                 role: "user", content: [
@@ -219,6 +221,7 @@ module.exports = async (req, res) => {
                         max_completion_tokens: 4000
                     });
 
+                    console.log("Vision API response:", completion.choices[0]?.message?.content?.substring(0, 200));
                     const jsonRes = JSON.parse(completion.choices[0]?.message?.content || "{}");
                     const blocks = jsonRes.blocks || [];
 
@@ -254,7 +257,9 @@ module.exports = async (req, res) => {
                 } catch (ocrErr) {
                     console.error("Vision OCR Failed:", ocrErr);
                     const p = pdfDoc.addPage();
-                    p.drawText(`OCR Error: ${ocrErr.message}`, { x: 50, y: 700, size: 12, font: customFont });
+                    p.drawText(`Translation Error: ${ocrErr.message}`, { x: 50, y: 750, size: 14, font: customFont, color: rgb(1, 0, 0) });
+                    p.drawText(`This may be due to API key issues, model access, or network problems.`, { x: 50, y: 720, size: 10, font: customFont });
+                    p.drawText(`Please check Vercel logs for details.`, { x: 50, y: 700, size: 10, font: customFont });
                 }
             }
         }
