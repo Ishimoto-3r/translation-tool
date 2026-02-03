@@ -1,23 +1,20 @@
-// api/pdftranslate.js
+// api/pdftranslate.js (Modified)
 
 import OpenAI from "openai";
 import { PDFDocument, PDFName, PDFStream, rgb, StandardFonts } from "pdf-lib";
 import pdfParse from "pdf-parse";
 import zlib from "zlib";
-// import { createWorker } from "tesseract.js"; // Removed
 
 export const config = {
     api: { bodyParser: false, maxDuration: 60 },
 };
 
-// --- Font Management ---
-// Google Fonts APIから動的にNoto Sansフォントを取得
+// ... (fetchFont, extractFirstOverlayImage helper functions remain same)
 async function fetchFont(lang) {
     try {
         const fontUrl = lang === "zh"
             ? "https://fonts.gstatic.com/s/notosanssc/v36/k3kXo84MPvpLmixcA63oeALhL4iJ-Q7m8w.ttf"
             : "https://fonts.gstatic.com/s/notosansjp/v52/-F6jfjtqLzI2JPCgQBnw7HFyzSD-AsregP8VFBEj75vY0rw-oME.ttf";
-
         const response = await fetch(fontUrl);
         if (!response.ok) throw new Error(`Font fetch failed: ${response.status}`);
         return Buffer.from(await response.arrayBuffer());
@@ -27,8 +24,8 @@ async function fetchFont(lang) {
     }
 }
 
-// --- OCR Helper ---
 async function extractFirstOverlayImage(doc, pageIndex = 0) {
+    // ... (Same logic as before)
     try {
         const page = doc.getPages()[pageIndex];
         const resources = page.node.Resources();
@@ -69,7 +66,6 @@ async function extractFirstOverlayImage(doc, pageIndex = 0) {
     return null;
 }
 
-// --- Main Handler ---
 export default async function handler(req, res) {
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
@@ -77,9 +73,17 @@ export default async function handler(req, res) {
     if (req.method === "OPTIONS") return res.status(200).end();
 
     const debugMode = req.headers["x-debug-mode"];
-    const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
     try {
+        // Validation: Check API Key FIRST
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+            throw new Error("OpenAI API Key is missing in server environment.");
+        }
+        
+        // Initialize OpenAI INSIDE try block to catch instantiation errors
+        const client = new OpenAI({ apiKey });
+
         const chunks = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
 
@@ -87,14 +91,11 @@ export default async function handler(req, res) {
         const contentType = req.headers["content-type"] || "";
 
         let pdfBuffer = bodyBuffer;
-        // Query Paramsからdirection取得
         let direction = "ja-zh";
         try {
             const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
             direction = urlObj.searchParams.get("direction") || "ja-zh";
-        } catch (e) { 
-            // URL parse error無視
-        }
+        } catch (e) {}
 
         let pdfUrl = null;
 
@@ -120,7 +121,6 @@ export default async function handler(req, res) {
         const targetLang = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
         const fontLang = direction === "ja-zh" ? "zh" : "ja";
 
-        // 日本語・中国語対応フォントを取得
         const fontBuffer = await fetchFont(fontLang);
         let customFont;
         if (fontBuffer) {
@@ -155,16 +155,9 @@ export default async function handler(req, res) {
                 p.drawText("Error: No text and no supported image found.", { x: 50, y: 700, size: 24, font: customFont });
             } else {
                 try {
-                    // Convert image buffer to base64
                     const base64Img = imgData.buffer.toString('base64');
-                    // Assuming JPEG (DCTDecode)
                     const dataUrl = `data:image/jpeg;base64,${base64Img}`;
-
-                    // Vision API Call
-                    // We ask GPT-4o to "Translate the text and provide approximate bounding boxes".
-                    // Coordinates: We ask for percentages (0-100) or absolute pixels (roughly) to be safe.
-                    // GPT-4o is not pixel-perfect, but better than nothing.
-
+                    
                     const prompt = `
                     You are a translator and layout analyzer.
                     1. Detect all text blocks in the image.
@@ -182,7 +175,7 @@ export default async function handler(req, res) {
                     `;
 
                     const completion = await client.chat.completions.create({
-                        model: "gpt-5.1", // Vision対応確認済み。非対応の場合は "gpt-4o" に変更
+                        model: "gpt-5.1",
                         messages: [
                             {
                                 role: "user", content: [
@@ -199,35 +192,22 @@ export default async function handler(req, res) {
                     const blocks = jsonRes.blocks || [];
 
                     const { width: pgW, height: pgH } = page.getSize();
-                    // imgData.width/height are the intrinsic image dimensions.
-                    // page.getSize() are the PDF page dimensions.
-                    // Assuming the image fits/covers the page, we map percentages to page size directly.
-                    // If image is only part of page, this might be offset, but for scans usually Page = Image.
 
                     blocks.forEach(block => {
                         const [topPct, leftPct, widthPct, heightPct] = block.bbox_pct;
                         const text = block.translated_text;
 
-                        // Parse percentages
                         const x = (leftPct / 100) * pgW;
                         const yTop = (topPct / 100) * pgH;
-
-                        // PDF Y is bottom-up. 
-                        // yTop in image is distance from top.
-                        // PDF Y = pgH - yTop - h
-
                         const w = (widthPct / 100) * pgW;
                         const h = (heightPct / 100) * pgH;
                         const y = pgH - yTop - h;
 
-                        // Draw White Box
                         page.drawRectangle({
                             x: x, y: y, width: w, height: h,
                             color: rgb(1, 1, 1)
                         });
 
-                        // Draw Text
-                        // Auto-size font attempt
                         const fontSize = Math.min(h * 0.8, 12);
                         page.drawText(text, {
                             x: x, y: y + (h * 0.1),
@@ -252,8 +232,11 @@ export default async function handler(req, res) {
         return res.status(200).send(Buffer.from(finalBytes));
 
     } catch (err) {
-        console.error(err);
+        console.error("Handler Error:", err);
+        // Fallback for non-JSON response if client expects text
         if (debugMode) return res.status(500).json({ error: err.message, stack: err.stack });
-        res.status(500).send("Error: " + err.message);
+        
+        // Return JSON error by default, frontend handles it.
+        res.status(500).json({ error: err.message });
     }
 }

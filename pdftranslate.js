@@ -117,13 +117,16 @@ async function handleExecute() {
         }
 
         if (!response.ok) {
-            // エラーメッセージがあれば取得して表示に含める
+            // まずテキストとして取得
+            const errText = await response.text();
             let errDetail = response.statusText;
             try {
-                const errJson = await response.json();
-                if (errJson.error) errDetail += ` (${errJson.error})`;
+                // JSONか試みる
+                const errJson = JSON.parse(errText);
+                if (errJson && errJson.error) errDetail = errJson.error;
             } catch (e) {
-                // JSONでない場合はテキスト取得を試みる、または無視
+                // JSONでないならテキストをそのまま使う（HTMLタグなどが含まれる場合は除去したいが、まずはそのまま）
+                if (errText) errDetail = errText.slice(0, 300); // 長すぎる場合はカット
             }
             throw new Error(`APIエラー: ${response.status} ${errDetail}`);
         }
