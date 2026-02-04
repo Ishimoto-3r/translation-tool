@@ -12,15 +12,6 @@ let cropAreas = []; // { pageNum: number, x, y, width, height, uuid }
 let isDrawing = false;
 let startX = 0;
 let startY = 0;
-let currentDrawingCanvas = null;
-
-
-// 範囲選択モード用
-let isCropMode = false;
-let cropAreas = []; // { pageIndex: number, x, y, width, height, id }
-let isDrawing = false;
-let startX = 0;
-let startY = 0;
 let currentCropPage = null; // 現在ドラッグ中のページインデックス
 
 // PDF.js設定
@@ -242,6 +233,9 @@ async function generatePreviews(pdfData) {
             labelContainer.appendChild(label);
 
             canvas.className = 'page-preview-canvas';
+
+            // 範囲選択イベントの設定
+            setupCropEvents(canvas, pageNum);
 
             itemDiv.appendChild(labelContainer);
             itemDiv.appendChild(canvas);
