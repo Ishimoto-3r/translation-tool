@@ -27,9 +27,7 @@ function setBusy(on) {
 }
 
 function updateStatus() {
-    const result
-
-    Area = $("resultArea");
+    const resultArea = $("resultArea");
     if (!resultArea) return;
 
     if (pdfFile) {
@@ -191,9 +189,17 @@ function initDragAndDrop() {
     const dz = $("dropzone");
     const input = $("pdfInput");
 
-    if (!dz || !input) return;
+    if (!dz || !input) {
+        console.error("dropzone or pdfInput not found!");
+        return;
+    }
 
-    dz.addEventListener("click", () => input.click());
+    console.log("Drag and drop initialized");
+
+    dz.addEventListener("click", () => {
+        console.log("Dropzone clicked");
+        input.click();
+    });
 
     dz.addEventListener("dragover", (e) => {
         e.preventDefault();
@@ -212,6 +218,7 @@ function initDragAndDrop() {
         if (file && file.type === "application/pdf") {
             pdfFile = file;
             updateStatus();
+            console.log("PDF file selected via drop:", file.name);
         } else {
             showError("PDFファイルのみ受け付けています。");
         }
@@ -222,16 +229,22 @@ function initDragAndDrop() {
         if (file && file.type === "application/pdf") {
             pdfFile = file;
             updateStatus();
+            console.log("PDF file selected via click:", file.name);
         }
     });
 }
 
 // 初期化
 document.addEventListener("DOMContentLoaded", () => {
+    console.log("DOMContentLoaded - Initializing...");
+
     initDragAndDrop();
 
     const btnExecute = $("btnExecute");
     if (btnExecute) {
         btnExecute.addEventListener("click", handleExecute);
+        console.log("Execute button listener attached");
+    } else {
+        console.error("btnExecute not found!");
     }
 });
