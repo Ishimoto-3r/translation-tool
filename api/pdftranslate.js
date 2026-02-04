@@ -142,8 +142,12 @@ module.exports = async (req, res) => {
 
 1. 画像内のすべてのテキストブロック（タイトル、本文、型番など）を検出
 2. 各ブロックを${targetLang}に正確に翻訳
-3. 各ブロックの位置を画像の幅・高さに対するパーセンテージで正確に推定
-   - bbox_pct: [top(%), left(%), width(%), height(%)] 
+3. 各ブロックの位置を画像左上を(0,0)、右下を(100,100)とするパーセンテージで指定
+   - bbox_pct形式: [left%, top%, width%, height%]
+   - left%: 左端の位置（0～100）
+   - top%: 上端の位置（0～100）
+   - width%: ブロックの幅（0～100）
+   - height%: ブロックの高さ（0～100）
    - 元のテキストを完全に覆うように、少し余裕を持たせてください
 
 以下の構造のJSONオブジェクトを返してください：
@@ -152,7 +156,7 @@ module.exports = async (req, res) => {
     {
       "original_text": "元のテキスト",
       "translated_text": "翻訳後のテキスト",
-      "bbox_pct": [10, 20, 30, 5]
+      "bbox_pct": [5.0, 10.0, 30.0, 5.0]
     }
   ]
 }
@@ -215,10 +219,11 @@ JSONのみを出力してください。`;
                 });
 
                 // 翻訳テキストをオーバーレイ
-                blocks.forEach(block => {
+                blocks.forEach((block, blockIdx) => {
                     if (!block.bbox_pct) return;
 
-                    const [topPct, leftPct, widthPct, heightPct] = block.bbox_pct;
+                    // 座標形式: [left%, top%, width%, height%]
+                    const [leftPct, topPct, widthPct, heightPct] = block.bbox_pct;
                     const text = block.translated_text || "";
 
                     const x = (leftPct / 100) * imgWidth;
@@ -226,6 +231,12 @@ JSONのみを出力してください。`;
                     const w = (widthPct / 100) * imgWidth;
                     const h = (heightPct / 100) * imgHeight;
                     const y = imgHeight - yTop - h;
+
+                    // デバッグ：座標計算結果を出力
+                    console.log(`Block ${blockIdx + 1} positioning:`);
+                    console.log(`  Input: [left=${leftPct}%, top=${topPct}%, w=${widthPct}%, h=${heightPct}%]`);
+                    console.log(`  Image: ${imgWidth}x${imgHeight}`);
+                    console.log(`  Calculated: x=${x.toFixed(1)}, y=${y.toFixed(1)}, w=${w.toFixed(1)}, h=${h.toFixed(1)}`);
 
                     // パディングを追加（元のテキストを完全に隠す）
                     const padding = 3;
