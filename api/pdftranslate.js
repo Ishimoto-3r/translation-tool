@@ -1,303 +1,245 @@
-const OpenAI = require("openai");
-const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
-const fontkit = require("@pdf-lib/fontkit");
+// PDF翻訳API - バックエンド
+// pdf.js座標 + GPT翻訳専業 + pdf-lib描画
 
-// Vercel Serverless Function Config
-module.exports.config = {
+import OpenAI from "openai";
+import { PDFDocument, rgb } from "pdf-lib";
+import * as fs from "fs";
+import * as path from "path";
+import fontkit from "@pdf-lib/fontkit";
+
+const client = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY
+});
+
+export const config = {
+    maxDuration: 60,
     api: {
-        bodyParser: false,
-        maxDuration: 60
-    },
+        bodyParser: {
+            sizeLimit: "10mb"
+        }
+    }
 };
 
-// Helper Functions
-const path = require("path");
-const fs = require("fs");
-
-async function fetchFont(lang) {
-    try {
-        const fontName = lang === "zh" ? "NotoSansSC-Regular.woff2" : "NotoSansJP-Regular.ttf";
-        const fontPath = path.join(__dirname, "fonts", fontName);
-        console.log(`Loading font from: ${fontPath}`);
-        return fs.readFileSync(fontPath);
-    } catch (e) {
-        console.error("Local font read error:", e);
-        return null;
-    }
-}
-
-// AI自己検証関数
-function validateTranslationBlock(block, index) {
-    const issues = [];
-
-    if (!block.original_text || block.original_text.trim() === "") {
-        issues.push(`Block ${index}: original_text is empty`);
-    }
-
-    if (!block.translated_text || block.translated_text.trim() === "") {
-        issues.push(`Block ${index}: translated_text is empty`);
-    }
-
-    // 中国語文字の存在チェック（Unicode範囲: U+4E00–U+9FFF）
-    const hasChinese = /[\u4e00-\u9fff]/.test(block.translated_text || "");
-    if (!hasChinese) {
-        issues.push(`Block ${index}: translated_text contains no Chinese characters`);
-    }
-
-    if (block.bbox_pct) {
-        const [top, left, width, height] = block.bbox_pct;
-        if (top < 0 || top > 100 || left < 0 || left > 100 ||
-            width < 0 || width > 100 || height < 0 || height > 100) {
-            issues.push(`Block ${index}: bbox_pct out of range (0-100%)`);
-        }
-    } else {
-        issues.push(`Block ${index}: bbox_pct is missing`);
-    }
-
-    return issues;
-}
-
-// Main Handler
-module.exports = async (req, res) => {
-    // CORS Headers
+export default async function handler(req, res) {
+    // CORS設定
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
+    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-    if (req.method === "OPTIONS") return res.status(200).end();
+    if (req.method === "OPTIONS") {
+        return res.status(200).end();
+    }
+
+    if (req.method !== "POST") {
+        return res.status(405).json({ error: "Method not allowed" });
+    }
 
     try {
-        // 1. Check API Key
-        const apiKey = process.env.OPENAI_API_KEY;
-        if (!apiKey) {
-            throw new Error("OpenAI API Key is missing");
+        const { pages, direction } = req.body;
+
+        if (!pages || !Array.isArray(pages) || pages.length === 0) {
+            return res.status(400).json({ error: "Invalid request: pages array required" });
         }
 
-        // 2. Initialize OpenAI
-        const client = new OpenAI({ apiKey });
+        console.log(`Processing ${pages.length} page(s), Direction: ${direction}`);
 
-        // 3. Read Body
-        const chunks = [];
-        for await (const chunk of req) chunks.push(Buffer.from(chunk));
-        const bodyBuffer = Buffer.concat(chunks);
-        const body = JSON.parse(bodyBuffer.toString());
+        // 翻訳方向設定
+        const targetLang = direction === "ja-zh" ? "簡体字中国語" : "日本語";
+        console.log(`Target: ${targetLang}`);
 
-        const { images, direction } = body;
+        // フォント読み込み
+        const fontPath = path.join(process.cwd(), "api", "fonts", "NotoSansSC-Regular.woff2");
+        console.log("Loading font from:", fontPath);
 
-        if (!images || !Array.isArray(images) || images.length === 0) {
-            throw new Error("No images provided");
+        if (!fs.existsSync(fontPath)) {
+            throw new Error(`Font file not found: ${fontPath}`);
         }
 
-        const targetLang = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
-        const fontLang = direction === "ja-zh" ? "zh" : "ja";
+        const fontBytes = fs.readFileSync(fontPath);
 
-        console.log(`Processing ${images.length} page(s), Target: ${targetLang}`);
-
-        // 4. Load Font
-        const fontBuffer = await fetchFont(fontLang);
-        let customFont;
-
-        // 5. Create new PDF
+        // PDF作成
         const pdfDoc = await PDFDocument.create();
         pdfDoc.registerFontkit(fontkit);
+        const customFont = await pdfDoc.embedFont(fontBytes);
 
-        if (fontBuffer) {
-            customFont = await pdfDoc.embedFont(fontBuffer);
-        } else {
-            console.warn("Font load failed, using Helvetica");
-            customFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-        }
-
-        // 6. AI自己検証用のカウンター
-        let totalBlocks = 0;
-        let successBlocks = 0;
+        // AI自己検証用
+        let totalTexts = 0;
+        let successfulTranslations = 0;
         const validationIssues = [];
 
-        // 7. Process each page (逐次処理)
-        for (let pageIndex = 0; pageIndex < images.length; pageIndex++) {
-            const imageDataUrl = images[pageIndex];
-            console.log(`Processing page ${pageIndex + 1}/${images.length}...`);
+        // 各ページを処理
+        for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
+            const pageData = pages[pageIndex];
+            console.log(`Processing page ${pageIndex + 1}/${pages.length}...`);
 
-            // 画像をBase64からBufferに変換
-            const base64Data = imageDataUrl.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
-            const imageBuffer = Buffer.from(base64Data, 'base64');
+            // テキスト抽出
+            const texts = pageData.textItems.map(item => item.text);
+            totalTexts += texts.length;
 
-            // 画像をPDFに埋め込み
-            let embeddedImage;
-            try {
-                if (imageDataUrl.includes('image/png')) {
-                    embeddedImage = await pdfDoc.embedPng(imageBuffer);
-                } else {
-                    embeddedImage = await pdfDoc.embedJpg(imageBuffer);
+            console.log(`Page ${pageIndex + 1}: ${texts.length} text items`);
+
+            // GPT APIで翻訳
+            const translations = await translateTexts(texts, targetLang);
+
+            // 検証
+            const validation = validateTranslations(texts, translations);
+            successfulTranslations += validation.success;
+            validationIssues.push(...validation.issues);
+
+            // PDFページ作成
+            const page = pdfDoc.addPage([pageData.width, pageData.height]);
+
+            // 各テキストを配置
+            pageData.textItems.forEach((item, idx) => {
+                const translatedText = translations[idx] || "";
+
+                if (!translatedText) {
+                    console.warn(`Empty translation for item ${idx + 1}: "${item.text}"`);
+                    return;
                 }
-            } catch (embedErr) {
-                console.error(`Failed to embed image: ${embedErr.message}`);
-                throw new Error(`画像埋め込みエラー: ${embedErr.message}`);
-            }
 
-            // Vision API呼び出し
-            const prompt = `
-あなたは翻訳者およびレイアウト解析の専門家です。
-以下の作業を実行してください：
+                // PDF座標系（左下が原点）
+                const x = item.x;
+                const y = item.y;
+                const width = item.width;
+                const height = item.height;
 
-1. 画像内のすべてのテキストブロック（タイトル、本文、型番など）を検出
-2. 各ブロックを${targetLang}に正確に翻訳
-3. 各ブロックの位置を画像左上を(0,0)、右下を(100,100)とするパーセンテージで指定
-   - bbox_pct形式: [left%, top%, width%, height%]
-   - left%: 左端の位置（0～100）
-   - top%: 上端の位置（0～100）
-   - width%: ブロックの幅（0～100）
-   - height%: ブロックの高さ（0～100）
-   - 元のテキストを完全に覆うように、少し余裕を持たせてください
+                // パディング
+                const padding = 2;
 
-以下の構造のJSONオブジェクトを返してください：
-{
-  "blocks": [
-    {
-      "original_text": "元のテキスト",
-      "translated_text": "翻訳後のテキスト",
-      "bbox_pct": [5.0, 10.0, 30.0, 5.0]
-    }
-  ]
-}
-
-JSONのみを出力してください。`;
-
-            try {
-                const completion = await client.chat.completions.create({
-                    model: "gpt-5.1",
-                    messages: [
-                        {
-                            role: "user",
-                            content: [
-                                { type: "text", text: prompt },
-                                { type: "image_url", image_url: { url: imageDataUrl, detail: "high" } }
-                            ]
-                        }
-                    ],
-                    response_format: { type: "json_object" },
-                    max_completion_tokens: 8000
+                // 白背景で原文を隠す
+                page.drawRectangle({
+                    x: Math.max(0, x - padding),
+                    y: Math.max(0, y - padding),
+                    width: Math.min(width + (padding * 2), pageData.width - x + padding),
+                    height: Math.min(height + (padding * 2), pageData.height - y + padding),
+                    color: rgb(1, 1, 1),
+                    opacity: 1.0
                 });
 
-                const jsonRes = JSON.parse(completion.choices[0]?.message?.content || "{}");
-                const blocks = jsonRes.blocks || [];
+                // 翻訳テキストを描画
+                const fontSize = Math.max(8, Math.min(item.fontSize * 0.85, 18));
 
-                totalBlocks += blocks.length;
-                console.log(`Page ${pageIndex + 1}: Detected ${blocks.length} text blocks`);
-
-                // デバッグ：Vision APIレスポンスを出力
-                console.log("=== Vision API Response ===");
-                blocks.forEach((block, idx) => {
-                    console.log(`Block ${idx + 1}:`);
-                    console.log(`  Original: "${block.original_text}"`);
-                    console.log(`  Translated: "${block.translated_text}"`);
-                    console.log(`  BBox: [${block.bbox_pct?.join(', ')}]`);
-                });
-                console.log("===========================");
-
-                // AI自己検証
-                blocks.forEach((block, idx) => {
-                    const issues = validateTranslationBlock(block, `${pageIndex + 1}-${idx + 1}`);
-                    if (issues.length === 0) {
-                        successBlocks++;
-                    } else {
-                        validationIssues.push(...issues);
-                    }
-                });
-
-                // PDFページを作成（元の画像サイズに合わせる）
-                const imgWidth = embeddedImage.width;
-                const imgHeight = embeddedImage.height;
-                const page = pdfDoc.addPage([imgWidth, imgHeight]);
-
-                // 背景として元の画像を配置
-                page.drawImage(embeddedImage, {
-                    x: 0,
-                    y: 0,
-                    width: imgWidth,
-                    height: imgHeight
-                });
-
-                // 翻訳テキストをオーバーレイ
-                blocks.forEach((block, blockIdx) => {
-                    if (!block.bbox_pct) return;
-
-                    // 座標形式: [left%, top%, width%, height%]
-                    const [leftPct, topPct, widthPct, heightPct] = block.bbox_pct;
-                    const text = block.translated_text || "";
-
-                    const x = (leftPct / 100) * imgWidth;
-                    const yTop = (topPct / 100) * imgHeight;
-                    const w = (widthPct / 100) * imgWidth;
-                    const h = (heightPct / 100) * imgHeight;
-                    const y = imgHeight - yTop - h;
-
-                    // デバッグ：座標計算結果を出力
-                    console.log(`Block ${blockIdx + 1} positioning:`);
-                    console.log(`  Input: [left=${leftPct}%, top=${topPct}%, w=${widthPct}%, h=${heightPct}%]`);
-                    console.log(`  Image: ${imgWidth}x${imgHeight}`);
-                    console.log(`  Calculated: x=${x.toFixed(1)}, y=${y.toFixed(1)}, w=${w.toFixed(1)}, h=${h.toFixed(1)}`);
-
-                    // パディングを追加（元のテキストを完全に隠す）
-                    const padding = 3;
-
-                    // 白背景で原文を隠す（完全に不透明）
-                    page.drawRectangle({
-                        x: Math.max(0, x - padding),
-                        y: Math.max(0, y - padding),
-                        width: Math.min(w + (padding * 2), imgWidth - x + padding),
-                        height: Math.min(h + (padding * 2), imgHeight - y + padding),
-                        color: rgb(1, 1, 1),
-                        opacity: 1.0
+                try {
+                    page.drawText(translatedText, {
+                        x: x,
+                        y: y,
+                        size: fontSize,
+                        font: customFont,
+                        color: rgb(0, 0, 0),
+                        maxWidth: width,
+                        lineHeight: fontSize * 1.1
                     });
-
-                    // 翻訳テキストを描画
-                    const fontSize = Math.max(9, Math.min(h * 0.7, 16));
-                    try {
-                        page.drawText(text, {
-                            x: Math.max(2, x + 1),
-                            y: Math.max(2, y + (h * 0.15)),
-                            size: fontSize,
-                            font: customFont,
-                            color: rgb(0, 0, 0),
-                            maxWidth: Math.max(10, w - 2),
-                            lineHeight: fontSize * 1.15
-                        });
-                    } catch (drawErr) {
-                        console.error(`Failed to draw text for block: ${drawErr.message}`);
-                    }
-                });
-
-            } catch (visionErr) {
-                console.error(`Vision API error on page ${pageIndex + 1}:`, visionErr);
-                validationIssues.push(`Page ${pageIndex + 1}: Vision API call failed - ${visionErr.message}`);
-            }
+                } catch (drawErr) {
+                    console.error(`Failed to draw text at (${x}, ${y}): ${drawErr.message}`);
+                }
+            });
         }
 
-        // 8. AI自己検証結果をログ出力
-        console.log("\n=== AI Self-Validation Report ===");
-        console.log(`Total blocks detected: ${totalBlocks}`);
-        console.log(`Successfully validated blocks: ${successBlocks}`);
-        console.log(`Failed blocks: ${totalBlocks - successBlocks}`);
-
+        // AI自己検証レポート
+        console.log("=== AI Self-Validation Report ===");
+        console.log(`Total texts: ${totalTexts}`);
+        console.log(`Successfully translated: ${successfulTranslations}`);
+        console.log(`Failed: ${totalTexts - successfulTranslations}`);
         if (validationIssues.length > 0) {
-            console.log("\nValidation Issues:");
+            console.log("Validation Issues:");
             validationIssues.forEach(issue => console.log(`  - ${issue}`));
-        } else {
-            console.log("All blocks passed validation!");
         }
-        console.log("=================================\n");
+        console.log("=================================");
 
-        // 9. Response
-        const finalBytes = await pdfDoc.save();
+        // PDF保存
+        const pdfBytes = await pdfDoc.save();
+
+        // レスポンス
         res.setHeader("Content-Type", "application/pdf");
-        res.setHeader("Content-Disposition", `attachment; filename="translated_result.pdf"`);
-        return res.status(200).send(Buffer.from(finalBytes));
+        res.setHeader("Content-Disposition", 'attachment; filename="translated.pdf"');
+        return res.status(200).send(Buffer.from(pdfBytes));
 
-    } catch (err) {
-        console.error("Handler Error:", err);
+    } catch (error) {
+        console.error("API Error:", error);
         return res.status(500).json({
-            error: err.message || "Unknown Error"
+            error: "Translation failed",
+            details: error.message
         });
     }
-};
+}
+
+// GPT APIでテキスト翻訳
+async function translateTexts(texts, targetLang) {
+    if (texts.length === 0) {
+        return [];
+    }
+
+    const textsWithIndex = texts.map((t, i) => `${i + 1}. ${t}`).join('\n');
+
+    const prompt = `以下のテキストを${targetLang}に翻訳してください。
+各行を翻訳し、同じ順序でJSON配列として返してください。
+型番や固有名詞（例: 3R-MFXS50, Anyty）はそのまま返してください。
+
+入力:
+${textsWithIndex}
+
+出力形式: {"translations": ["翻訳1", "翻訳2", ...]}
+必ず${texts.length}個の翻訳を返してください。`;
+
+    try {
+        const completion = await client.chat.completions.create({
+            model: "gpt-4o",
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+            max_completion_tokens: 4000
+        });
+
+        const result = JSON.parse(completion.choices[0].message.content);
+        const translations = result.translations || [];
+
+        // 数が一致しない場合は空配列で埋める
+        while (translations.length < texts.length) {
+            translations.push("");
+        }
+
+        return translations.slice(0, texts.length);
+
+    } catch (error) {
+        console.error("Translation API error:", error);
+        // エラー時は元のテキストをそのまま返す
+        return texts;
+    }
+}
+
+// 翻訳結果の検証
+function validateTranslations(originalTexts, translations) {
+    const issues = [];
+    let successCount = 0;
+
+    // 数の一致チェック
+    if (originalTexts.length !== translations.length) {
+        issues.push(`テキスト数不一致: 原文${originalTexts.length}件、翻訳${translations.length}件`);
+    }
+
+    translations.forEach((trans, idx) => {
+        // 空チェック
+        if (!trans || trans.trim() === "") {
+            issues.push(`翻訳${idx + 1}: 空の翻訳結果`);
+            return;
+        }
+
+        // 中国語文字チェック（型番などは除外）
+        const hasChinese = /[\u4e00-\u9fff]/.test(trans);
+        const isAlphanumeric = /^[A-Za-z0-9\-_]+$/.test(trans);
+
+        // 中国語文字があるか、型番（英数字のみ）なら成功
+        if (hasChinese || isAlphanumeric) {
+            successCount++;
+        } else {
+            issues.push(`翻訳${idx + 1}: 中国語文字が含まれていない - "${trans}"`);
+        }
+    });
+
+    return {
+        total: originalTexts.length,
+        success: successCount,
+        failed: originalTexts.length - successCount,
+        issues: issues
+    };
+}

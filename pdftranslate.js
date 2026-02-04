@@ -1,29 +1,32 @@
-// pdftranslate.js - PDF→画像変換＆Vision API翻訳
+// PDF翻訳ツール - フロントエンド
+// pdf.js getTextContent()による正確な座標取得 + GPT翻訳
 
+// グローバル変数
 let pdfFile = null;
-const $ = (id) => document.getElementById(id);
 
-function setBusy(on) {
-    const ov = $("overlay");
-    if (ov) ov.classList.toggle("show", !!on);
+// PDF.js設定
+if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+}
 
-    const btnExecute = $("btnExecute");
-    if (btnExecute) {
-        btnExecute.disabled = !!on;
-        btnExecute.style.opacity = on ? "0.7" : "1";
-    }
+// ユーティリティ関数
+function $(id) {
+    return document.getElementById(id);
+}
 
+function setBusy(busy) {
+    const btn = $("btnExecute");
     const dropzone = $("dropzone");
-    if (dropzone) {
-        dropzone.style.pointerEvents = on ? "none" : "auto";
-        dropzone.style.opacity = on ? "0.7" : "1";
+
+    if (btn) {
+        btn.disabled = busy;
+        btn.textContent = busy ? "処理中..." : "翻訳を実行する";
     }
 
-    const urlInput = $("pdfUrlInput");
-    if (urlInput) urlInput.disabled = !!on;
-
-    const directionSelect = $("directionSelect");
-    if (directionSelect) directionSelect.disabled = !!on;
+    if (dropzone) {
+        dropzone.style.pointerEvents = busy ? "none" : "auto";
+        dropzone.style.opacity = busy ? "0.5" : "1";
+    }
 }
 
 function updateStatus() {
@@ -59,9 +62,9 @@ function clearError() {
     }
 }
 
-// PDF→画像変換関数
-async function convertPDFToImages(pdfData) {
-    const images = [];
+// PDF→テキスト+座標抽出関数
+async function convertPDFToTextItems(pdfData) {
+    const pages = [];
 
     try {
         const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
@@ -74,29 +77,45 @@ async function convertPDFToImages(pdfData) {
 
         for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
             const page = await pdf.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 1.5 }); // 適度な解像度
+            const viewport = page.getViewport({ scale: 1.0 });
+            const textContent = await page.getTextContent();
 
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
+            const textItems = textContent.items.map(item => {
+                // pdf.jsのtransform配列: [scaleX, skewY, skewX, scaleY, translateX, translateY]
+                const fontSize = item.transform[3]; // scaleY = フォントサイズ
+                const x = item.transform[4];
+                const y = item.transform[5];
 
-            await page.render({
-                canvasContext: context,
-                viewport: viewport
-            }).promise;
+                return {
+                    text: item.str,
+                    x: x,
+                    y: y,
+                    width: item.width,
+                    height: item.height,
+                    fontSize: fontSize,
+                    fontName: item.fontName,
+                    transform: item.transform
+                };
+            });
 
-            // Canvas→JPEG Base64（サイズ抑制）
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-            images.push(dataUrl);
+            // 空テキストを除外
+            const filteredItems = textItems.filter(item => item.text && item.text.trim() !== "");
 
-            console.log(`Page ${pageNum} converted to image (${Math.round(dataUrl.length / 1024)} KB)`);
+            pages.push({
+                pageNumber: pageNum,
+                width: viewport.width,
+                height: viewport.height,
+                textItems: filteredItems
+            });
+
+            console.log(`Page ${pageNum}: Extracted ${filteredItems.length} text items`);
+            console.log("Sample items:", filteredItems.slice(0, 3));
         }
 
-        return images;
+        return pages;
     } catch (err) {
-        console.error("PDF to image conversion error:", err);
-        throw new Error(`PDF変換エラー: ${err.message}`);
+        console.error("PDF text extraction error:", err);
+        throw new Error(`PDF解析エラー: ${err.message}`);
     }
 }
 
@@ -114,17 +133,18 @@ async function handleExecute() {
 
     try {
         if (resultArea) {
-            resultArea.textContent = "PDFを画像に変換中...";
+            resultArea.textContent = "PDFからテキストを抽出中...";
         }
 
         // 1. PDFを読み込み
         const arrayBuffer = await pdfFile.arrayBuffer();
 
-        // 2. PDF→画像配列に変換
-        const images = await convertPDFToImages(arrayBuffer);
+        // 2. PDF→テキスト+座標抽出
+        const pages = await convertPDFToTextItems(arrayBuffer);
 
         if (resultArea) {
-            resultArea.textContent = `${images.length}ページを変換完了。翻訳中...`;
+            const totalItems = pages.reduce((sum, p) => sum + p.textItems.length, 0);
+            resultArea.textContent = `${totalItems}個のテキストを抽出完了。翻訳中...`;
         }
 
         // 3. APIに送信
@@ -136,7 +156,7 @@ async function handleExecute() {
                 "Content-Type": "application/json"
             },
             body: JSON.stringify({
-                images: images,
+                pages: pages,
                 direction: direction
             })
         });
