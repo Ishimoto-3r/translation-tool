@@ -6,6 +6,12 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>マニュアル中国語化（pdftranslate）</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        // PDF.js worker設定
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
     <script src="pdftranslate.js" defer></script>
 
     <style>

@@ -1,16 +1,11 @@
-// pdftranslate.js
+// pdftranslate.js - PDF→画像変換＆Vision API翻訳
 
 let pdfFile = null;
 const $ = (id) => document.getElementById(id);
 
-/**
- * UIの無効化・有効化とオーバーレイ制御
- */
 function setBusy(on) {
     const ov = $("overlay");
-    if (ov) {
-        ov.classList.toggle("show", !!on);
-    }
+    if (ov) ov.classList.toggle("show", !!on);
 
     const btnExecute = $("btnExecute");
     if (btnExecute) {
@@ -25,21 +20,16 @@ function setBusy(on) {
     }
 
     const urlInput = $("pdfUrlInput");
-    if (urlInput) {
-        urlInput.disabled = !!on;
-    }
+    if (urlInput) urlInput.disabled = !!on;
 
     const directionSelect = $("directionSelect");
-    if (directionSelect) {
-        directionSelect.disabled = !!on;
-    }
+    if (directionSelect) directionSelect.disabled = !!on;
 }
 
-/**
- * ファイル選択ステータスの更新
- */
 function updateStatus() {
-    const resultArea = $("resultArea");
+    const result
+
+    Area = $("resultArea");
     if (!resultArea) return;
 
     if (pdfFile) {
@@ -53,9 +43,6 @@ function updateStatus() {
     }
 }
 
-/**
- * エラー表示
- */
 function showError(msg) {
     const errorBox = $("errorBox");
     if (errorBox) {
@@ -74,90 +61,132 @@ function clearError() {
     }
 }
 
-/**
- * 翻訳実行処理
- */
+// PDF→画像変換関数
+async function convertPDFToImages(pdfData) {
+    const images = [];
+
+    try {
+        const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+        const numPages = pdf.numPages;
+
+        console.log(`PDF has ${numPages} pages. Processing first page only (MVP).`);
+
+        // MVP: 最初の1ページのみ処理
+        const maxPages = Math.min(numPages, 1);
+
+        for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 1.5 }); // 適度な解像度
+
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            await page.render({
+                canvasContext: context,
+                viewport: viewport
+            }).promise;
+
+            // Canvas→JPEG Base64（サイズ抑制）
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            images.push(dataUrl);
+
+            console.log(`Page ${pageNum} converted to image (${Math.round(dataUrl.length / 1024)} KB)`);
+        }
+
+        return images;
+    } catch (err) {
+        console.error("PDF to image conversion error:", err);
+        throw new Error(`PDF変換エラー: ${err.message}`);
+    }
+}
+
+// 翻訳実行処理
 async function handleExecute() {
     clearError();
-    const urlInput = $("pdfUrlInput");
-    const pdfUrl = urlInput ? urlInput.value.trim() : "";
 
-    if (!pdfFile && !pdfUrl) {
-        showError("PDFファイルを選択するか、URLを入力してください。");
+    if (!pdfFile) {
+        showError("PDFファイルを選択してください（ドラッグ&ドロップまたはクリック）");
         return;
     }
 
     setBusy(true);
+    const resultArea = $("resultArea");
 
     try {
-        const direction = $("directionSelect").value;
-        let response;
-
-        if (pdfFile) {
-            // PDFファイル（Raw Binary送信）
-            response = await fetch(`/api/pdftranslate?direction=${encodeURIComponent(direction)}`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/pdf"
-                },
-                body: pdfFile
-            });
-        } else {
-            // URL指定（JSON送信）
-            response = await fetch("/api/pdftranslate", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    pdfUrl: pdfUrl,
-                    direction: direction
-                })
-            });
+        if (resultArea) {
+            resultArea.textContent = "PDFを画像に変換中...";
         }
 
+        // 1. PDFを読み込み
+        const arrayBuffer = await pdfFile.arrayBuffer();
+
+        // 2. PDF→画像配列に変換
+        const images = await convertPDFToImages(arrayBuffer);
+
+        if (resultArea) {
+            resultArea.textContent = `${images.length}ページを変換完了。翻訳中...`;
+        }
+
+        // 3. APIに送信
+        const direction = $("directionSelect").value;
+
+        const response = await fetch("/api/pdftranslate", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                images: images,
+                direction: direction
+            })
+        });
+
         if (!response.ok) {
-            // まずテキストとして取得
             const errText = await response.text();
             let errDetail = response.statusText;
             try {
-                // JSONか試みる
                 const errJson = JSON.parse(errText);
                 if (errJson && errJson.error) errDetail = errJson.error;
             } catch (e) {
-                // JSONでないならテキストをそのまま使う（HTMLタグなどが含まれる場合は除去したいが、まずはそのまま）
-                if (errText) errDetail = errText.slice(0, 300); // 長すぎる場合はカット
+                if (errText) errDetail = errText.slice(0, 300);
             }
             throw new Error(`APIエラー: ${response.status} ${errDetail}`);
         }
 
-        // 成功時はBlob（PDF）として受け取りダウンロード
+        // 4. 翻訳済みPDFをダウンロード
         const blob = await response.blob();
         const downloadUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = downloadUrl;
-        a.download = pdfFile ? `translated_${pdfFile.name}` : "translated_manual.pdf";
+        a.download = `translated_${pdfFile.name}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(downloadUrl);
 
-        const resultArea = $("resultArea");
         if (resultArea) {
-            resultArea.textContent = "翻訳が完了しました。ダウンロードを開始します。";
+            resultArea.textContent = "✅ 翻訳が完了しました。ダウンロードを開始します。";
+            resultArea.classList.remove("text-blue-600");
+            resultArea.classList.add("text-green-600");
         }
 
     } catch (error) {
         console.error("Execution error:", error);
         showError("処理中にエラーが発生しました: " + error.message);
+
+        if (resultArea) {
+            resultArea.textContent = "エラーが発生しました";
+            resultArea.classList.remove("text-blue-600", "text-green-600");
+            resultArea.classList.add("text-red-600");
+        }
     } finally {
         setBusy(false);
     }
 }
 
-/**
- * ドラッグ&ドロップの初期化
- */
+// ドラッグ&ドロップの初期化
 function initDragAndDrop() {
     const dz = $("dropzone");
     const input = $("pdfInput");
@@ -182,7 +211,6 @@ function initDragAndDrop() {
         const file = e.dataTransfer.files[0];
         if (file && file.type === "application/pdf") {
             pdfFile = file;
-            if ($("pdfUrlInput")) $("pdfUrlInput").value = ""; // URLをクリア
             updateStatus();
         } else {
             showError("PDFファイルのみ受け付けています。");
@@ -193,7 +221,6 @@ function initDragAndDrop() {
         const file = e.target.files[0];
         if (file && file.type === "application/pdf") {
             pdfFile = file;
-            if ($("pdfUrlInput")) $("pdfUrlInput").value = ""; // URLをクリア
             updateStatus();
         }
     });
@@ -206,17 +233,5 @@ document.addEventListener("DOMContentLoaded", () => {
     const btnExecute = $("btnExecute");
     if (btnExecute) {
         btnExecute.addEventListener("click", handleExecute);
-    }
-
-    const urlInput = $("pdfUrlInput");
-    if (urlInput) {
-        urlInput.addEventListener("input", () => {
-            if (urlInput.value.trim()) {
-                pdfFile = null;
-                const input = $("pdfInput");
-                if (input) input.value = "";
-                updateStatus();
-            }
-        });
     }
 });
