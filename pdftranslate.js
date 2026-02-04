@@ -86,12 +86,12 @@ async function generatePreviews(pdfData) {
 
         // プレビューアイテム作成
         const itemDiv = document.createElement('div');
-        itemDiv.className = 'page-preview-item selected cursor-pointer';
+        itemDiv.className = 'page-preview-item cursor-pointer'; // デフォルト: 未選択
         itemDiv.dataset.pageNum = pageNum;
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = true;
+        checkbox.checked = false; // デフォルト: チェックなし
         checkbox.id = `page-check-${pageNum}`;
         checkbox.className = 'mr-2';
 
@@ -143,8 +143,7 @@ async function generatePreviews(pdfData) {
 
         previewContainer.appendChild(itemDiv);
 
-        // 選択状態を記録
-        selectedPages.add(pageNum);
+        // デフォルトは未選択（selectedPagesに追加しない）
 
         updateStatus("プレビュー生成中", `${pageNum}/${numPages}`, "PDFのプレビューを作成しています...");
     }
@@ -375,9 +374,13 @@ function initDragAndDrop() {
             // プレビュー生成
             try {
                 setBusy(true);
-                const pdfData = await file.arrayBuffer();
-                await generatePreviews(pdfData);
-                await convertPDFToTextItems(pdfData);
+                // 毎回新しいArrayBufferを取得
+                const pdfData1 = await file.arrayBuffer();
+                await generatePreviews(pdfData1);
+
+                // 再度新しいArrayBufferを取得
+                const pdfData2 = await file.arrayBuffer();
+                await convertPDFToTextItems(pdfData2);
 
                 dropzone.innerHTML = `
                     <div class="text-center">
@@ -419,9 +422,13 @@ function initDragAndDrop() {
             // プレビュー生成
             try {
                 setBusy(true);
-                const pdfData = await file.arrayBuffer();
-                await generatePreviews(pdfData);
-                await convertPDFToTextItems(pdfData);
+                // 毎回新しいArrayBufferを取得
+                const pdfData1 = await file.arrayBuffer();
+                await generatePreviews(pdfData1);
+
+                // 再度新しいArrayBufferを取得
+                const pdfData2 = await file.arrayBuffer();
+                await convertPDFToTextItems(pdfData2);
 
                 dropzone.innerHTML = `
                     <div class="text-center">
