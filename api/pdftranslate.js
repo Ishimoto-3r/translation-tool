@@ -1,14 +1,13 @@
 const OpenAI = require("openai");
-const { PDFDocument, PDFName, PDFStream, rgb, StandardFonts } = require("pdf-lib");
-const fontkit = require("@pdf-lib/fontkit"); // 追加
-const pdfParse = require("pdf-parse");
-const zlib = require("zlib");
+const { PDFDocument, rgb, StandardFonts } = require("pdf-lib");
+const fontkit = require("@pdf-lib/fontkit");
+const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 
 // Vercel Serverless Function Config
 module.exports.config = {
     api: {
-        bodyParser: false, // Disallow Vercel's default body parsing to handle raw binary
-        maxDuration: 60    // Attempt to set 60s (might be ignored on Hobby plan)
+        bodyParser: false,
+        maxDuration: 60
     },
 };
 
@@ -28,45 +27,52 @@ async function fetchFont(lang) {
     }
 }
 
-async function extractFirstOverlayImage(doc, pageIndex = 0) {
+// Convert PDF page to image data URL
+async function renderPDFPageToImage(pdfBuffer, pageNumber) {
     try {
-        const page = doc.getPages()[pageIndex];
-        const resources = page.node.Resources();
-        const xObjects = resources?.lookup(PDFName.of('XObject'));
-        if (!xObjects) return null;
+        const loadingTask = pdfjsLib.getDocument({
+            data: new Uint8Array(pdfBuffer),
+            useSystemFonts: true,
+            standardFontDataUrl: null
+        });
 
-        const keys = xObjects.dict.keys();
-        for (const key of keys) {
-            const ref = xObjects.get(key);
-            const obj = doc.context.lookup(ref);
-            if (obj instanceof PDFStream) {
-                const dict = obj.dict;
-                if (dict.lookup(PDFName.of('Subtype'))?.toString() === '/Image') {
-                    const filter = dict.lookup(PDFName.of('Filter'));
-                    let filters = [];
-                    if (filter instanceof PDFName) filters.push(filter.toString());
-                    else if (Array.isArray(filter)) filters = filter.map(f => f.toString());
-                    else if (filter.array) filters = filter.array.map(f => f.toString());
+        const pdfDoc = await loadingTask.promise;
+        const page = await pdfDoc.getPage(pageNumber);
 
-                    const hasDCT = filters.some(f => f === '/DCTDecode' || f.toString() === '/DCTDecode');
-                    if (hasDCT) {
-                        let contents = obj.contents;
-                        if (filters[0].toString() === '/FlateDecode') {
-                            contents = zlib.unzipSync(contents);
-                        }
-                        return {
-                            buffer: contents,
-                            width: dict.lookup(PDFName.of('Width')).value(),
-                            height: dict.lookup(PDFName.of('Height')).value()
-                        };
-                    }
-                }
-            }
-        }
+        const viewport = page.getViewport({ scale: 2.0 }); // 高解像度
+
+        // Node.js環境用のCanvasFactory
+        const NodeCanvasFactory = require('pdfjs-dist/lib/pdf.js').NodeCanvasFactory;
+        const canvasFactory = new NodeCanvasFactory();
+
+        const canvasAndContext = canvasFactory.create(
+            viewport.width,
+            viewport.height
+        );
+
+        const renderContext = {
+            canvasContext: canvasAndContext.context,
+            viewport: viewport,
+        };
+
+        await page.render(renderContext).promise;
+
+        // CanvasをPNGのBase64に変換
+        const canvas = canvasAndContext.canvas;
+        const imageData = canvas.toBuffer('image/png');
+        const base64 = imageData.toString('base64');
+
+        canvasFactory.destroy(canvasAndContext);
+
+        return {
+            dataUrl: `data:image/png;base64,${base64}`,
+            width: viewport.width,
+            height: viewport.height
+        };
     } catch (e) {
-        console.error("Image extraction failed:", e);
+        console.error("PDF rendering error:", e);
+        return null;
     }
-    return null;
 }
 
 // Main Handler
@@ -78,8 +84,6 @@ module.exports = async (req, res) => {
 
     if (req.method === "OPTIONS") return res.status(200).end();
 
-    const debugMode = req.headers["x-debug-mode"];
-
     try {
         // 1. Check API Key
         const apiKey = process.env.OPENAI_API_KEY;
@@ -87,62 +91,31 @@ module.exports = async (req, res) => {
             throw new Error("OpenAI API Key is missing in server environment.");
         }
 
-        // 2. Initialize OpenAI (inside try block)
+        // 2. Initialize OpenAI
         const client = new OpenAI({ apiKey });
 
         // 3. Read Body (Raw Buffer)
         const chunks = [];
         for await (const chunk of req) chunks.push(Buffer.from(chunk));
         const bodyBuffer = Buffer.concat(chunks);
-        const contentType = req.headers["content-type"] || "";
 
-        // 4. Determine Input (PDF Binary or JSON URL)
-        let pdfBuffer = bodyBuffer;
+        // 4. Parse Query Params
         let direction = "ja-zh";
         try {
-            // Parse Query Params
             const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
             if (urlObj.searchParams.has("direction")) {
                 direction = urlObj.searchParams.get("direction");
             }
         } catch (e) { }
 
-        let pdfUrl = null;
-
-        if (contentType.includes("application/json")) {
-            const bodyStr = bodyBuffer.toString() || "{}";
-            const body = JSON.parse(bodyStr);
-            if (body.direction) direction = body.direction;
-            pdfUrl = body.pdfUrl;
-
-            if (pdfUrl) {
-                const r = await fetch(pdfUrl);
-                if (r.ok) pdfBuffer = Buffer.from(await r.arrayBuffer());
-                else throw new Error("Method 2 (Fetch URL) failed: " + r.status);
-            }
-        }
-
-        if (!pdfBuffer || pdfBuffer.length === 0) {
-            throw new Error("No PDF content provided.");
-        }
-
-        // 5. Extract Text (Helper)
-        let extractedText = "";
-        try {
-            const parsed = await pdfParse(pdfBuffer);
-            extractedText = (parsed.text || "").trim();
-        } catch (e) {
-            console.error("PDF Parsing error (pdf-parse):", e);
-        }
-
-        // 6. Load PDF Document (pdf-lib)
-        const pdfDoc = await PDFDocument.load(pdfBuffer);
-        pdfDoc.registerFontkit(fontkit); // 追加
-
         const targetLang = direction === "ja-zh" ? "Simplified Chinese" : "Japanese";
         const fontLang = direction === "ja-zh" ? "zh" : "ja";
 
-        // 7. Load Fonts
+        // 5. Load PDF Document
+        const pdfDoc = await PDFDocument.load(bodyBuffer);
+        pdfDoc.registerFontkit(fontkit);
+
+        // 6. Load Fonts
         const fontBuffer = await fetchFont(fontLang);
         let customFont;
         if (fontBuffer) {
@@ -152,123 +125,97 @@ module.exports = async (req, res) => {
             customFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
         }
 
+        // 7. OCR + Translation for each page
+        const pageCount = pdfDoc.getPageCount();
+        console.log(`Processing ${pageCount} page(s)...`);
 
-        // 8. Translation Logic
-        if (extractedText.length > 50) {
-            // Text Mode
-            const completion = await client.chat.completions.create({
-                model: "gpt-5.1",
-                messages: [
-                    { role: "system", content: `Translate to ${targetLang}.` },
-                    { role: "user", content: extractedText.slice(0, 3000) }
-                ]
-            });
-            const translated = completion.choices[0]?.message?.content || "No translation.";
+        for (let i = 0; i < Math.min(pageCount, 5); i++) { // 最初の5ページのみ（MVP）
+            console.log(`Processing page ${i + 1}/${pageCount}...`);
 
-            const page = pdfDoc.addPage();
-            const { width, height } = page.getSize();
-            // Simple text rendering
-            page.drawText(translated, {
-                x: 50, y: height - 50,
-                size: 10, font: customFont,
-                maxWidth: width - 100,
-                lineHeight: 14,
-                color: rgb(0, 0, 0)
-            });
+            const imageData = await renderPDFPageToImage(bodyBuffer, i + 1);
 
-        } else {
-            // Vision Mode
-            console.log("Image-based PDF detected. Using GPT-4o Vision...");
+            if (!imageData) {
+                console.error(`Failed to render page ${i + 1}`);
+                continue;
+            }
 
+            // GPT-5.1 Vision API for OCR + Translation
+            const prompt = `
+あなたは翻訳者およびレイアウト解析の専門家です。
+1. 画像内のすべてのテキストブロックを検出してください
+2. 各ブロックを${targetLang}に翻訳してください
+3. 各ブロックのbounding boxを画像の幅・高さに対するパーセンテージで推定してください: [top(%), left(%), width(%), height(%)]
 
+以下の構造のJSONオブジェクトを返してください：
+{
+  "blocks": [
+    { "original_text": "元のテキスト", "translated_text": "翻訳後のテキスト", "bbox_pct": [10, 10, 30, 5] },
+    ...
+  ]
+}
+JSONのみを出力してください。`;
 
-            const page = pdfDoc.getPages()[0]; // Only 1st page for MVP
-            const imgData = await extractFirstOverlayImage(pdfDoc, 0);
+            try {
+                const completion = await client.chat.completions.create({
+                    model: "gpt-5.1",
+                    messages: [
+                        {
+                            role: "user", content: [
+                                { type: "text", text: prompt },
+                                { type: "image_url", image_url: { url: imageData.dataUrl, detail: "high" } }
+                            ]
+                        }
+                    ],
+                    response_format: { type: "json_object" },
+                    max_completion_tokens: 8000
+                });
 
-            if (!imgData) {
-                console.error("Image extraction failed - no supported image found");
-                const p = pdfDoc.addPage();
-                p.drawText("Error: No text and no supported image found. PDF may be text-based or use unsupported compression.", { x: 50, y: 700, size: 12, font: customFont });
-            } else {
-                console.log(`Image extracted: ${imgData.width}x${imgData.height}, buffer size: ${imgData.buffer.length}`);
-                try {
-                    const base64Img = imgData.buffer.toString('base64');
-                    const dataUrl = `data:image/jpeg;base64,${base64Img}`;
+                const jsonRes = JSON.parse(completion.choices[0]?.message?.content || "{}");
+                const blocks = jsonRes.blocks || [];
 
-                    const prompt = `
-                    You are a translator and layout analyzer.
-                    1. Detect all text blocks in the image.
-                    2. Translate each block to ${targetLang}.
-                    3. Estimate the bounding box for each block as percentage of image width/height: [top(%), left(%), width(%), height(%)].
-                    
-                    Return a JSON object with this structure:
-                    {
-                      "blocks": [
-                        { "translated_text": "...", "bbox_pct": [10, 10, 30, 5] },
-                        ...
-                      ]
-                    }
-                    Output JSON only.
-                    `;
+                console.log(`Page ${i + 1}: Found ${blocks.length} text blocks`);
 
-                    const completion = await client.chat.completions.create({
-                        model: "gpt-5.1",
-                        messages: [
-                            {
-                                role: "user", content: [
-                                    { type: "text", text: prompt },
-                                    { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
-                                ]
-                            }
-                        ],
-                        response_format: { type: "json_object" },
-                        max_completion_tokens: 4000
+                // 翻訳テキストをPDFにオーバーレイ
+                const page = pdfDoc.getPages()[i];
+                const { width: pgW, height: pgH } = page.getSize();
+
+                blocks.forEach(block => {
+                    const [topPct, leftPct, widthPct, heightPct] = block.bbox_pct;
+                    const text = block.translated_text;
+
+                    const x = (leftPct / 100) * pgW;
+                    const yTop = (topPct / 100) * pgH;
+                    const w = (widthPct / 100) * pgW;
+                    const h = (heightPct / 100) * pgH;
+                    const y = pgH - yTop - h;
+
+                    // 白い背景ボックスで元のテキストを隠す
+                    page.drawRectangle({
+                        x: x, y: y, width: w, height: h,
+                        color: rgb(1, 1, 1),
+                        opacity: 0.95
                     });
 
-                    console.log("Vision API response:", completion.choices[0]?.message?.content?.substring(0, 200));
-                    const jsonRes = JSON.parse(completion.choices[0]?.message?.content || "{}");
-                    const blocks = jsonRes.blocks || [];
-
-                    const { width: pgW, height: pgH } = page.getSize();
-
-                    blocks.forEach(block => {
-                        const [topPct, leftPct, widthPct, heightPct] = block.bbox_pct;
-                        const text = block.translated_text;
-
-                        const x = (leftPct / 100) * pgW;
-                        const yTop = (topPct / 100) * pgH;
-                        const w = (widthPct / 100) * pgW;
-                        const h = (heightPct / 100) * pgH;
-                        const y = pgH - yTop - h; // PDF coordinates (bottom-left origin)
-
-                        // Draw background box
-                        page.drawRectangle({
-                            x: x, y: y, width: w, height: h,
-                            color: rgb(1, 1, 1)
-                        });
-
-                        // Draw text
-                        const fontSize = Math.min(h * 0.8, 12);
-                        page.drawText(text, {
-                            x: x, y: y + (h * 0.1),
-                            size: fontSize,
-                            font: customFont,
-                            color: rgb(0, 0, 0),
-                            width: w
-                        });
+                    // 翻訳テキストを描画
+                    const fontSize = Math.min(h * 0.7, 12);
+                    page.drawText(text, {
+                        x: x + 2,
+                        y: y + (h * 0.15),
+                        size: fontSize,
+                        font: customFont,
+                        color: rgb(0, 0, 0),
+                        maxWidth: w - 4,
+                        lineHeight: fontSize * 1.2
                     });
+                });
 
-                } catch (ocrErr) {
-                    console.error("Vision OCR Failed:", ocrErr);
-                    const p = pdfDoc.addPage();
-                    p.drawText(`Translation Error: ${ocrErr.message}`, { x: 50, y: 750, size: 14, font: customFont, color: rgb(1, 0, 0) });
-                    p.drawText(`This may be due to API key issues, model access, or network problems.`, { x: 50, y: 720, size: 10, font: customFont });
-                    p.drawText(`Please check Vercel logs for details.`, { x: 50, y: 700, size: 10, font: customFont });
-                }
+            } catch (ocrErr) {
+                console.error(`Page ${i + 1} OCR Failed:`, ocrErr);
+                // エラーは無視して続行
             }
         }
 
-        // 9. Response
+        // 8. Response
         const finalBytes = await pdfDoc.save();
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader("Content-Disposition", `attachment; filename="translated_result.pdf"`);
@@ -276,14 +223,9 @@ module.exports = async (req, res) => {
 
     } catch (err) {
         console.error("Handler Error:", err);
-        // Error Response (JSON)
-        // If client accepts text (e.g. Browser default), it might render JSON, which is fine.
-        // If debugMode is on, send stack.
-        const errorBody = {
+        return res.status(500).json({
             error: err.message || "Unknown Error",
-            stack: debugMode ? err.stack : undefined
-        };
-
-        return res.status(500).json(errorBody);
+            stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+        });
     }
 };
