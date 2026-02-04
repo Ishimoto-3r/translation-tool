@@ -8,6 +8,15 @@ let selectedPages = new Set(); // 選択されたページ番号（1-indexed）
 
 // 範囲選択モード用
 let isCropMode = false;
+let cropAreas = []; // { pageNum: number, x, y, width, height, uuid }
+let isDrawing = false;
+let startX = 0;
+let startY = 0;
+let currentDrawingCanvas = null;
+
+
+// 範囲選択モード用
+let isCropMode = false;
 let cropAreas = []; // { pageIndex: number, x, y, width, height, id }
 let isDrawing = false;
 let startX = 0;
@@ -61,6 +70,89 @@ function clearError() {
         errorBox.classList.add("hidden");
         errorBox.textContent = "";
     }
+}
+
+// モード切替
+function switchMode(mode) {
+    isCropMode = (mode === 'crop');
+
+    const btnModePage = $("modePage");
+    const btnModeCrop = $("modeCrop");
+    const pageControls = $("pageSelectionControls");
+    const cropInstruction = $("cropInstruction");
+
+    if (isCropMode) {
+        // スタイル変更
+        btnModePage.classList.remove('bg-white', 'shadow-sm', 'text-blue-600');
+        btnModePage.classList.add('text-gray-500', 'hover:text-gray-700');
+
+        btnModeCrop.classList.remove('text-gray-500', 'hover:text-gray-700');
+        btnModeCrop.classList.add('bg-white', 'shadow-sm', 'text-blue-600');
+
+        if (pageControls) pageControls.classList.add('hidden');
+        if (cropInstruction) cropInstruction.classList.remove('hidden');
+
+        // ページ選択を無効化（視覚的）
+        document.querySelectorAll('.page-preview-item checkbox').forEach(cb => cb.disabled = true);
+        document.querySelectorAll('.page-preview-item').forEach(item => item.classList.remove('cursor-pointer'));
+    } else {
+        // スタイル戻す
+        btnModeCrop.classList.remove('bg-white', 'shadow-sm', 'text-blue-600');
+        btnModeCrop.classList.add('text-gray-500', 'hover:text-gray-700');
+
+        btnModePage.classList.remove('text-gray-500', 'hover:text-gray-700');
+        btnModePage.classList.add('bg-white', 'shadow-sm', 'text-blue-600');
+
+        if (pageControls) pageControls.classList.remove('hidden');
+        if (cropInstruction) cropInstruction.classList.add('hidden');
+
+        document.querySelectorAll('.page-preview-item checkbox').forEach(cb => cb.disabled = false);
+        document.querySelectorAll('.page-preview-item').forEach(item => item.classList.add('cursor-pointer'));
+    }
+
+    // 全Canvasを再描画（枠の表示/非表示）
+    document.querySelectorAll('canvas.page-preview-canvas').forEach(canvas => {
+        const pageNum = parseInt(canvas.dataset.pageNum);
+        redrawCanvas(canvas, pageNum);
+    });
+}
+
+// Canvas再描画（PDF画像 + 選択枠）
+function redrawCanvas(canvas, pageNum) {
+    const ctx = canvas.getContext('2d');
+    const pageData = pagesData[pageNum - 1];
+
+    if (!pageData || !pageData.image) return;
+
+    const img = new Image();
+    img.onload = () => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // 元画像を描画（スケーリング考慮）
+        // プレビューは viewport scale 0.5 で生成されていると仮定
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        // 範囲選択モードなら枠を描画
+        if (isCropMode) {
+            const areas = cropAreas.filter(a => a.pageNum === pageNum);
+            areas.forEach(area => {
+                ctx.strokeStyle = 'red';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(area.x, area.y, area.width, area.height);
+
+                // 半透明の背景
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                ctx.fillRect(area.x, area.y, area.width, area.height);
+
+                // 削除ボタン的なもの(簡易的に右下に×)
+                ctx.fillStyle = 'red';
+                ctx.fillRect(area.x + area.width - 15, area.y + area.height - 15, 15, 15);
+                ctx.fillStyle = 'white';
+                ctx.font = '12px Arial';
+                ctx.fillText('×', area.x + area.width - 12, area.y + area.height - 3);
+            });
+        }
+    };
+    img.src = pageData.image; // pageData.image は DataURL
 }
 
 // プレビュー生成関数
