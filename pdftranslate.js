@@ -423,91 +423,158 @@ async function convertPDFToTextItems(pdfData) {
     return pages;
 }
 
+// 座標計算ヘルパー
+function getMousePos(canvas, evt) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: (evt.clientX - rect.left) * scaleX,
+        y: (evt.clientY - rect.top) * scaleY
+    };
+}
+
+// ヒットテスト
+function hitTest(x, y, pageNum) {
+    const DEL_SIZE = 30; // 削除ボタン判定サイズ
+    const RESIZE_SIZE = 20; // リサイズハンドル判定サイズ
+
+    // 逆順（手前優先）
+    for (let i = cropAreas.length - 1; i >= 0; i--) {
+        const area = cropAreas[i];
+        if (area.pageNum !== pageNum) continue;
+
+        // 削除ボタン (右上)
+        if (x >= area.x + area.width - DEL_SIZE && x <= area.x + area.width &&
+            y >= area.y && y <= area.y + DEL_SIZE) {
+            return { type: 'delete', index: i };
+        }
+
+        // リサイズハンドル (右下)
+        if (x >= area.x + area.width - RESIZE_SIZE && x <= area.x + area.width &&
+            y >= area.y + area.height - RESIZE_SIZE && y <= area.y + area.height) {
+            return { type: 'resize-se', index: i };
+        }
+
+        // 移動 (内部)
+        if (x >= area.x && x <= area.x + area.width &&
+            y >= area.y && y <= area.y + area.height) {
+            return { type: 'move', index: i };
+        }
+    }
+    return { type: 'none' };
+}
+
 // 範囲選択イベント設定
 function setupCropEvents(canvas, pageNum) {
-    let isDragging = false;
 
     canvas.addEventListener('mousedown', (e) => {
         if (!isCropMode) return;
-        const rect = canvas.getBoundingClientRect();
-        startX = e.clientX - rect.left;
-        startY = e.clientY - rect.top;
-        isDragging = true;
-        currentCropPage = pageNum;
+        const pos = getMousePos(canvas, e);
+        const hit = hitTest(pos.x, pos.y, pageNum);
+
+        if (hit.type === 'delete') {
+            cropAreas.splice(hit.index, 1);
+            redrawCanvas(canvas, pageNum);
+            updateSelectionCount();
+            return;
+        }
+
+        if (hit.type === 'move' || hit.type === 'resize-se') {
+            interactionMode = hit.type;
+            selectedAreaIndex = hit.index;
+            dragStartMouseX = pos.x;
+            dragStartMouseY = pos.y;
+            dragStartArea = { ...cropAreas[hit.index] };
+            currentCropPage = pageNum;
+        } else {
+            // 新規作成
+            interactionMode = 'draw';
+            startX = pos.x;
+            startY = pos.y;
+            currentCropPage = pageNum;
+        }
     });
 
     canvas.addEventListener('mousemove', (e) => {
-        if (!isCropMode || !isDragging) return;
-        const rect = canvas.getBoundingClientRect();
-        const currentX = e.clientX - rect.left;
-        const currentY = e.clientY - rect.top;
+        if (!isCropMode) return;
+        const pos = getMousePos(canvas, e);
 
-        // ラバーバンド描画（再描画してから描く）
-        redrawCanvas(canvas, pageNum);
+        // カーソル変更
+        if (interactionMode === 'none') {
+            const hit = hitTest(pos.x, pos.y, pageNum);
+            if (hit.type === 'delete') canvas.style.cursor = 'pointer';
+            else if (hit.type === 'resize-se') canvas.style.cursor = 'nwse-resize';
+            else if (hit.type === 'move') canvas.style.cursor = 'move';
+            else canvas.style.cursor = 'crosshair';
+        }
 
-        const ctx = canvas.getContext('2d');
-        ctx.strokeStyle = 'blue';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 3]);
-        ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
-        ctx.setLineDash([]);
+        if (interactionMode === 'none') return;
+
+        if (interactionMode === 'draw') {
+            redrawCanvas(canvas, pageNum);
+            const ctx = canvas.getContext('2d');
+            ctx.strokeStyle = 'blue';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([5, 3]);
+            ctx.strokeRect(startX, startY, pos.x - startX, pos.y - startY);
+            ctx.setLineDash([]);
+        }
+        else if (interactionMode === 'move') {
+            const dx = pos.x - dragStartMouseX;
+            const dy = pos.y - dragStartMouseY;
+            const area = cropAreas[selectedAreaIndex];
+            if (area) {
+                area.x = dragStartArea.x + dx;
+                area.y = dragStartArea.y + dy;
+                redrawCanvas(canvas, pageNum);
+            }
+        }
+        else if (interactionMode === 'resize-se') {
+            const dx = pos.x - dragStartMouseX;
+            const dy = pos.y - dragStartMouseY;
+            const area = cropAreas[selectedAreaIndex];
+            if (area) {
+                area.width = Math.max(10, dragStartArea.width + dx);
+                area.height = Math.max(10, dragStartArea.height + dy);
+                redrawCanvas(canvas, pageNum);
+            }
+        }
     });
 
     canvas.addEventListener('mouseup', (e) => {
-        if (!isCropMode || !isDragging) return;
-        isDragging = false;
+        if (!isCropMode || interactionMode === 'none') return;
 
-        const rect = canvas.getBoundingClientRect();
-        const endX = e.clientX - rect.left;
-        const endY = e.clientY - rect.top;
+        const pos = getMousePos(canvas, e);
 
-        let width = endX - startX;
-        let height = endY - startY;
-        let x = startX;
-        let y = startY;
+        if (interactionMode === 'draw') {
+            let width = pos.x - startX;
+            let height = pos.y - startY;
+            let x = startX;
+            let y = startY;
 
-        // 負のサイズ対応
-        if (width < 0) { x = endX; width = Math.abs(width); }
-        if (height < 0) { y = endY; height = Math.abs(height); }
+            if (width < 0) { x = pos.x; width = Math.abs(width); }
+            if (height < 0) { y = pos.y; height = Math.abs(height); }
 
-        // 極小サイズは無視（誤クリック防止）
-        if (width > 10 && height > 10) {
-            // 新しいエリアを追加
-            cropAreas.push({
-                pageNum: pageNum,
-                x: x,
-                y: y,
-                width: width,
-                height: height,
-                uuid: crypto.randomUUID()
-            });
-            console.log("Added crop area:", cropAreas[cropAreas.length - 1]);
-        } else {
-            // クリックとみなして削除判定
-            const clickX = x;
-            const clickY = y;
-            // 逆順（手前のものから）判定
-            for (let i = cropAreas.length - 1; i >= 0; i--) {
-                const area = cropAreas[i];
-                if (area.pageNum === pageNum &&
-                    clickX >= area.x && clickX <= area.x + area.width &&
-                    clickY >= area.y && clickY <= area.y + area.height) {
-
-                    cropAreas.splice(i, 1); // 削除
-                    console.log("Removed crop area");
-                    break;
-                }
+            if (width > 10 && height > 10) {
+                cropAreas.push({
+                    pageNum: pageNum,
+                    x: x, y: y, width: width, height: height,
+                    uuid: crypto.randomUUID()
+                });
             }
         }
 
+        interactionMode = 'none';
+        selectedAreaIndex = -1;
         redrawCanvas(canvas, pageNum);
-        updateSelectionCount(); // 選択数を更新（エリア数などを表示してもよい）
+        updateSelectionCount();
     });
 
-    // マウスが外れた場合も終了
     canvas.addEventListener('mouseleave', () => {
-        if (isDragging) {
-            isDragging = false;
+        if (interactionMode !== 'none') {
+            interactionMode = 'none';
+            selectedAreaIndex = -1;
             redrawCanvas(canvas, pageNum);
         }
     });
