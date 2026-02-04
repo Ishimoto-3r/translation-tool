@@ -57,7 +57,11 @@ function clearError() {
 
 // プレビュー生成関数
 async function generatePreviews(pdfData) {
-    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+    const pdf = await pdfjsLib.getDocument({
+        data: pdfData,
+        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+        cMapPacked: true
+    }).promise;
     const numPages = pdf.numPages;
 
     pagesData = [];
