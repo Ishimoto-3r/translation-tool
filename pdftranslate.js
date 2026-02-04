@@ -5,6 +5,7 @@
 let pdfDoc = null;
 let pagesData = []; // 全ページデータ
 let selectedPages = new Set(); // 選択されたページ番号（1-indexed）
+let pdfFile = null; // 選択/D&DされたPDFファイルオブジェクト
 
 // 範囲選択モード用
 let isCropMode = false;
