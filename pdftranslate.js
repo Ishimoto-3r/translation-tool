@@ -263,105 +263,94 @@ async function generatePreviews(pdfData) {
     updateSelectionCount();
 }
 
-// 選択数表示更新
-function updateSelectionCount() {
-    const count = selectedPages.size;
-    const total = pagesData.length || document.querySelectorAll('.page-preview-item').length;
-    $("selectionCount").textContent = `${count}/${total} ページ選択中`;
-}
+// 範囲選択イベント設定
+function setupCropEvents(canvas, pageNum) {
+    let isDragging = false;
 
-// すべて選択/解除
-function setupSelectionButtons() {
-    $("btnSelectAll").addEventListener("click", () => {
-        document.querySelectorAll('.page-preview-item').forEach(item => {
-            const pageNum = parseInt(item.dataset.pageNum);
-            const checkbox = item.querySelector('input[type="checkbox"]');
-            checkbox.checked = true;
-            selectedPages.add(pageNum);
-            item.classList.add('selected');
-        });
-        updateSelectionCount();
+    canvas.addEventListener('mousedown', (e) => {
+        if (!isCropMode) return;
+        const rect = canvas.getBoundingClientRect();
+        startX = e.clientX - rect.left;
+        startY = e.clientY - rect.top;
+        isDragging = true;
+        currentCropPage = pageNum;
     });
 
-    $("btnDeselectAll").addEventListener("click", () => {
-        document.querySelectorAll('.page-preview-item').forEach(item => {
-            const pageNum = parseInt(item.dataset.pageNum);
-            const checkbox = item.querySelector('input[type="checkbox"]');
-            checkbox.checked = false;
-            selectedPages.delete(pageNum);
-            item.classList.remove('selected');
-        });
-        updateSelectionCount();
+    canvas.addEventListener('mousemove', (e) => {
+        if (!isCropMode || !isDragging) return;
+        const rect = canvas.getBoundingClientRect();
+        const currentX = e.clientX - rect.left;
+        const currentY = e.clientY - rect.top;
+
+        // ラバーバンド描画（再描画してから描く）
+        redrawCanvas(canvas, pageNum);
+
+        const ctx = canvas.getContext('2d');
+        ctx.strokeStyle = 'blue';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 3]);
+        ctx.strokeRect(startX, startY, currentX - startX, currentY - startY);
+        ctx.setLineDash([]);
     });
-}
 
-// PDF→テキスト+座標抽出関数（画像フォールバック付き）
-async function convertPDFToTextItems(pdfData) {
-    const pdf = await pdfjsLib.getDocument({
-        data: pdfData,
-        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
-        cMapPacked: true
-    }).promise;
+    canvas.addEventListener('mouseup', (e) => {
+        if (!isCropMode || !isDragging) return;
+        isDragging = false;
 
-    const numPages = pdf.numPages;
-    const pages = [];
+        const rect = canvas.getBoundingClientRect();
+        const endX = e.clientX - rect.left;
+        const endY = e.clientY - rect.top;
 
-    updateStatus("PDF読み込み中", `0/${numPages}`, "PDFからテキストと座標を抽出しています...");
+        let width = endX - startX;
+        let height = endY - startY;
+        let x = startX;
+        let y = startY;
 
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        try {
-            const page = await pdf.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 2.0 }); // スケール〉2.0に上げる（高品質）
+        // 負のサイズ対応
+        if (width < 0) { x = endX; width = Math.abs(width); }
+        if (height < 0) { y = endY; height = Math.abs(height); }
 
-            const textContent = await page.getTextContent();
-
-            const textItems = textContent.items
-                .filter(item => item.str && item.str.trim() !== "")
-                .map(item => ({
-                    text: item.str,
-                    x: item.transform[4],
-                    y: viewport.height - item.transform[5] - item.height,
-                    width: item.width,
-                    height: item.height
-                }));
-
-            // 常に画像として処理（元のページを表示するため）
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-
-            await page.render({
-                canvasContext: context,
-                viewport: viewport
-            }).promise;
-
-            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.95); // 圧縮率を0.95に（高品質）
-
-            pages.push({
-                page: pageNum,
-                width: viewport.width,
-                height: viewport.height,
-                textItems: textItems, // テキストがあれば翻訳に使用
-                image: imageDataUrl   // 常に画像を含める
+        // 極小サイズは無視（誤クリック防止）
+        if (width > 10 && height > 10) {
+            // 新しいエリアを追加
+            cropAreas.push({
+                pageNum: pageNum,
+                x: x,
+                y: y,
+                width: width,
+                height: height,
+                uuid: crypto.randomUUID()
             });
+            console.log("Added crop area:", cropAreas[cropAreas.length - 1]);
+        } else {
+            // クリックとみなして削除判定
+            const clickX = x;
+            const clickY = y;
+            // 逆順（手前のものから）判定
+            for (let i = cropAreas.length - 1; i >= 0; i--) {
+                const area = cropAreas[i];
+                if (area.pageNum === pageNum &&
+                    clickX >= area.x && clickX <= area.x + area.width &&
+                    clickY >= area.y && clickY <= area.y + area.height) {
 
-            updateStatus("PDF読み込み中", `${pageNum}/${numPages}`, "PDFからテキストと座標を抽出しています...");
-        } catch (error) {
-            console.error(`ページ${pageNum}のテキスト抽出失敗:`, error);
-            // エラーページを空白として追加
-            pages.push({
-                page: pageNum,
-                width: 595,
-                height: 842,
-                textItems: [],
-                error: error.message
-            });
+                    cropAreas.splice(i, 1); // 削除
+                    console.log("Removed crop area");
+                    break;
+                }
+            }
         }
-    }
 
-    pagesData = pages;
-    return pages;
+        redrawCanvas(canvas, pageNum);
+        updateSelectionCount(); // 選択数を更新（エリア数などを表示してもよい）
+    });
+
+    // マウスが外れた場合も終了
+    canvas.addEventListener('mouseleave', () => {
+        if (isDragging) {
+            isDragging = false;
+            redrawCanvas(canvas, pageNum);
+        }
+    });
 }
 
 // 翻訳実行処理
@@ -369,21 +358,109 @@ async function handleExecute() {
     try {
         clearError();
 
-        // ページ選択確認（プレビューが表示されている場合）
-        if (pagesData.length > 0 && selectedPages.size === 0) {
-            showError("翻訳するページを少なくとも1つ選択してください。");
-            return;
+        // モードによる分岐
+        let pagesToSend = [];
+
+        if (isCropMode) {
+            if (cropAreas.length === 0) {
+                showError("翻訳する範囲を選択してください。プレビュー画像をドラッグして範囲を指定できます。");
+                return;
+            }
+
+            setBusy(true);
+            updateStatus("画像切り出し中", "処理開始", "選択範囲を切り出しています...");
+
+            // 切り出し処理
+            for (let i = 0; i < cropAreas.length; i++) {
+                const area = cropAreas[i];
+                const pageData = pagesData[area.pageNum - 1];
+
+                // 元画像を読み込み
+                const img = new Image();
+                img.src = pageData.image;
+                await new Promise(resolve => img.onload = resolve);
+
+                // 切り出し用Canvas
+                const cropCanvas = document.createElement('canvas');
+                cropCanvas.width = area.width;
+                cropCanvas.height = area.height;
+                const ctx = cropCanvas.getContext('2d');
+
+                // 描画（スケーリングに注意：プレビューは0.5倍、canvasサイズも0.5倍されている状態）
+                // pagesData.imageは元画像（プレビュー描画用）だが、これはconvertPDFToTextItemsで作ったもので、viewport scale依存。
+                // convertPDFToTextItemsでは scale: 2.0 で作成されていたが、
+                // generatePreviewsでは viewprot scale: 0.5 で作成したcanvasに描画している。
+                // pagesData.imageは？ -> convertPDFToTextItemsで作られた(scale 2.0)ものが入っているか、
+                // いや、pdftranslate.jsでは initDragAndDropで convertPDFToTextItems が呼ばれ pagesData が更新される。
+                // convertPDFToTextItems内では scale:2.0 で作った画像を toDataURL している。
+
+                // しかし、generatePreviewsで作られた canvas.width/height は scale:0.5。
+                // つまりプレビュー上の 1px は、pagesData.image (scale 2.0) 上では 4px に相当する。
+                // 比率計算が必要。
+
+                // area.x, area.width は「プレビューCanvas(scale 0.5)」上の座標。
+                // image は scale 2.0 の画像。
+                // 比率は 2.0 / 0.5 = 4倍。
+
+                const scaleRatio = 4.0;
+                // ただし、もしgeneratePreviewsだけ呼んで textItems生成がまだの場合、pagesDataが無い可能性があるが、
+                // initDragAndDropで両方呼んでいるので大丈夫。
+
+                //念のため比率を計算
+                const previewWidth = pagesData[area.pageNum - 1].width; // これは scale 2.0 の幅？
+                // pagesData[].width は convertPDFToTextItems で viewport.width (scale 2.0) が入っている。
+
+                // プレビューのCanvasサイズ（DOMから取得したほうが確実かも）
+                const previewCanvas = document.querySelector(`canvas[data-page-num="${area.pageNum}"]`) ||
+                    document.querySelectorAll('canvas.page-preview-canvas')[area.pageNum - 1];
+
+                let actualRatio = 1;
+                if (previewCanvas) {
+                    actualRatio = img.width / previewCanvas.width;
+                }
+
+                ctx.drawImage(img,
+                    area.x * actualRatio, area.y * actualRatio, area.width * actualRatio, area.height * actualRatio,
+                    0, 0, area.width, area.height); // 出力サイズはプレビュー見た目サイズのままか、高解像度にするか？
+                // プレビュー見た目サイズ(area.width)だと小さいので、高解像度で切り出すべき。
+                // 出力canvasサイズを大きくする。
+
+                cropCanvas.width = area.width * actualRatio;
+                cropCanvas.height = area.height * actualRatio;
+                // コンテキスト再取得が必要（サイズ変更したためリセットされる）
+                const ctx2 = cropCanvas.getContext('2d');
+                ctx2.drawImage(img,
+                    area.x * actualRatio, area.y * actualRatio, area.width * actualRatio, area.height * actualRatio,
+                    0, 0, cropCanvas.width, cropCanvas.height);
+
+                const croppedDataUrl = cropCanvas.toDataURL('image/jpeg', 0.95);
+
+                pagesToSend.push({
+                    page: i + 1, // 連番
+                    width: cropCanvas.width,
+                    height: cropCanvas.height,
+                    textItems: [], // テキストなし（Vision API強制）
+                    image: croppedDataUrl
+                });
+            }
+
+        } else {
+            // ページ選択モード（既存ロジック）
+            if (pagesData.length > 0 && selectedPages.size === 0) {
+                showError("翻訳するページを少なくとも1つ選択してください。");
+                return;
+            }
+            const selectedPagesArray = Array.from(selectedPages).sort((a, b) => a - b);
+            pagesToSend = selectedPagesArray.map(pageNum => pagesData[pageNum - 1]);
         }
 
-        // プレビューが表示されている場合、すぐに翻訳処理へ
-        if (pagesData.length > 0 && selectedPages.size > 0) {
-            setBusy(true);
+        // ここから共通処理
+        if (pagesToSend.length > 0) {
+            setBusy(true); // 念のため
 
-            // 選択されたページのみフィルタリング
-            const selectedPagesArray = Array.from(selectedPages).sort((a, b) => a - b);
-            const selectedPagesData = selectedPagesArray.map(pageNum => pagesData[pageNum - 1]);
+            updateStatus("翻訳中", `0/${pagesToSend.length}`,
+                isCropMode ? "選択された範囲を翻訳しています..." : "選択されたページを翻訳しています...");
 
-            updateStatus("翻訳中", `0/${selectedPagesData.length}`, "選択されたページを翻訳しています...");
 
             const direction = $("directionSelect").value;
 
