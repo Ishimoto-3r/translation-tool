@@ -203,7 +203,12 @@ function setupSelectionButtons() {
 
 // PDF→テキスト+座標抽出関数（画像フォールバック付き）
 async function convertPDFToTextItems(pdfData) {
-    const pdf = await pdfjsLib.getDocument({ data: pdfData }).promise;
+    const pdf = await pdfjsLib.getDocument({
+        data: pdfData,
+        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+        cMapPacked: true
+    }).promise;
+
     const numPages = pdf.numPages;
     const pages = [];
 
