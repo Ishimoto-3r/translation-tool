@@ -71,6 +71,7 @@ function switchMode(mode) {
     const btnModeCrop = $("modeCrop");
     const pageControls = $("pageSelectionControls");
     const cropInstruction = $("cropInstruction");
+    const previewContainer = $("previewContainer");
 
     if (isCropMode) {
         // スタイル変更
@@ -82,6 +83,22 @@ function switchMode(mode) {
 
         if (pageControls) pageControls.classList.add('hidden');
         if (cropInstruction) cropInstruction.classList.remove('hidden');
+
+        // プレビュー表示を大きくする（1カラム表示）
+        if (previewContainer) {
+            previewContainer.classList.remove('grid-cols-2', 'md:grid-cols-3', 'lg:grid-cols-4');
+            previewContainer.classList.add('grid-cols-1', 'justify-items-center');
+
+            document.querySelectorAll('.page-preview-item').forEach(item => {
+                item.style.width = '100%';
+                item.style.maxWidth = '800px';
+                const canvas = item.querySelector('canvas');
+                if (canvas) {
+                    canvas.style.maxWidth = '100%';
+                    canvas.style.height = 'auto';
+                }
+            });
+        }
 
         // ページ選択を無効化（視覚的）
         document.querySelectorAll('.page-preview-item checkbox').forEach(cb => cb.disabled = true);
@@ -96,6 +113,22 @@ function switchMode(mode) {
 
         if (pageControls) pageControls.classList.remove('hidden');
         if (cropInstruction) cropInstruction.classList.add('hidden');
+
+        // プレビュー表示を元に戻す
+        if (previewContainer) {
+            previewContainer.classList.add('grid-cols-2', 'md:grid-cols-3', 'lg:grid-cols-4');
+            previewContainer.classList.remove('grid-cols-1', 'justify-items-center');
+
+            document.querySelectorAll('.page-preview-item').forEach(item => {
+                item.style.width = '';
+                item.style.maxWidth = '';
+                const canvas = item.querySelector('canvas');
+                if (canvas) {
+                    canvas.style.maxWidth = '';
+                    canvas.style.height = '';
+                }
+            });
+        }
 
         document.querySelectorAll('.page-preview-item checkbox').forEach(cb => cb.disabled = false);
         document.querySelectorAll('.page-preview-item').forEach(item => item.classList.add('cursor-pointer'));
