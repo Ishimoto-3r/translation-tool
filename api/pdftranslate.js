@@ -118,6 +118,23 @@ module.exports = async (req, res) => {
             const imageDataUrl = images[pageIndex];
             console.log(`Processing page ${pageIndex + 1}/${images.length}...`);
 
+            // 画像をBase64からBufferに変換
+            const base64Data = imageDataUrl.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
+            const imageBuffer = Buffer.from(base64Data, 'base64');
+
+            // 画像をPDFに埋め込み
+            let embeddedImage;
+            try {
+                if (imageDataUrl.includes('image/png')) {
+                    embeddedImage = await pdfDoc.embedPng(imageBuffer);
+                } else {
+                    embeddedImage = await pdfDoc.embedJpg(imageBuffer);
+                }
+            } catch (embedErr) {
+                console.error(`Failed to embed image: ${embedErr.message}`);
+                throw new Error(`画像埋め込みエラー: ${embedErr.message}`);
+            }
+
             // Vision API呼び出し
             const prompt = `
 あなたは翻訳者およびレイアウト解析の専門家です。
@@ -172,9 +189,18 @@ JSONのみを出力してください。`;
                     }
                 });
 
-                // PDFページを作成（A4サイズ）
-                const page = pdfDoc.addPage([595, 842]);
-                const { width: pgW, height: pgH } = page.getSize();
+                // PDFページを作成（元の画像サイズに合わせる）
+                const imgWidth = embeddedImage.width;
+                const imgHeight = embeddedImage.height;
+                const page = pdfDoc.addPage([imgWidth, imgHeight]);
+
+                // 背景として元の画像を配置
+                page.drawImage(embeddedImage, {
+                    x: 0,
+                    y: 0,
+                    width: imgWidth,
+                    height: imgHeight
+                });
 
                 // 翻訳テキストをオーバーレイ
                 blocks.forEach(block => {
@@ -183,18 +209,18 @@ JSONのみを出力してください。`;
                     const [topPct, leftPct, widthPct, heightPct] = block.bbox_pct;
                     const text = block.translated_text || "";
 
-                    const x = (leftPct / 100) * pgW;
-                    const yTop = (topPct / 100) * pgH;
-                    const w = (widthPct / 100) * pgW;
-                    const h = (heightPct / 100) * pgH;
-                    const y = pgH - yTop - h;
+                    const x = (leftPct / 100) * imgWidth;
+                    const yTop = (topPct / 100) * imgHeight;
+                    const w = (widthPct / 100) * imgWidth;
+                    const h = (heightPct / 100) * imgHeight;
+                    const y = imgHeight - yTop - h;
 
                     // 白背景で原文を隠す
                     page.drawRectangle({
                         x: Math.max(0, x),
                         y: Math.max(0, y),
-                        width: Math.min(w, pgW - x),
-                        height: Math.min(h, pgH - y),
+                        width: Math.min(w, imgWidth - x),
+                        height: Math.min(h, imgHeight - y),
                         color: rgb(1, 1, 1),
                         opacity: 0.95
                     });
