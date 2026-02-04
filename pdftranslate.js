@@ -289,11 +289,17 @@ async function handleExecute() {
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
 
+            // 新しいタブでPDFを開く
+            window.open(url, '_blank');
+
             // 結果表示
             const resultArea = $("resultArea");
             resultArea.innerHTML = `
                 <div class="text-center">
                     <div class="text-lg font-bold text-green-600 mb-4">✓ 翻訳完了</div>
+                    <div class="mb-4 text-sm text-gray-600">
+                        新しいタブでPDFを開きました。開かない場合は下のボタンをクリックしてください。
+                    </div>
                     <a href="${url}" download="translated.pdf" 
                        class="inline-block px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition">
                         翻訳済みPDFをダウンロード
