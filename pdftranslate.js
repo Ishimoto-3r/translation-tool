@@ -69,84 +69,95 @@ async function generatePreviews(pdfData) {
     updateStatus("プレビュー生成中", `0/${numPages}`, "PDFのプレビューを作成しています...");
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 0.5 }); // プレビュー用サムネイル（軽量化）
+        try {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 0.5 }); // プレビュー用サムネイル（軽量化）
 
+            // Canvas作成
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
 
-        // Canvas作成
-        const canvas = document.createElement('canvas');
-        const context = canvas.getContext('2d');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+            // ページをCanvasに描画
+            await page.render({
+                canvasContext: context,
+                viewport: viewport
+            }).promise;
 
-        // ページをCanvasに描画
-        await page.render({
-            canvasContext: context,
-            viewport: viewport
-        }).promise;
+            // プレビューアイテム作成
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'page-preview-item cursor-pointer'; // デフォルト: 未選択
+            itemDiv.dataset.pageNum = pageNum;
 
-        // プレビューアイテム作成
-        const itemDiv = document.createElement('div');
-        itemDiv.className = 'page-preview-item cursor-pointer'; // デフォルト: 未選択
-        itemDiv.dataset.pageNum = pageNum;
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.checked = false; // デフォルト: チェックなし
+            checkbox.id = `page-check-${pageNum}`;
+            checkbox.className = 'mr-2';
 
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.checked = false; // デフォルト: チェックなし
-        checkbox.id = `page-check-${pageNum}`;
-        checkbox.className = 'mr-2';
+            const toggleSelection = () => {
+                checkbox.checked = !checkbox.checked;
+                if (checkbox.checked) {
+                    selectedPages.add(pageNum);
+                    itemDiv.classList.add('selected');
+                } else {
+                    selectedPages.delete(pageNum);
+                    itemDiv.classList.remove('selected');
+                }
+                updateSelectionCount();
+            };
 
-        const toggleSelection = () => {
-            checkbox.checked = !checkbox.checked;
-            if (checkbox.checked) {
-                selectedPages.add(pageNum);
-                itemDiv.classList.add('selected');
-            } else {
-                selectedPages.delete(pageNum);
-                itemDiv.classList.remove('selected');
-            }
-            updateSelectionCount();
-        };
+            checkbox.addEventListener('change', (e) => {
+                e.stopPropagation();
+                if (e.target.checked) {
+                    selectedPages.add(pageNum);
+                    itemDiv.classList.add('selected');
+                } else {
+                    selectedPages.delete(pageNum);
+                    itemDiv.classList.remove('selected');
+                }
+                updateSelectionCount();
+            });
 
-        checkbox.addEventListener('change', (e) => {
-            e.stopPropagation();
-            if (e.target.checked) {
-                selectedPages.add(pageNum);
-                itemDiv.classList.add('selected');
-            } else {
-                selectedPages.delete(pageNum);
-                itemDiv.classList.remove('selected');
-            }
-            updateSelectionCount();
-        });
+            // アイテム全体をクリック可能に
+            itemDiv.addEventListener('click', (e) => {
+                if (e.target !== checkbox) {
+                    toggleSelection();
+                }
+            });
 
-        // アイテム全体をクリック可能に
-        itemDiv.addEventListener('click', (e) => {
-            if (e.target !== checkbox) {
-                toggleSelection();
-            }
-        });
+            const label = document.createElement('label');
+            label.htmlFor = `page-check-${pageNum}`;
+            label.className = 'flex items-center gap-2 mb-2 cursor-pointer select-none';
+            label.innerHTML = `<span class="text-sm font-bold">ページ ${pageNum}</span>`;
 
-        const label = document.createElement('label');
-        label.htmlFor = `page-check-${pageNum}`;
-        label.className = 'flex items-center gap-2 mb-2 cursor-pointer select-none';
-        label.innerHTML = `<span class="text-sm font-bold">ページ ${pageNum}</span>`;
+            const labelContainer = document.createElement('div');
+            labelContainer.className = 'flex items-center gap-2 mb-2';
+            labelContainer.appendChild(checkbox);
+            labelContainer.appendChild(label);
 
-        const labelContainer = document.createElement('div');
-        labelContainer.className = 'flex items-center gap-2 mb-2';
-        labelContainer.appendChild(checkbox);
-        labelContainer.appendChild(label);
+            canvas.className = 'page-preview-canvas';
 
-        canvas.className = 'page-preview-canvas';
+            itemDiv.appendChild(labelContainer);
+            itemDiv.appendChild(canvas);
 
-        itemDiv.appendChild(labelContainer);
-        itemDiv.appendChild(canvas);
+            previewContainer.appendChild(itemDiv);
 
-        previewContainer.appendChild(itemDiv);
-
-        // デフォルトは未選択（selectedPagesに追加しない）
-
-        updateStatus("プレビュー生成中", `${pageNum}/${numPages}`, "PDFのプレビューを作成しています...");
+            updateStatus("プレビュー生成中", `${pageNum}/${numPages}`, "PDFのプレビューを作成しています...");
+        } catch (error) {
+            console.error(`ページ${pageNum}のプレビュー生成失敗:`, error);
+            // エラーページを表示
+            const itemDiv = document.createElement('div');
+            itemDiv.className = 'page-preview-item bg-gray-100 opacity-50';
+            itemDiv.innerHTML = `
+                <div class="text-sm font-bold mb-2 text-gray-600">ページ ${pageNum}</div>
+                <div class="w-full h-32 border rounded flex items-center justify-center text-xs text-red-600">
+                    エラー
+                </div>
+            `;
+            previewContainer.appendChild(itemDiv);
+        }
     }
 
     // プレビューセクションを表示
