@@ -413,8 +413,6 @@ async function translateTextWithGPT(text, targetLang) {
         return result.translation;
 
     } catch (error) {
-
-    } catch (error) {
         console.error("Translation API error:", error);
         return `[翻訳エラー: ${error.message}]`;
     }
