@@ -14,6 +14,13 @@ let startX = 0;
 let startY = 0;
 let currentCropPage = null; // 現在ドラッグ中のページインデックス
 
+// 操作用状態変数
+let interactionMode = 'none'; // 'none', 'draw', 'move', 'resize-se'
+let selectedAreaIndex = -1;
+let dragStartMouseX = 0;
+let dragStartMouseY = 0;
+let dragStartArea = null;
+
 // PDF.js設定
 if (typeof pdfjsLib !== 'undefined') {
     pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -151,32 +158,44 @@ function redrawCanvas(canvas, pageNum) {
     const img = new Image();
     img.onload = () => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        // 元画像を描画（スケーリング考慮）
-        // プレビューは viewport scale 0.5 で生成されていると仮定
+        // 元画像を描画
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         // 範囲選択モードなら枠を描画
         if (isCropMode) {
             const areas = cropAreas.filter(a => a.pageNum === pageNum);
             areas.forEach(area => {
+                // 枠線
                 ctx.strokeStyle = 'red';
                 ctx.lineWidth = 2;
+                ctx.setLineDash([]);
                 ctx.strokeRect(area.x, area.y, area.width, area.height);
 
                 // 半透明の背景
-                ctx.fillStyle = 'rgba(255, 0, 0, 0.2)';
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
                 ctx.fillRect(area.x, area.y, area.width, area.height);
 
-                // 削除ボタン的なもの(簡易的に右下に×)
+                // 削除ボタン（右上）: 大きくする(30px)
+                const delSize = 30;
                 ctx.fillStyle = 'red';
-                ctx.fillRect(area.x + area.width - 15, area.y + area.height - 15, 15, 15);
+                // エリアの右上座標: x = area.x + area.width - delSize (内側に入れるなら)
+                // あるいは外側に出すか？ -> 内側が見やすい
+                ctx.fillRect(area.x + area.width - delSize, area.y, delSize, delSize);
+
                 ctx.fillStyle = 'white';
-                ctx.font = '12px Arial';
-                ctx.fillText('×', area.x + area.width - 12, area.y + area.height - 3);
+                ctx.font = 'bold 20px Arial';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('×', area.x + area.width - delSize / 2, area.y + delSize / 2);
+
+                // リサイズハンドル（右下）
+                const handleSize = 15;
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(area.x + area.width - handleSize, area.y + area.height - handleSize, handleSize, handleSize);
             });
         }
     };
-    img.src = pageData.image; // pageData.image は DataURL
+    img.src = pageData.image;
 }
 
 // プレビュー生成関数
