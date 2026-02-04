@@ -383,22 +383,36 @@ Please provide the translation:
 
 // GPT APIでテキスト翻訳
 async function translateTextWithGPT(text, targetLang) {
-    const prompt = `以下のテキストを${targetLang}に翻訳してください。
-型番や固有名詞はそのまま返してください。
-
-入力:
-${text}
-
-出力: 翻訳のみを返してください（説明不要）`;
-
     try {
         const completion = await client.chat.completions.create({
             model: "gpt-4o",
-            messages: [{ role: "user", content: prompt }],
-            max_completion_tokens: 2000
+            messages: [
+                {
+                    role: "system",
+                    content: `あなたはプロフェッショナルな技術翻訳者です。
+入力されたマニュアルをお客様のために${targetLang}に翻訳してください。
+
+重要なルール:
+1. 翻訳結果のみをJSON形式で出力すること。会話や謝罪は一切禁止。
+2. 技術用語は正確に翻訳すること。
+3. 元のテキストの意味を損なわないこと。
+4. 入力が断片的でも、文脈を補完して翻訳すること。
+
+出力フォーマット:
+{ "translation": "翻訳されたテキスト" }`
+                },
+                {
+                    role: "user",
+                    content: text
+                }
+            ],
+            response_format: { type: "json_object" }
         });
 
-        return completion.choices[0].message.content || "";
+        const result = JSON.parse(completion.choices[0].message.content);
+        return result.translation;
+
+    } catch (error) {
 
     } catch (error) {
         console.error("Translation API error:", error);
