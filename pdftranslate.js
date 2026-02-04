@@ -195,7 +195,7 @@ async function convertPDFToTextItems(pdfData) {
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 1.0 });
+        const viewport = page.getViewport({ scale: 2.0 }); // スケールを2.0に上げる（高品質）
 
         const textContent = await page.getTextContent();
 
@@ -221,7 +221,7 @@ async function convertPDFToTextItems(pdfData) {
                 viewport: viewport
             }).promise;
 
-            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.95); // 圧縮率を0.95に（高品質）
 
             pages.push({
                 page: pageNum,
