@@ -803,8 +803,19 @@ function initDragAndDrop() {
 document.addEventListener("DOMContentLoaded", () => {
     console.log("DOMContentLoaded - Initializing...");
 
+    // モード切替ボタンのイベント設定（ここが抜けていたため追加）
+    const btnModePage = $("modePage");
+    const btnModeCrop = $("modeCrop");
+    if (btnModePage && btnModeCrop) {
+        btnModePage.addEventListener('click', () => switchMode('page'));
+        btnModeCrop.addEventListener('click', () => switchMode('crop'));
+    }
+
     initDragAndDrop();
-    setupSelectionButtons();
+    // ユーティリティ系
+    if (typeof setupSelectionButtons === 'function') {
+        setupSelectionButtons();
+    }
 
     const btnExecute = $("btnExecute");
     if (btnExecute) {
