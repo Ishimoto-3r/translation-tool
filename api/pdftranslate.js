@@ -119,16 +119,18 @@ export default async function handler(req, res) {
             pageTranslations.push(translationText);
         }
 
-        // Step 2: PDFを生成（追記型）
+        // Step 2: PDFを生成（元のページ + 翻訳ページ）
         for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
             const pageData = pages[pageIndex];
             const translation = pageTranslations[pageIndex];
 
-            console.log(`\n=== Generating PDF page ${pageIndex + 1} ===`);
+            console.log(`\n=== Generating PDF pages for page ${pageIndex + 1} ===`);
 
-            let pdfPage;
             let pageWidth;
             let pageHeight;
+
+            // === 元のページを追加 ===
+            let originalPage;
 
             // 画像PDF
             if (pageData.image) {
@@ -139,45 +141,55 @@ export default async function handler(req, res) {
                 pageWidth = embeddedImage.width;
                 pageHeight = embeddedImage.height;
 
-                pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
+                originalPage = pdfDoc.addPage([pageWidth, pageHeight]);
 
                 // 背景として元の画像を配置
-                pdfPage.drawImage(embeddedImage, {
+                originalPage.drawImage(embeddedImage, {
                     x: 0,
                     y: 0,
                     width: pageWidth,
                     height: pageHeight
                 });
 
-                console.log(`  Image background: ${pageWidth} x ${pageHeight}`);
+                console.log(`  Original page (image): ${pageWidth} x ${pageHeight}`);
             }
             // テキストPDF（背景なし、白ページ）
             else {
                 pageWidth = pageData.width || 595;
                 pageHeight = pageData.height || 842;
-                pdfPage = pdfDoc.addPage([pageWidth, pageHeight]);
+                originalPage = pdfDoc.addPage([pageWidth, pageHeight]);
 
-                console.log(`  Blank page: ${pageWidth} x ${pageHeight}`);
+                console.log(`  Original page (blank): ${pageWidth} x ${pageHeight}`);
             }
 
-            // ページ下部に翻訳を追記
+            totalPages++;
+
+            // === 翻訳専用ページを追加 ===
             if (translation && translation.trim().length > 0) {
-                const overflow = await drawTranslationAtBottom(
-                    pdfPage,
+                const translationPage = pdfDoc.addPage([pageWidth, pageHeight]);
+
+                // 見出しを追加
+                const headerText = `（${pageIndex + 1}ページ目の翻訳）`;
+                translationPage.drawText(headerText, {
+                    x: 20,
+                    y: pageHeight - 30,
+                    size: 10,
+                    font: customFont,
+                    color: rgb(0.5, 0.5, 0.5)
+                });
+
+                // 翻訳テキストを描画
+                await drawTranslationOnPage(
+                    translationPage,
                     translation,
                     customFont,
                     pageWidth,
                     pageHeight
                 );
 
-                // 収まらない場合、続きページを追加
-                if (overflow) {
-                    console.log(`  Translation overflow, adding continuation page...`);
-                    // TODO: 続きページ実装（必要に応じて）
-                }
+                totalPages++;
+                console.log(`  Translation page added`);
             }
-
-            totalPages++;
         }
 
         // AI自己検証レポート
@@ -208,41 +220,32 @@ export default async function handler(req, res) {
     }
 }
 
-// ページ下部に翻訳を描画
-async function drawTranslationAtBottom(page, translationText, font, pageWidth, pageHeight) {
-    const bandHeight = 150; // 翻訳エリアの高さ
-    const margin = 20;
+// 翻訳専用ページに翻訳を描画
+async function drawTranslationOnPage(page, translationText, font, pageWidth, pageHeight) {
+    const margin = 40;
+    const topMargin = 60; // 見出し分のスペース
     const maxWidth = pageWidth - (margin * 2);
-
-    // 半透明白背景（読みやすさ向上）
-    page.drawRectangle({
-        x: 0,
-        y: 0,
-        width: pageWidth,
-        height: bandHeight,
-        color: rgb(1, 1, 1),
-        opacity: 0.95
-    });
+    const maxHeight = pageHeight - topMargin - margin;
 
     // フォントサイズ調整
-    let fontSize = 12;
+    let fontSize = 14;
     const lines = wrapText(translationText, font, fontSize, maxWidth);
-    let textHeight = lines.length * fontSize * 1.3;
+    let textHeight = lines.length * fontSize * 1.4;
 
     // 収まらない場合、フォントサイズを下げる
-    while (textHeight > (bandHeight - margin * 2) && fontSize > 8) {
+    while (textHeight > maxHeight && fontSize > 8) {
         fontSize -= 0.5;
         const newLines = wrapText(translationText, font, fontSize, maxWidth);
-        textHeight = newLines.length * fontSize * 1.3;
+        textHeight = newLines.length * fontSize * 1.4;
     }
 
     // 最終的な折り返し
     const finalLines = wrapText(translationText, font, fontSize, maxWidth);
 
-    // 描画
-    let yPos = bandHeight - margin - fontSize;
+    // 描画（上から下へ）
+    let yPos = pageHeight - topMargin;
     for (const line of finalLines) {
-        if (yPos < margin) break; // 収まらない
+        if (yPos < margin) break; // ページ下端に到達
 
         try {
             page.drawText(line, {
@@ -256,14 +259,10 @@ async function drawTranslationAtBottom(page, translationText, font, pageWidth, p
             console.error(`Failed to draw text: ${drawErr.message}`);
         }
 
-        yPos -= fontSize * 1.3;
+        yPos -= fontSize * 1.4;
     }
 
-    // オーバーフロー判定
-    const overflow = textHeight > (bandHeight - margin * 2);
-    console.log(`  Translation band: fontSize=${fontSize}, lines=${finalLines.length}, overflow=${overflow}`);
-
-    return overflow;
+    console.log(`  Translation: fontSize=${fontSize}, lines=${finalLines.length}`);
 }
 
 // テキスト折り返し（簡易版）
