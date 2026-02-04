@@ -35,7 +35,23 @@ export default async function handler(req, res) {
     }
 
     try {
-        const { pages, direction } = req.body;
+        const { pages, direction, url } = req.body;
+
+        // URLが指定された場合、PDFを取得してBase64で返す（プレビュー用）
+        if (url && !pages) {
+            console.log('[URL Fetch] Fetching PDF from:', url);
+            const response = await fetch(url);
+            if (!response.ok) {
+                throw new Error(`Failed to fetch PDF: ${response.statusText}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            const base64 = Buffer.from(arrayBuffer).toString('base64');
+
+            return res.status(200).json({
+                pdfBase64: base64,
+                contentType: 'application/pdf'
+            });
+        }
 
         if (!pages || !Array.isArray(pages) || pages.length === 0) {
             return res.status(400).json({ error: "Invalid request: pages array required" });

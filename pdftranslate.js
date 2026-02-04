@@ -321,12 +321,34 @@ async function handleExecute() {
 
         let pdfData;
 
-        // URLから読み込み
+        // URLから読み込み（API経由でCORS回避）
         if (urlInput) {
-            const response = await fetch(urlInput);
-            if (!response.ok) throw new Error("PDFのダウンロードに失敗しました");
-            const blob = await response.blob();
-            pdfData = await blob.arrayBuffer();
+            try {
+                const response = await fetch("/api/pdftranslate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ url: urlInput })
+                });
+
+                if (!response.ok) {
+                    throw new Error("ファイルのダウンロードに失敗しました");
+                }
+
+                const data = await response.json();
+                const base64 = data.pdfBase64;
+
+                // Base64をArrayBufferに変換
+                const binaryString = atob(base64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                pdfData = bytes.buffer;
+            } catch (error) {
+                setBusy(false);
+                showError(`URLからの読み込みエラー: ${error.message}`);
+                return;
+            }
         }
         // ファイルから読み込み
         else {
@@ -339,9 +361,20 @@ async function handleExecute() {
         // 再度新しいArrayBufferを取得（URL/ファイルから）
         let pdfData2;
         if (urlInput) {
-            const response2 = await fetch(urlInput);
-            const blob2 = await response2.blob();
-            pdfData2 = await blob2.arrayBuffer();
+            const response = await fetch("/api/pdftranslate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url: urlInput })
+            });
+            const data = await response.json();
+            const base64 = data.pdfBase64;
+
+            const binaryString = atob(base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            pdfData2 = bytes.buffer;
         } else {
             pdfData2 = await pdfFile.arrayBuffer();
         }
