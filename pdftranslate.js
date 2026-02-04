@@ -70,7 +70,8 @@ async function generatePreviews(pdfData) {
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
         const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 0.5 }); // サムネイル用
+        const viewport = page.getViewport({ scale: 0.5 }); // プレビュー用サムネイル（軽量化）
+
 
         // Canvas作成
         const canvas = document.createElement('canvas');
@@ -194,52 +195,64 @@ async function convertPDFToTextItems(pdfData) {
     updateStatus("PDF読み込み中", `0/${numPages}`, "PDFからテキストと座標を抽出しています...");
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        const page = await pdf.getPage(pageNum);
-        const viewport = page.getViewport({ scale: 2.0 }); // スケールを2.0に上げる（高品質）
+        try {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 2.0 }); // スケール〉2.0に上げる（高品質）
 
-        const textContent = await page.getTextContent();
+            const textContent = await page.getTextContent();
 
-        const textItems = textContent.items
-            .filter(item => item.str && item.str.trim() !== "")
-            .map(item => ({
-                text: item.str,
-                x: item.transform[4],
-                y: viewport.height - item.transform[5] - item.height,
-                width: item.width,
-                height: item.height
-            }));
+            const textItems = textContent.items
+                .filter(item => item.str && item.str.trim() !== "")
+                .map(item => ({
+                    text: item.str,
+                    x: item.transform[4],
+                    y: viewport.height - item.transform[5] - item.height,
+                    width: item.width,
+                    height: item.height
+                }));
 
-        if (textItems.length === 0) {
-            // テキストがない場合、画像として処理
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
+            if (textItems.length === 0) {
+                // テキストがない場合、画像として処理
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
 
-            await page.render({
-                canvasContext: context,
-                viewport: viewport
-            }).promise;
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
 
-            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.95); // 圧縮率を0.95に（高品質）
+                const imageDataUrl = canvas.toDataURL('image/jpeg', 0.95); // 圧縮率を0.95に（高品質）
 
+                pages.push({
+                    page: pageNum,
+                    width: viewport.width,
+                    height: viewport.height,
+                    textItems: [],
+                    image: imageDataUrl
+                });
+            } else {
+                pages.push({
+                    page: pageNum,
+                    width: viewport.width,
+                    height: viewport.height,
+                    textItems: textItems
+                });
+            }
+
+            updateStatus("PDF読み込み中", `${pageNum}/${numPages}`, "PDFからテキストと座標を抽出しています...");
+        } catch (error) {
+            console.error(`ページ${pageNum}のテキスト抽出失敗:`, error);
+            // エラーページを空白として追加
             pages.push({
                 page: pageNum,
-                width: viewport.width,
-                height: viewport.height,
+                width: 595,
+                height: 842,
                 textItems: [],
-                image: imageDataUrl
-            });
-        } else {
-            pages.push({
-                page: pageNum,
-                width: viewport.width,
-                height: viewport.height,
-                textItems: textItems
+                error: error.message
             });
         }
-
-        updateStatus("PDF読み込み中", `${pageNum}/${numPages}`, "PDFからテキストと座標を抽出しています...");
     }
 
     pagesData = pages;
