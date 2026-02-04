@@ -231,35 +231,26 @@ async function convertPDFToTextItems(pdfData) {
                     height: item.height
                 }));
 
-            if (textItems.length === 0) {
-                // テキストがない場合、画像として処理
-                const canvas = document.createElement('canvas');
-                const context = canvas.getContext('2d');
-                canvas.width = viewport.width;
-                canvas.height = viewport.height;
+            // 常に画像として処理（元のページを表示するため）
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
 
-                await page.render({
-                    canvasContext: context,
-                    viewport: viewport
-                }).promise;
+            await page.render({
+                canvasContext: context,
+                viewport: viewport
+            }).promise;
 
-                const imageDataUrl = canvas.toDataURL('image/jpeg', 0.95); // 圧縮率を0.95に（高品質）
+            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.95); // 圧縮率を0.95に（高品質）
 
-                pages.push({
-                    page: pageNum,
-                    width: viewport.width,
-                    height: viewport.height,
-                    textItems: [],
-                    image: imageDataUrl
-                });
-            } else {
-                pages.push({
-                    page: pageNum,
-                    width: viewport.width,
-                    height: viewport.height,
-                    textItems: textItems
-                });
-            }
+            pages.push({
+                page: pageNum,
+                width: viewport.width,
+                height: viewport.height,
+                textItems: textItems, // テキストがあれば翻訳に使用
+                image: imageDataUrl   // 常に画像を含める
+            });
 
             updateStatus("PDF読み込み中", `${pageNum}/${numPages}`, "PDFからテキストと座標を抽出しています...");
         } catch (error) {
