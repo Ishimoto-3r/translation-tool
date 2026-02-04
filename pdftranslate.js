@@ -309,7 +309,9 @@ async function handleExecute() {
         }
 
         // プレビュー未生成の場合、PDFを読み込んでプレビュー生成
-        if (!pdfFile && !$("pdfUrlInput").value) {
+        const urlInput = $("pdfUrlInput").value;
+
+        if (!pdfFile && !urlInput) {
             showError("PDFファイルを選択するか、URLを入力してください。");
             return;
         }
@@ -320,9 +322,8 @@ async function handleExecute() {
         let pdfData;
 
         // URLから読み込み
-        if ($("pdfUrlInput").value) {
-            const url = $("pdfUrlInput").value;
-            const response = await fetch(url);
+        if (urlInput) {
+            const response = await fetch(urlInput);
             if (!response.ok) throw new Error("PDFのダウンロードに失敗しました");
             const blob = await response.blob();
             pdfData = await blob.arrayBuffer();
@@ -334,7 +335,18 @@ async function handleExecute() {
 
         // プレビュー生成
         await generatePreviews(pdfData);
-        await convertPDFToTextItems(pdfData);
+
+        // 再度新しいArrayBufferを取得（URL/ファイルから）
+        let pdfData2;
+        if (urlInput) {
+            const response2 = await fetch(urlInput);
+            const blob2 = await response2.blob();
+            pdfData2 = await blob2.arrayBuffer();
+        } else {
+            pdfData2 = await pdfFile.arrayBuffer();
+        }
+
+        await convertPDFToTextItems(pdfData2);
 
         setBusy(false);
 
