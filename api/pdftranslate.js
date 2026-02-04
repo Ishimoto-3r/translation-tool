@@ -294,22 +294,30 @@ function wrapText(text, font, fontSize, maxWidth) {
 // Vision APIで翻訳（テキストのみ取得、bbox禁止）
 async function translateImageWithVision(imageDataUrl, targetLang) {
     const prompt = `
-あなたはOCRおよび翻訳の専門家です。
+Please perform OCR on this image and translate all Japanese text to ${targetLang}.
 
-タスク:
-1. この画像に含まれるすべての日本語テキストを読み取ってください
-2. 読み取ったテキストを${targetLang}に翻訳してください
-3. 翻訳結果のみを返してください
+Task:
+1. Read all Japanese text visible in this image (including titles, body text, model numbers, captions, etc.)
+2. Translate the read text to ${targetLang}
+3. Return only the translated text
 
-重要なルール:
-- テキストを上から下、左から右の順に読み取ってください
-- すべてのテキスト（タイトル、本文、型番、注釈など）を含めてください
-- 翻訳結果は段落形式で、元の意味を正確に伝えてください
-- 型番・固有名詞はそのまま残してください
-- 位置情報やJSON形式は不要です
+Important guidelines:
+- Read text from top to bottom, left to right
+- Include ALL text elements you can see
+- Keep model numbers and proper nouns unchanged (e.g., "3R-MFXS50", "Anyty")
+- Present translation in paragraph format
+- NO position information or JSON format needed
+- This is a standard OCR and translation task for a product manual
 
-出力形式（純粋なテキスト）:
-[翻訳された内容]
+Example output format:
+使用说明书
+3R-MFXS50
+Anyty
+可动式前端内窥镜
+3R-MFXS50
+[additional translated text...]
+
+Please provide the translation:
 `;
 
     try {
