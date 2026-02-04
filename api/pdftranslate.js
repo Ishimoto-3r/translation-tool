@@ -1,5 +1,5 @@
 // PDF翻訳API - バックエンド
-// pdf.js座標 + GPT翻訳専業 + pdf-lib描画
+// pdf.js座標 + GPT翻訳専業 + 画像ベースPDF対応（Vision APIフォールバック）
 
 import OpenAI from "openai";
 import { PDFDocument, rgb } from "pdf-lib";
@@ -72,7 +72,78 @@ export default async function handler(req, res) {
             const pageData = pages[pageIndex];
             console.log(`Processing page ${pageIndex + 1}/${pages.length}...`);
 
-            // テキスト抽出
+            // テキスト抽出がない場合（画像ベースPDF）、Vision APIで処理
+            if (pageData.textItems.length === 0 && pageData.image) {
+                console.log(`Page ${pageIndex + 1}: Image-based PDF detected, using Vision API for OCR...`);
+
+                // 画像をPDFに埋め込み
+                const base64Data = pageData.image.replace(/^data:image\/(png|jpeg|jpg);base64,/, '');
+                const imageBuffer = Buffer.from(base64Data, 'base64');
+                const embeddedImage = await pdfDoc.embedJpg(imageBuffer);
+
+                // ページ作成
+                const imgWidth = embeddedImage.width;
+                const imgHeight = embeddedImage.height;
+                const page = pdfDoc.addPage([imgWidth, imgHeight]);
+
+                // 背景として元の画像を配置
+                page.drawImage(embeddedImage, {
+                    x: 0,
+                    y: 0,
+                    width: imgWidth,
+                    height: imgHeight
+                });
+
+                // Vision APIでOCR+翻訳
+                const ocrResult = await processImageWithVision(pageData.image, targetLang);
+                totalTexts += ocrResult.blocks.length;
+                successfulTranslations += ocrResult.success;
+                validationIssues.push(...ocrResult.issues);
+
+                // 翻訳テキストをオーバーレイ
+                ocrResult.blocks.forEach(block => {
+                    if (!block.translated_text || !block.bbox_pct) return;
+
+                    const [leftPct, topPct, widthPct, heightPct] = block.bbox_pct;
+                    const x = (leftPct / 100) * imgWidth;
+                    const yTop = (topPct / 100) * imgHeight;
+                    const w = (widthPct / 100) * imgWidth;
+                    const h = (heightPct / 100) * imgHeight;
+                    const y = imgHeight - yTop - h;
+
+                    const padding = 3;
+
+                    // 白背景で原文を隠す
+                    page.drawRectangle({
+                        x: Math.max(0, x - padding),
+                        y: Math.max(0, y - padding),
+                        width: Math.min(w + (padding * 2), imgWidth - x + padding),
+                        height: Math.min(h + (padding * 2), imgHeight - y + padding),
+                        color: rgb(1, 1, 1),
+                        opacity: 1.0
+                    });
+
+                    // 翻訳テキストを描画
+                    const fontSize = Math.max(9, Math.min(h * 0.7, 16));
+                    try {
+                        page.drawText(block.translated_text, {
+                            x: x,
+                            y: y,
+                            size: fontSize,
+                            font: customFont,
+                            color: rgb(0, 0, 0),
+                            maxWidth: w,
+                            lineHeight: fontSize * 1.1
+                        });
+                    } catch (drawErr) {
+                        console.error(`Failed to draw text: ${drawErr.message}`);
+                    }
+                });
+
+                continue; // 次のページへ
+            }
+
+            // テキスト抽出（通常のPDF）
             const texts = pageData.textItems.map(item => item.text);
             totalTexts += texts.length;
 
@@ -162,6 +233,105 @@ export default async function handler(req, res) {
             details: error.message
         });
     }
+}
+
+// Vision APIでOCR+翻訳（画像ベースPDF用）
+async function processImageWithVision(imageDataUrl, targetLang) {
+    const prompt = `
+あなたは翻訳者およびレイアウト解析の専門家です。
+以下の作業を実行してください：
+
+1. 画像内のすべてのテキストブロック（タイトル、本文、型番など）を検出
+2. 各ブロックを${targetLang}に正確に翻訳
+3. 各ブロックの位置を画像左上を(0,0)、右下を(100,100)とするパーセンテージで指定
+   - bbox_pct形式: [left%, top%, width%, height%]
+   - left%: 左端の位置（0～100）
+   - top%: 上端の位置（0～100）
+   - width%: ブロックの幅（0～100）
+   - height%: ブロックの高さ（0～100）
+   - 元のテキストを完全に覆うように、少し余裕を持たせてください
+
+以下の構造のJSONオブジェクトを返してください：
+{
+  "blocks": [
+    {
+      "original_text": "元のテキスト",
+      "translated_text": "翻訳後のテキスト",
+      "bbox_pct": [5.0, 10.0, 30.0, 5.0]
+    }
+  ]
+}
+
+JSONのみを出力してください。`;
+
+    try {
+        const completion = await client.chat.completions.create({
+            model: "gpt-4o",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        { type: "text", text: prompt },
+                        { type: "image_url", image_url: { url: imageDataUrl } }
+                    ]
+                }
+            ],
+            response_format: { type: "json_object" },
+            max_completion_tokens: 4000
+        });
+
+        const result = JSON.parse(completion.choices[0].message.content);
+        const blocks = result.blocks || [];
+
+        // 検証
+        const validation = validateVisionBlocks(blocks);
+
+        return {
+            blocks: blocks,
+            success: validation.success,
+            issues: validation.issues
+        };
+
+    } catch (error) {
+        console.error("Vision API error:", error);
+        return {
+            blocks: [],
+            success: 0,
+            issues: [`Vision API error: ${error.message}`]
+        };
+    }
+}
+
+// Vision APIブロックの検証
+function validateVisionBlocks(blocks) {
+    const issues = [];
+    let successCount = 0;
+
+    blocks.forEach((block, idx) => {
+        if (!block.translated_text || block.translated_text.trim() === "") {
+            issues.push(`Block ${idx + 1}: 空の翻訳結果`);
+            return;
+        }
+
+        if (!block.bbox_pct || block.bbox_pct.length !== 4) {
+            issues.push(`Block ${idx + 1}: 位置情報が不正`);
+            return;
+        }
+
+        const hasChinese = /[\u4e00-\u9fff]/.test(block.translated_text);
+        const isAlphanumeric = /^[A-Za-z0-9\-_]+$/.test(block.translated_text);
+
+        if (hasChinese || isAlphanumeric) {
+            successCount++;
+        } else {
+            issues.push(`Block ${idx + 1}: 中国語文字が含まれていない - "${block.translated_text}"`);
+        }
+    });
+
+    return {
+        success: successCount,
+        issues: issues
+    };
 }
 
 // GPT APIでテキスト翻訳

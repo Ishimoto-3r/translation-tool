@@ -1,5 +1,5 @@
 // PDF翻訳ツール - フロントエンド
-// pdf.js getTextContent()による正確な座標取得 + GPT翻訳
+// pdf.js getTextContent()による正確な座標取得 + 画像フォールバック
 
 // グローバル変数
 let pdfFile = null;
@@ -62,7 +62,7 @@ function clearError() {
     }
 }
 
-// PDF→テキスト+座標抽出関数
+// PDF→テキスト+座標抽出関数（画像フォールバック付き）
 async function convertPDFToTextItems(pdfData) {
     const pages = [];
 
@@ -77,7 +77,7 @@ async function convertPDFToTextItems(pdfData) {
 
         for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
             const page = await pdf.getPage(pageNum);
-            const viewport = page.getViewport({ scale: 1.0 });
+            const viewport = page.getViewport({ scale: 1.5 });
             const textContent = await page.getTextContent();
 
             const textItems = textContent.items.map(item => {
@@ -101,15 +101,37 @@ async function convertPDFToTextItems(pdfData) {
             // 空テキストを除外
             const filteredItems = textItems.filter(item => item.text && item.text.trim() !== "");
 
+            // テキストが抽出できない場合（画像ベースPDF）、画像に変換
+            let pageImage = null;
+            if (filteredItems.length === 0) {
+                console.log(`Page ${pageNum}: No text found, converting to image for Vision API...`);
+
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+
+                pageImage = canvas.toDataURL('image/jpeg', 0.85);
+                console.log(`Page ${pageNum}: Converted to image (${Math.round(pageImage.length / 1024)} KB)`);
+            }
+
             pages.push({
                 pageNumber: pageNum,
                 width: viewport.width,
                 height: viewport.height,
-                textItems: filteredItems
+                textItems: filteredItems,
+                image: pageImage // 画像ベースPDFの場合は画像データ
             });
 
             console.log(`Page ${pageNum}: Extracted ${filteredItems.length} text items`);
-            console.log("Sample items:", filteredItems.slice(0, 3));
+            if (filteredItems.length > 0) {
+                console.log("Sample items:", filteredItems.slice(0, 3));
+            }
         }
 
         return pages;
@@ -139,12 +161,17 @@ async function handleExecute() {
         // 1. PDFを読み込み
         const arrayBuffer = await pdfFile.arrayBuffer();
 
-        // 2. PDF→テキスト+座標抽出
+        // 2. PDF→テキスト+座標抽出（または画像変換）
         const pages = await convertPDFToTextItems(arrayBuffer);
 
         if (resultArea) {
             const totalItems = pages.reduce((sum, p) => sum + p.textItems.length, 0);
-            resultArea.textContent = `${totalItems}個のテキストを抽出完了。翻訳中...`;
+            const hasImages = pages.some(p => p.image !== null);
+            if (hasImages) {
+                resultArea.textContent = "画像ベースPDFを検出。Vision APIで翻訳中...";
+            } else {
+                resultArea.textContent = `${totalItems}個のテキストを抽出完了。翻訳中...`;
+            }
         }
 
         // 3. APIに送信
