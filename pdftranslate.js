@@ -84,9 +84,9 @@ async function generatePreviews(pdfData) {
             viewport: viewport
         }).promise;
 
-        // プレビューアイテ��作成
+        // プレビューアイテム作成
         const itemDiv = document.createElement('div');
-        itemDiv.className = 'page-preview-item selected';
+        itemDiv.className = 'page-preview-item selected cursor-pointer';
         itemDiv.dataset.pageNum = pageNum;
 
         const checkbox = document.createElement('input');
@@ -94,7 +94,21 @@ async function generatePreviews(pdfData) {
         checkbox.checked = true;
         checkbox.id = `page-check-${pageNum}`;
         checkbox.className = 'mr-2';
+
+        const toggleSelection = () => {
+            checkbox.checked = !checkbox.checked;
+            if (checkbox.checked) {
+                selectedPages.add(pageNum);
+                itemDiv.classList.add('selected');
+            } else {
+                selectedPages.delete(pageNum);
+                itemDiv.classList.remove('selected');
+            }
+            updateSelectionCount();
+        };
+
         checkbox.addEventListener('change', (e) => {
+            e.stopPropagation();
             if (e.target.checked) {
                 selectedPages.add(pageNum);
                 itemDiv.classList.add('selected');
@@ -105,15 +119,26 @@ async function generatePreviews(pdfData) {
             updateSelectionCount();
         });
 
+        // アイテム全体をクリック可能に
+        itemDiv.addEventListener('click', (e) => {
+            if (e.target !== checkbox) {
+                toggleSelection();
+            }
+        });
+
         const label = document.createElement('label');
         label.htmlFor = `page-check-${pageNum}`;
-        label.className = 'flex items-center gap-2 mb-2 cursor-pointer';
-        label.innerHTML = `${checkbox.outerHTML}<span class="text-sm font-bold">ページ ${pageNum}</span>`;
+        label.className = 'flex items-center gap-2 mb-2 cursor-pointer select-none';
+        label.innerHTML = `<span class="text-sm font-bold">ページ ${pageNum}</span>`;
+
+        const labelContainer = document.createElement('div');
+        labelContainer.className = 'flex items-center gap-2 mb-2';
+        labelContainer.appendChild(checkbox);
+        labelContainer.appendChild(label);
 
         canvas.className = 'page-preview-canvas';
 
-        itemDiv.appendChild(label.firstChild); // checkbox
-        itemDiv.appendChild(label.querySelector('span'));
+        itemDiv.appendChild(labelContainer);
         itemDiv.appendChild(canvas);
 
         previewContainer.appendChild(itemDiv);
@@ -227,15 +252,66 @@ async function handleExecute() {
     try {
         clearError();
 
-        // PDF選択確認
-        if (!pdfFile && !$("pdfUrlInput").value) {
-            showError("PDFファイルを選択するか、URLを入力してください。");
+        // ページ選択確認（プレビューが表示されている場合）
+        if (pagesData.length > 0 && selectedPages.size === 0) {
+            showError("翻訳するページを少なくとも1つ選択してください。");
             return;
         }
 
-        // ページ選択確認
-        if (selectedPages.size === 0) {
-            showError("翻訳するページを少なくとも1つ選択してください。");
+        // プレビューが表示されている場合、すぐに翻訳処理へ
+        if (pagesData.length > 0 && selectedPages.size > 0) {
+            setBusy(true);
+
+            // 選択されたページのみフィルタリング
+            const selectedPagesArray = Array.from(selectedPages).sort((a, b) => a - b);
+            const selectedPagesData = selectedPagesArray.map(pageNum => pagesData[pageNum - 1]);
+
+            updateStatus("翻訳中", `0/${selectedPagesData.length}`, "選択されたページを翻訳しています...");
+
+            const direction = $("directionSelect").value;
+
+            // API呼び出し
+            const response = await fetch("/api/pdftranslate", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    pages: selectedPagesData,
+                    direction: direction
+                })
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || "翻訳に失敗しました");
+            }
+
+            updateStatus("完了", "Done", "翻訳が完了しました。PDFをダウンロードしています...");
+
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+
+            // 結果表示
+            const resultArea = $("resultArea");
+            resultArea.innerHTML = `
+                <div class="text-center">
+                    <div class="text-lg font-bold text-green-600 mb-4">✓ 翻訳完了</div>
+                    <a href="${url}" download="translated.pdf" 
+                       class="inline-block px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition">
+                        翻訳済みPDFをダウンロード
+                    </a>
+                    <div class="mt-3 text-sm text-gray-600">
+                        ${selectedPages.size}ページを翻訳しました（元のページ + 翻訳ページ = ${selectedPages.size * 2}ページ）
+                    </div>
+                </div>
+            `;
+
+            setBusy(false);
+            return;
+        }
+
+        // プレビュー未生成の場合、PDFを読み込んでプレビュー生成
+        if (!pdfFile && !$("pdfUrlInput").value) {
+            showError("PDFファイルを選択するか、URLを入力してください。");
             return;
         }
 
@@ -257,60 +333,14 @@ async function handleExecute() {
             pdfData = await pdfFile.arrayBuffer();
         }
 
-        // プレビューがまだ生成されていない場合
-        if (pagesData.length === 0) {
-            await generatePreviews(pdfData);
-        }
-
-        // 全ページデータを取得（まだ取得していない場合）
-        if (!pagesData[0].textItems && !pagesData[0].image) {
-            await convertPDFToTextItems(pdfData);
-        }
-
-        // 選択されたページのみフィルタリング
-        const selectedPagesArray = Array.from(selectedPages).sort((a, b) => a - b);
-        const selectedPagesData = selectedPagesArray.map(pageNum => pagesData[pageNum - 1]);
-
-        updateStatus("翻訳中", `0/${selectedPagesData.length}`, "選択されたページを翻訳しています...");
-
-        const direction = $("directionSelect").value;
-
-        // API呼び出し
-        const response = await fetch("/api/pdftranslate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                pages: selectedPagesData,
-                direction: direction
-            })
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || "翻訳に失敗しました");
-        }
-
-        updateStatus("完了", "Done", "翻訳が完了しました。PDFをダウンロードしています...");
-
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-
-        // 結果表示
-        const resultArea = $("resultArea");
-        resultArea.innerHTML = `
-            <div class="text-center">
-                <div class="text-lg font-bold text-green-600 mb-4">✓ 翻訳完了</div>
-                <a href="${url}" download="translated.pdf" 
-                   class="inline-block px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition">
-                    翻訳済みPDFをダウンロード
-                </a>
-                <div class="mt-3 text-sm text-gray-600">
-                    ${selectedPages.size}ページを翻訳しました（元のページ + 翻訳ページ = ${selectedPages.size * 2}ページ）
-                </div>
-            </div>
-        `;
+        // プレビュー生成
+        await generatePreviews(pdfData);
+        await convertPDFToTextItems(pdfData);
 
         setBusy(false);
+
+        // プレビュー生成後、ユーザーに選択を促す
+        showError("ページを選択して、もう一度「翻訳を実行する」ボタンを押してください。");
 
     } catch (error) {
         console.error("Error:", error);
