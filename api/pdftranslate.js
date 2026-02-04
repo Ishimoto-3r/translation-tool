@@ -140,9 +140,11 @@ module.exports = async (req, res) => {
 あなたは翻訳者およびレイアウト解析の専門家です。
 以下の作業を実行してください：
 
-1. 画像内のすべてのテキストブロックを検出
-2. 各ブロックを${targetLang}に翻訳
-3. 各ブロックの位置を画像の幅・高さに対するパーセンテージで推定: [top(%), left(%), width(%), height(%)]
+1. 画像内のすべてのテキストブロック（タイトル、本文、型番など）を検出
+2. 各ブロックを${targetLang}に正確に翻訳
+3. 各ブロックの位置を画像の幅・高さに対するパーセンテージで正確に推定
+   - bbox_pct: [top(%), left(%), width(%), height(%)] 
+   - 元のテキストを完全に覆うように、少し余裕を持たせてください
 
 以下の構造のJSONオブジェクトを返してください：
 {
@@ -215,27 +217,30 @@ JSONのみを出力してください。`;
                     const h = (heightPct / 100) * imgHeight;
                     const y = imgHeight - yTop - h;
 
-                    // 白背景で原文を隠す
+                    // パディングを追加（元のテキストを完全に隠す）
+                    const padding = 3;
+
+                    // 白背景で原文を隠す（完全に不透明）
                     page.drawRectangle({
-                        x: Math.max(0, x),
-                        y: Math.max(0, y),
-                        width: Math.min(w, imgWidth - x),
-                        height: Math.min(h, imgHeight - y),
+                        x: Math.max(0, x - padding),
+                        y: Math.max(0, y - padding),
+                        width: Math.min(w + (padding * 2), imgWidth - x + padding),
+                        height: Math.min(h + (padding * 2), imgHeight - y + padding),
                         color: rgb(1, 1, 1),
-                        opacity: 0.95
+                        opacity: 1.0
                     });
 
                     // 翻訳テキストを描画
-                    const fontSize = Math.max(8, Math.min(h * 0.6, 14));
+                    const fontSize = Math.max(9, Math.min(h * 0.7, 16));
                     try {
                         page.drawText(text, {
-                            x: Math.max(2, x + 2),
-                            y: Math.max(2, y + (h * 0.2)),
+                            x: Math.max(2, x + 1),
+                            y: Math.max(2, y + (h * 0.15)),
                             size: fontSize,
                             font: customFont,
                             color: rgb(0, 0, 0),
-                            maxWidth: Math.max(10, w - 4),
-                            lineHeight: fontSize * 1.2
+                            maxWidth: Math.max(10, w - 2),
+                            lineHeight: fontSize * 1.15
                         });
                     } catch (drawErr) {
                         console.error(`Failed to draw text for block: ${drawErr.message}`);
