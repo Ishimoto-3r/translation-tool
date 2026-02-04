@@ -2,9 +2,17 @@
 // pdf.js getTextContent()による正確な座標取得 + 画像フォールバック + ページ選択UI
 
 // グローバル変数
-let pdfFile = null;
+let pdfDoc = null;
 let pagesData = []; // 全ページデータ
 let selectedPages = new Set(); // 選択されたページ番号（1-indexed）
+
+// 範囲選択モード用
+let isCropMode = false;
+let cropAreas = []; // { pageIndex: number, x, y, width, height, id }
+let isDrawing = false;
+let startX = 0;
+let startY = 0;
+let currentCropPage = null; // 現在ドラッグ中のページインデックス
 
 // PDF.js設定
 if (typeof pdfjsLib !== 'undefined') {
