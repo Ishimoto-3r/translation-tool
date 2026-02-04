@@ -181,6 +181,16 @@ JSONのみを出力してください。`;
                 totalBlocks += blocks.length;
                 console.log(`Page ${pageIndex + 1}: Detected ${blocks.length} text blocks`);
 
+                // デバッグ：Vision APIレスポンスを出力
+                console.log("=== Vision API Response ===");
+                blocks.forEach((block, idx) => {
+                    console.log(`Block ${idx + 1}:`);
+                    console.log(`  Original: "${block.original_text}"`);
+                    console.log(`  Translated: "${block.translated_text}"`);
+                    console.log(`  BBox: [${block.bbox_pct?.join(', ')}]`);
+                });
+                console.log("===========================");
+
                 // AI自己検証
                 blocks.forEach((block, idx) => {
                     const issues = validateTranslationBlock(block, `${pageIndex + 1}-${idx + 1}`);
