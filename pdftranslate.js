@@ -263,6 +263,114 @@ async function generatePreviews(pdfData) {
     updateSelectionCount();
 }
 
+// 選択数表示更新
+function updateSelectionCount() {
+    const count = selectedPages.size;
+    const total = pagesData.length || document.querySelectorAll('.page-preview-item').length;
+    $("selectionCount").textContent = `${count}/${total} ページ選択中`;
+}
+
+// すべて選択/解除
+function setupSelectionButtons() {
+    const btnSelectAll = $("btnSelectAll");
+    const btnDeselectAll = $("btnDeselectAll");
+
+    if (btnSelectAll) {
+        btnSelectAll.addEventListener("click", () => {
+            document.querySelectorAll('.page-preview-item').forEach(item => {
+                const pageNum = parseInt(item.dataset.pageNum);
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                if (checkbox) checkbox.checked = true;
+                selectedPages.add(pageNum);
+                item.classList.add('selected');
+            });
+            updateSelectionCount();
+        });
+    }
+
+    if (btnDeselectAll) {
+        btnDeselectAll.addEventListener("click", () => {
+            document.querySelectorAll('.page-preview-item').forEach(item => {
+                const pageNum = parseInt(item.dataset.pageNum);
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                if (checkbox) checkbox.checked = false;
+                selectedPages.delete(pageNum);
+                item.classList.remove('selected');
+            });
+            updateSelectionCount();
+        });
+    }
+}
+
+// PDF→テキスト+座標抽出関数（画像フォールバック付き）
+async function convertPDFToTextItems(pdfData) {
+    const pdf = await pdfjsLib.getDocument({
+        data: pdfData,
+        cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/cmaps/',
+        cMapPacked: true
+    }).promise;
+
+    const numPages = pdf.numPages;
+    const pages = [];
+
+    updateStatus("PDF読み込み中", `0/${numPages}`, "PDFからテキストと座標を抽出しています...");
+
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+        try {
+            const page = await pdf.getPage(pageNum);
+            const viewport = page.getViewport({ scale: 2.0 }); // スケール〉2.0に上げる（高品質）
+
+            const textContent = await page.getTextContent();
+
+            const textItems = textContent.items
+                .filter(item => item.str && item.str.trim() !== "")
+                .map(item => ({
+                    text: item.str,
+                    x: item.transform[4],
+                    y: viewport.height - item.transform[5] - item.height,
+                    width: item.width,
+                    height: item.height
+                }));
+
+            // 常に画像として処理（元のページを表示するため）
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            await page.render({
+                canvasContext: context,
+                viewport: viewport
+            }).promise;
+
+            const imageDataUrl = canvas.toDataURL('image/jpeg', 0.95); // 圧縮率を0.95に（高品質）
+
+            pages.push({
+                page: pageNum,
+                width: viewport.width,
+                height: viewport.height,
+                textItems: textItems, // テキストがあれば翻訳に使用
+                image: imageDataUrl   // 常に画像を含める
+            });
+
+            updateStatus("PDF読み込み中", `${pageNum}/${numPages}`, "PDFからテキストと座標を抽出しています...");
+        } catch (error) {
+            console.error(`ページ${pageNum}のテキスト抽出失敗:`, error);
+            // エラーページを空白として追加
+            pages.push({
+                page: pageNum,
+                width: 595,
+                height: 842,
+                textItems: [],
+                error: error.message
+            });
+        }
+    }
+
+    pagesData = pages;
+    return pages;
+}
+
 // 範囲選択イベント設定
 function setupCropEvents(canvas, pageNum) {
     let isDragging = false;
