@@ -469,7 +469,7 @@ async function handleExecute() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    pages: selectedPagesData,
+                    pages: pagesToSend,
                     direction: direction
                 })
             });
