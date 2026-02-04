@@ -265,26 +265,49 @@ async function drawTranslationOnPage(page, translationText, font, pageWidth, pag
     console.log(`  Translation: fontSize=${fontSize}, lines=${finalLines.length}`);
 }
 
-// テキスト折り返し（簡易版）
+// テキスト折り返し（中国語対応）
 function wrapText(text, font, fontSize, maxWidth) {
-    const words = text.split('');
     const lines = [];
     let currentLine = '';
 
-    for (const char of words) {
-        const testLine = currentLine + char;
-        const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+    // 改行で分割
+    const paragraphs = text.split('\n');
 
-        if (testWidth > maxWidth && currentLine.length > 0) {
-            lines.push(currentLine);
-            currentLine = char;
-        } else {
-            currentLine = testLine;
+    for (const paragraph of paragraphs) {
+        if (!paragraph.trim()) {
+            if (currentLine) {
+                lines.push(currentLine);
+                currentLine = '';
+            }
+            lines.push(''); // 空行を保持
+            continue;
         }
-    }
 
-    if (currentLine.length > 0) {
-        lines.push(currentLine);
+        // 文字単位で処理
+        for (let i = 0; i < paragraph.length; i++) {
+            const char = paragraph[i];
+            const testLine = currentLine + char;
+
+            try {
+                const testWidth = font.widthOfTextAtSize(testLine, fontSize);
+
+                if (testWidth > maxWidth && currentLine.length > 0) {
+                    lines.push(currentLine);
+                    currentLine = char;
+                } else {
+                    currentLine = testLine;
+                }
+            } catch (err) {
+                // フォント幅計算エラーの場合、文字を追加
+                currentLine = testLine;
+            }
+        }
+
+        // 段落の終わり
+        if (currentLine.length > 0) {
+            lines.push(currentLine);
+            currentLine = '';
+        }
     }
 
     return lines;
