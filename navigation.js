@@ -391,7 +391,13 @@ const STYLE = `
         width: 16px;
         height: 16px;
     }
-    .icon-dot { background: currentColor; border-radius: 2px; }
+    
+    .icon-dot {
+        width: 4px;
+        height: 4px;
+        background: currentColor;
+        border-radius: 2px;
+    }
 
     @media (max-width: 768px) {
         .header-left { gap: 12px; }
