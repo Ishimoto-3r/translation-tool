@@ -96,7 +96,6 @@ const PinManager = {
 
 // CSSの注入
 const STYLE = `
-    /* Navigation Bar */
     .app-header {
         position: sticky;
         top: 0;
@@ -110,6 +109,7 @@ const STYLE = `
         align-items: center;
         justify-content: space-between;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        gap: 16px; /* ヘッダー内の要素間の隙間 */
     }
 
     .header-left {
@@ -117,7 +117,9 @@ const STYLE = `
         align-items: center;
         gap: 24px;
         flex: 1;
-        overflow: hidden; /* コンテンツが多い場合用 */
+        min-width: 0; /* Flexアイテムの縮小を許可 */
+        max-width: calc(100% - 80px); /* ランチャーボタン分のスペースを確保 */
+        overflow: hidden;
     }
 
     .app-brand {
@@ -129,7 +131,7 @@ const STYLE = `
         font-size: 1.1rem;
         text-decoration: none;
         white-space: nowrap;
-        margin-right: 16px;
+        flex-shrink: 0; /* タイトルは縮まない */
     }
 
     /* Pinned Tools Area */
@@ -138,6 +140,8 @@ const STYLE = `
         position: relative;
         overflow: hidden;
         margin: 0 16px;
+        min-width: 0; /* 縮小を許可 */
+        max-width: 800px; /* ピン留めエリアの最大幅を制限 */
         mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
         -webkit-mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
     }
@@ -192,7 +196,7 @@ const STYLE = `
         justify-content: center;
         cursor: pointer;
         transition: all 0.2s;
-        flex-shrink: 0;
+        flex-shrink: 0; /* 絶対に縮まない */
         position: relative;
     }
 
