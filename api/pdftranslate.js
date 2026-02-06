@@ -60,7 +60,23 @@ export default async function handler(req, res) {
         console.log(`Processing ${pages.length} page(s), Direction: ${direction}`);
 
         // 翻訳方向設定
-        const targetLang = direction === "ja-zh" ? "簡体字中国語" : "日本語";
+        let targetLang;
+        switch (direction) {
+            case "ja-zh":
+                targetLang = "簡体字中国語";
+                break;
+            case "ja-en":
+                targetLang = "英語";
+                break;
+            case "ja-ko":
+                targetLang = "韓国語";
+                break;
+            case "zh-ja":
+                targetLang = "日本語";
+                break;
+            default:
+                targetLang = "簡体字中国語"; // デフォルト
+        }
         console.log(`Target: ${targetLang}`);
 
         // フォント読み込み
