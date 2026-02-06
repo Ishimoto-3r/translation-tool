@@ -515,6 +515,18 @@ window.addEventListener("load", () => {
             console.error("Navigation Error: header.innerHTML =", header.innerHTML);
             console.error("Navigation Error: header.children =", header.children);
         }
+
+        // ピン留めツールの横スクロール対応（マウスホイール）
+        const pinnedTools = header.querySelector(".pinned-tools");
+        if (pinnedTools) {
+            pinnedTools.addEventListener("wheel", (e) => {
+                // 縦スクロールを横スクロールに変換
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    pinnedTools.scrollLeft += e.deltaY;
+                }
+            }, { passive: false });
+        }
     }
 
     function renderLauncher() {
