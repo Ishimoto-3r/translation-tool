@@ -133,13 +133,23 @@ const STYLE = `
     }
 
     /* Pinned Tools Area */
+    .pinned-tools-container {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+        margin: 0 16px;
+        mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
+        -webkit-mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
+    }
+
     .pinned-tools {
         display: flex;
         align-items: center;
         gap: 8px;
-        overflow-x: auto; /* はみ出し対応 */
-        scrollbar-width: none; /* Firefox */
-        -ms-overflow-style: none; /* IE/Edge */
+        overflow-x: auto;
+        padding: 0 12px;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
     }
     .pinned-tools::-webkit-scrollbar { display: none; } /* Chrome/Safari */
 
@@ -183,11 +193,46 @@ const STYLE = `
         cursor: pointer;
         transition: all 0.2s;
         flex-shrink: 0;
-        margin-left: 16px;
+        position: relative;
     }
 
     .launcher-btn:hover {
         background: rgba(255, 255, 255, 0.2);
+        box-shadow: 0 0 12px rgba(255, 255, 255, 0.1);
+    }
+
+    /* Tooltip */
+    .nav-tooltip {
+        position: absolute;
+        bottom: -32px;
+        left: 50%;
+        transform: translateX(-50%) translateY(-4px);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        white-space: nowrap;
+        pointer-events: none;
+        opacity: 0;
+        transition: all 0.2s;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        z-index: 1001;
+    }
+
+    .launcher-btn:hover .nav-tooltip {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+
+    .shortcut-hint {
+        color: #9ca3af;
+        margin-left: 4px;
+        font-size: 10px;
+        border: 1px solid #4b5563;
+        padding: 0 3px;
+        border-radius: 3px;
+        background: #374151;
     }
 
     /* Launcher Overlay */
@@ -337,6 +382,8 @@ const STYLE = `
         .app-brand span { display: none; } /* スマホではタイトル隠す */
         .app-brand::before { content: "AI"; } /* 代わりに短いロゴ */
         .pin-link span:not(.icon) { display: none; } /* スマホでは文字隠す？いや、ユーザーは不要と言ったが念のため */
+        .pinned-tools-container { margin: 0 8px; mask-image: linear-gradient(to right, transparent, black 8px, black calc(100% - 8px), transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 8px, black calc(100% - 8px), transparent); }
+        .nav-tooltip { display: none; }
     }
 `;
 
@@ -394,18 +441,25 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         });
 
+        // Cmd+K or Ctrl+K
+        const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+        const shortcutKey = isMac ? '⌘K' : 'Ctrl+K';
+
         header.innerHTML = `
             <div class="header-left">
                 <a href="/index.html" class="app-brand">
                     <span>${getCurrentPageTitle()}</span>
                 </a>
-                <div class="pinned-tools">
-                    ${pinnedHtml}
+                <div class="pinned-tools-container">
+                    <div class="pinned-tools">
+                        ${pinnedHtml}
+                    </div>
                 </div>
             </div>
             
             <button class="launcher-btn" aria-label="アプリ一覧">
                 ${createIconGrid()}
+                <span class="nav-tooltip">アプリ一覧 <span class="shortcut-hint">${shortcutKey}</span></span>
             </button>
         `;
 
@@ -505,6 +559,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.addEventListener("keydown", (e) => {
         if (e.key === "Escape" && launcher.classList.contains("active")) {
+            toggleLauncher();
+        }
+
+        // Cmd(Meta)+K or Ctrl+K
+        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+            e.preventDefault();
             toggleLauncher();
         }
     });
