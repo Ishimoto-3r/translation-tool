@@ -505,8 +505,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 const isPinned = pinnedUrls.includes(tool.url);
 
                 launcherHtml += `
-                    <div class="tool-card ${isActive ? 'active' : ''}">
-                        <a href="${tool.url}" class="card-link" aria-label="${tool.name}"></a>
+                    <div class="tool-card ${isActive ? 'active' : ''}" data-url="${tool.url}">
                         <div class="tool-header">
                             <span class="tool-icon">${tool.icon}</span>
                             <button class="star-btn ${isPinned ? 'pinned' : ''}" data-url="${tool.url}" title="${isPinned ? 'ピン留め解除' : 'ピン留めする'}">
