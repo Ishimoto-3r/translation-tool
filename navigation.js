@@ -205,8 +205,8 @@ const STYLE = `
     .nav-tooltip {
         position: absolute;
         bottom: -32px;
-        left: 50%;
-        transform: translateX(-50%) translateY(-4px);
+        right: 0;
+        transform: translateY(-4px);
         background: rgba(0, 0, 0, 0.8);
         color: white;
         padding: 4px 8px;
@@ -222,7 +222,7 @@ const STYLE = `
 
     .launcher-btn:hover .nav-tooltip {
         opacity: 1;
-        transform: translateX(-50%) translateY(0);
+        transform: translateY(0);
     }
 
     .shortcut-hint {
