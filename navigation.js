@@ -328,7 +328,8 @@ const STYLE = `
         display: flex;
         flex-direction: column;
         gap: 6px;
-        position: relative; /* for star btn */
+        position: relative; /* for star btn and absolute link */
+        cursor: pointer; /* カード全体をクリック可能に */
     }
 
     .tool-card:hover {
@@ -346,11 +347,21 @@ const STYLE = `
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
+        position: relative; /* z-indexのため */
+        z-index: 1; /* リンクより上に */
     }
 
     .tool-icon { font-size: 1.5rem; margin-bottom: 4px; display: block; }
-    .tool-name { color: #f3f4f6; font-weight: 600; font-size: 0.95rem; }
-    .tool-desc { color: #9ca3af; font-size: 0.75rem; line-height: 1.4; }
+    .tool-name { color: #f3f4f6; font-weight: 600; font-size: 0.95rem; position: relative; z-index: 1; }
+    .tool-desc { color: #9ca3af; font-size: 0.75rem; line-height: 1.4; position: relative; z-index: 1; }
+
+    /* Card Link - 全体をカバー */
+    .card-link {
+        position: absolute;
+        inset: 0;
+        z-index: 0;
+        border-radius: 12px;
+    }
 
     /* Star Button */
     .star-btn {
@@ -362,6 +373,7 @@ const STYLE = `
         font-size: 1.2rem;
         line-height: 1;
         transition: all 0.2s;
+        position: relative;
         z-index: 2; /* リンクより上に */
     }
     .star-btn:hover { color: rgba(255, 255, 255, 0.6); transform: scale(1.1); }
@@ -494,13 +506,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 launcherHtml += `
                     <div class="tool-card ${isActive ? 'active' : ''}">
+                        <a href="${tool.url}" class="card-link" aria-label="${tool.name}"></a>
                         <div class="tool-header">
                             <span class="tool-icon">${tool.icon}</span>
                             <button class="star-btn ${isPinned ? 'pinned' : ''}" data-url="${tool.url}" title="${isPinned ? 'ピン留め解除' : 'ピン留めする'}">
                                 ${isPinned ? '★' : '☆'}
                             </button>
                         </div>
-                        <a href="${tool.url}" class="absolute inset-0 z-0"></a>
                         <span class="tool-name">${tool.name}</span>
                         <span class="tool-desc">${tool.desc}</span>
                     </div>
