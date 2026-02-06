@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>マニュアル中国語化（pdftranslate）</title>
+    <title>検品用マニュアル翻訳</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- PDF.js CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -151,7 +151,14 @@
                 <a href="/column-translate.html">列指定翻訳</a>
                 <a href="/sheet-translate.html">シート翻訳</a>
                 <a href="/word-translate.html">Word翻訳</a>
-                <a href="/pdftranslate.html" class="active">マニュアル中国語化</a>
+            </div>
+        </div>
+
+        <div class="nav-groupbox">
+            <div class="nav-heading">🔍 検品</div>
+            <div class="nav-links">
+                <a href="/pdftranslate.html" class="active">検品用マニュアル翻訳</a>
+                <a href="/inspection.html">検品リスト作成</a>
             </div>
         </div>
 
@@ -169,7 +176,6 @@
                 <a href="/report.html">修理レポート</a>
                 <a href="/kensho.html">検証項目作成</a>
                 <a href="/prompt.html">単発プロンプト</a>
-                <a href="/inspection.html">検品リスト作成</a>
             </div>
         </div>
     </nav>
@@ -191,7 +197,7 @@
 
     <main class="max-w-5xl mx-auto px-4 py-8">
         <div class="bg-white rounded-2xl shadow p-6 border border-gray-200">
-            <h1 class="text-2xl font-bold">マニュアル中国語化（pdftranslate）</h1>
+            <h1 class="text-2xl font-bold">検品用マニュアル翻訳</h1>
 
             <!-- 入力 -->
             <section class="mt-6">
@@ -207,12 +213,9 @@
                         <input id="pdfInput" type="file" accept="application/pdf" class="hidden" />
                     </div>
 
-                    <!-- URL入力（容量が大きいファイルはURL推奨） -->
+                    <!-- URL入力 -->
                     <div class="mt-4">
-                        <label class="block text-sm font-bold">マニュアルURL（容量が大きい場合はこちら）</label>
-                        <div class="text-xs text-gray-500 mt-1">
-                            ※ドラッグ＆ドロップは4MBまで。超える場合はURLを貼り付けてください（ファイル直リンクのみ）。
-                        </div>
+                        <label class="block text-sm font-bold">マニュアルURL</label>
                         <div class="text-xs text-gray-500 mt-1">
                             <a href="https://3rrr-btob.jp/manual/" target="_blank" rel="noopener noreferrer"
                                 class="text-blue-600 underline">マニュアル検索はこちら</a>
