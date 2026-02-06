@@ -141,7 +141,6 @@ const STYLE = `
         overflow: hidden;
         margin: 0 16px;
         min-width: 0; /* 縮小を許可 */
-        max-width: 800px; /* ピン留めエリアの最大幅を制限 */
         mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
         -webkit-mask-image: linear-gradient(to right, transparent, black 12px, black calc(100% - 12px), transparent);
     }
