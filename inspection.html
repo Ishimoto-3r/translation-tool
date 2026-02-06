@@ -1,6 +1,7 @@
 <!-- inspection.html（全文置き換え） -->
 <!doctype html>
 <html lang="ja">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -9,73 +10,110 @@
   <script src="/inspection.js" defer></script>
 
   <style>
-    body{
-      font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Hiragino Kaku Gothic ProN','Meiryo',sans-serif;
-      margin:0;padding:0;
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+      margin: 0;
+      padding: 0;
     }
 
-    .tool-nav{position:sticky;top:0;z-index:100;background:#374151;padding:10px 16px;box-shadow:0 2px 4px rgba(0,0,0,.12);display:flex;justify-content:center;gap:14px;align-items:center;flex-wrap:wrap}
-    .nav-groupbox{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 10px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:rgba(255,255,255,.04)}
-    .nav-heading{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;font-size:12px;font-weight:700;letter-spacing:.08em;color:rgba(243,244,246,.85)}
-    .nav-links{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-    .tool-nav a{color:#f3f4f6;text-decoration:none;font-weight:600;font-size:14px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06)}
-    .tool-nav a:hover{background:rgba(255,255,255,.12)}
-    .tool-nav a.active{background:#172554;color:#fff}
+    .tool-nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #374151;
+      padding: 10px 16px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, .12);
+      display: flex;
+      justify-content: center;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap
+    }
+
+    .nav-groupbox {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      border: 1px solid rgba(255, 255, 255, .14);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, .04)
+    }
+
+    .nav-heading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      color: rgba(243, 244, 246, .85)
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap
+    }
+
+    .tool-nav a {
+      color: #f3f4f6;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 14px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .06)
+    }
+
+    .tool-nav a:hover {
+      background: rgba(255, 255, 255, .12)
+    }
+
+    .tool-nav a.active {
+      background: #172554;
+      color: #fff
+    }
 
     /* ===== Top Nav (media-manual.html と同一) ===== */
     /* overlay */
-    .overlay{
-      position: fixed; inset: 0; z-index: 2000;
-      background: rgba(17,24,39,.45);
-      display:none;
-      align-items:center; justify-content:center;
+    .overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 2000;
+      background: rgba(17, 24, 39, .45);
+      display: none;
+      align-items: center;
+      justify-content: center;
       padding: 16px;
     }
-    .overlay.show{ display:flex; }
-    .overlay-card{
-      width:min(560px, 100%);
-      background:#111827;
-      color:#fff;
+
+    .overlay.show {
+      display: flex;
+    }
+
+    .overlay-card {
+      width: min(560px, 100%);
+      background: #111827;
+      color: #fff;
       border-radius: 14px;
       padding: 18px 18px;
-      box-shadow: 0 10px 30px rgba(0,0,0,.35);
-      border: 1px solid rgba(255,255,255,.12);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+      border: 1px solid rgba(255, 255, 255, .12);
     }
-    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
   </style>
 </head>
 
 <body class="bg-gray-100 text-gray-800">
-  <nav class="tool-nav">
-    <div class="nav-groupbox">
-      <div class="nav-heading">🌐 翻訳</div>
-      <div class="nav-links">
-        <a href="/index.html">翻訳ツール</a>
-        <a href="/verify.html">検証結果翻訳</a>
-        <a href="/column-translate.html">列指定翻訳</a>
-        <a href="/sheet-translate.html">シート翻訳</a>
-        <a href="/word-translate.html">Word翻訳</a>
-      </div>
-    </div>
-
-    <div class="nav-groupbox">
-      <div class="nav-heading">📝 マニュアル</div>
-      <div class="nav-links">
-        <a href="/manual.html">原稿作成（AIチェック）</a>
-        <a href="/media-manual.html">動画から原稿作成</a>
-      </div>
-    </div>
-
-    <div class="nav-groupbox">
-      <div class="nav-heading">★ その他</div>
-      <div class="nav-links">
-        <a href="/report.html">修理レポート</a>
-        <a href="/kensho.html">検証項目作成</a>
-        <a href="/prompt.html">単発プロンプト</a>
-        <a href="/inspection.html" class="active">検品リスト作成</a>
-      </div>
-    </div>
-  </nav>
+  <script src="/navigation.js" defer></script>
 
   <!-- overlay -->
   <div id="overlay" class="overlay" aria-hidden="true">
@@ -105,7 +143,7 @@
           </div>
 
           <div id="dropzone"
-               class="mt-4 border-2 border-dashed border-gray-300 rounded-xl p-4 bg-white hover:bg-gray-50 transition cursor-pointer">
+            class="mt-4 border-2 border-dashed border-gray-300 rounded-xl p-4 bg-white hover:bg-gray-50 transition cursor-pointer">
             <div class="text-center">
               <div class="font-semibold">ここにファイルをドロップ（またはクリックで選択）</div>
               <div class="mt-2 text-xs text-gray-500" id="pdfNameHint">※選択したファイルの内容を解析に使用します</div>
@@ -120,11 +158,11 @@
               ※ドラッグ＆ドロップは4MBまで。超える場合はURLを貼り付けてください（ファイル直リンクのみ）。
             </div>
             <div class="text-xs text-gray-500 mt-1">
-              <a href="https://3rrr-btob.jp/manual/" target="_blank" rel="noopener noreferrer" class="text-blue-600 underline">マニュアル検索はこちら</a>
+              <a href="https://3rrr-btob.jp/manual/" target="_blank" rel="noopener noreferrer"
+                class="text-blue-600 underline">マニュアル検索はこちら</a>
             </div>
-            <input id="pdfUrlInput" type="url"
-                   class="mt-2 w-full border border-gray-300 rounded-xl px-3 py-2"
-                   placeholder="例：https://www.example.com/manual" />
+            <input id="pdfUrlInput" type="url" class="mt-2 w-full border border-gray-300 rounded-xl px-3 py-2"
+              placeholder="例：https://www.example.com/manual" />
           </div>
 
           <div class="mt-8 flex items-center justify-between gap-4 flex-wrap">
@@ -134,8 +172,7 @@
                 抽出結果を確認し、必要なものだけチェックして検品リストに反映します（初期は未チェック）。
               </div>
             </div>
-            <button id="btnExtract"
-                    class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700">
+            <button id="btnExtract" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700">
               ファイル内容をAIに読み取らせる
             </button>
           </div>
@@ -144,15 +181,13 @@
           <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-bold mb-1">型番（URLから自動取得）</label>
-              <input id="modelInput" type="text"
-                     class="w-full border border-gray-300 rounded-xl px-3 py-2"
-                     placeholder="URLから自動取得" />
+              <input id="modelInput" type="text" class="w-full border border-gray-300 rounded-xl px-3 py-2"
+                placeholder="URLから自動取得" />
             </div>
             <div>
               <label class="block text-sm font-bold mb-1">製品名（URLから自動取得）</label>
-              <input id="productInput" type="text"
-                     class="w-full border border-gray-300 rounded-xl px-3 py-2"
-                     placeholder="URLから自動取得" />
+              <input id="productInput" type="text" class="w-full border border-gray-300 rounded-xl px-3 py-2"
+                placeholder="URLから自動取得" />
             </div>
           </div>
         </div>
@@ -194,12 +229,9 @@
           <div class="mt-4">
             <h2 class="text-lg font-bold flex items-center">
               ラベル選択
-              <a
-                href="https://3rhd.sharepoint.com/:x:/r/sites/doc_share/DocLib2/%E5%95%86%E5%93%81%E9%96%8B%E7%99%BA%E3%83%81%E3%83%BC%E3%83%A0/ai-manual-database/database.xlsx?d=w8deb5def816b4890aa586b309de54dc5&csf=1&web=1&e=QXQeD6"
-                target="_blank"
-                rel="noopener"
-                class="ml-2 text-xs font-bold text-blue-600 underline hover:text-blue-800 flex items-center gap-1"
-              >
+              <a href="https://3rhd.sharepoint.com/:x:/r/sites/doc_share/DocLib2/%E5%95%86%E5%93%81%E9%96%8B%E7%99%BA%E3%83%81%E3%83%BC%E3%83%A0/ai-manual-database/database.xlsx?d=w8deb5def816b4890aa586b309de54dc5&csf=1&web=1&e=QXQeD6"
+                target="_blank" rel="noopener"
+                class="ml-2 text-xs font-bold text-blue-600 underline hover:text-blue-800 flex items-center gap-1">
                 <i class="fas fa-database"></i>
                 database
               </a>
@@ -225,8 +257,7 @@
           </div>
 
           <div class="mt-8 flex items-center gap-3 flex-wrap">
-            <button id="btnGenerate"
-                    class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold hover:bg-black">
+            <button id="btnGenerate" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold hover:bg-black">
               検品リストExcel生成
             </button>
             <div class="text-sm text-gray-500" id="genHint"></div>
@@ -241,4 +272,5 @@
     </div>
   </main>
 </body>
+
 </html>
