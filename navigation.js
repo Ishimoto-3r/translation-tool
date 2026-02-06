@@ -442,7 +442,9 @@ window.addEventListener("load", () => {
 
     // 描画関数
     function renderHeader() {
+        console.log("Navigation: renderHeader開始");
         const pinnedUrls = PinManager.getPinnedUrls();
+        console.log("Navigation: pinnedUrls =", pinnedUrls);
         let pinnedHtml = '';
 
         pinnedUrls.forEach(url => {
@@ -462,10 +464,15 @@ window.addEventListener("load", () => {
         const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
         const shortcutKey = isMac ? '⌘K' : 'Ctrl+K';
 
-        header.innerHTML = `
+        const pageTitle = getCurrentPageTitle();
+        console.log("Navigation: pageTitle =", pageTitle);
+        console.log("Navigation: shortcutKey =", shortcutKey);
+        console.log("Navigation: createIconGrid() =", createIconGrid());
+
+        const headerHtml = `
             <div class="header-left">
                 <a href="/index.html" class="app-brand">
-                    <span>${getCurrentPageTitle()}</span>
+                    <span>${pageTitle}</span>
                 </a>
                 <div class="pinned-tools-container">
                     <div class="pinned-tools">
@@ -480,13 +487,23 @@ window.addEventListener("load", () => {
             </button>
         `;
 
+        console.log("Navigation: headerHtml長さ =", headerHtml.length);
+        console.log("Navigation: header要素 =", header);
+
+        header.innerHTML = headerHtml;
+
+        console.log("Navigation: header.innerHTML設定完了、長さ =", header.innerHTML.length);
+
         // ランチャー開閉イベント再設定
         const launcherBtn = header.querySelector(".launcher-btn");
+        console.log("Navigation: launcherBtn =", launcherBtn);
         if (launcherBtn) {
             launcherBtn.addEventListener("click", toggleLauncher);
             console.log("Navigation: ランチャーボタンのイベントリスナー設定完了");
         } else {
-            console.error("Navigation Error: ランチャーボタンが見つかりません", header.innerHTML);
+            console.error("Navigation Error: ランチャーボタンが見つかりません");
+            console.error("Navigation Error: header.innerHTML =", header.innerHTML);
+            console.error("Navigation Error: header.children =", header.children);
         }
     }
 
