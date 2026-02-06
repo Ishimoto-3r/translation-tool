@@ -534,10 +534,21 @@ document.addEventListener("DOMContentLoaded", () => {
         // Star Button Events
         launcher.querySelectorAll(".star-btn").forEach(btn => {
             btn.addEventListener("click", (e) => {
-                e.stopPropagation(); // リンク遷移防止
+                e.stopPropagation(); // カードのクリックイベント防止
                 e.preventDefault();
                 const url = btn.dataset.url;
                 PinManager.togglePin(url);
+            });
+        });
+
+        // Tool Card Click Events
+        launcher.querySelectorAll(".tool-card").forEach(card => {
+            card.addEventListener("click", (e) => {
+                // Starボタンのクリックは除外（既にstopPropagationで処理済み）
+                const url = card.dataset.url;
+                if (url) {
+                    window.location.href = url;
+                }
             });
         });
     }
