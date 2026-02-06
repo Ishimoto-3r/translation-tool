@@ -1,17 +1,17 @@
 // PDF翻訳API - バックエンド
 // 追記型: 各ページ下部に中国語翻訳を追記
 
-import OpenAI from "openai";
-import { PDFDocument, rgb } from "pdf-lib";
-import * as fs from "fs";
-import * as path from "path";
-import fontkit from "@pdf-lib/fontkit";
+const OpenAI = require("openai");
+const { PDFDocument, rgb } = require("pdf-lib");
+const fs = require("fs");
+const path = require("path");
+const fontkit = require("@pdf-lib/fontkit");
 
 const client = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY
 });
 
-export const config = {
+const config = {
     maxDuration: 60,
     api: {
         bodyParser: {
@@ -20,7 +20,7 @@ export const config = {
     }
 };
 
-export default async function handler(req, res) {
+async function handler(req, res) {
     // CORS設定
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -433,3 +433,9 @@ async function translateTextWithGPT(text, targetLang) {
         return `[翻訳エラー: ${error.message}]`;
     }
 }
+
+// CommonJS Exports
+module.exports = handler;
+module.exports.config = config;
+module.exports.wrapText = wrapText;
+module.exports.drawTranslationOnPage = drawTranslationOnPage;
