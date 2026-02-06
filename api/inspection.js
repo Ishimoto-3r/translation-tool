@@ -1,11 +1,11 @@
-// api/inspection.js（全文置き換え）
+// api/inspection.js（CommonJS変換版）
 // op=meta     : SharePointテンプレから「選択リスト」（検品項目リスト A=選択リスト の C列）を返す
 // op=extract  : PDFテキスト（ブラウザ抽出）から、型番/製品名/仕様/動作(タイトル+items)/付属品 をAI抽出
 // op=generate : テンプレExcelへ差し込み → 余計なシート削除 → 書体/サイズ/揃え調整 → base64で返す
 
-import ExcelJS from "exceljs";
-import OpenAI from "openai";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.js";
+const ExcelJS = require("exceljs");
+const OpenAI = require("openai");
+const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -339,7 +339,7 @@ function normalizeManualAccessory(text) {
   // 取扱説明書の表記ブレ吸収（あなたのC要件）
   const t = norm(text);
   if (!t) return "";
-  const variants = ["取扱説明書","取り扱い説明書","取扱い説明書","取説","マニュアル","説明書"];
+  const variants = ["取扱説明書", "取り扱い説明書", "取扱い説明書", "取説", "マニュアル", "説明書"];
   if (variants.some(v => t.includes(v))) return "取扱説明書";
   return t;
 }
@@ -792,7 +792,7 @@ async function generateExcel({
 }
 
 // ===== handler =====
-export default async function handler(req, res) {
+async function handler(req, res) {
   // CORS（既存ツールに合わせた最小）
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -998,3 +998,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "InternalError", detail: msg });
   }
 }
+
+module.exports = handler;

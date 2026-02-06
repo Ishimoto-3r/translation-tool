@@ -1,6 +1,6 @@
-// api/translate.js
+// api/translate.js (CommonJS)
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   // 1) CORS/OPTIONS（既存sheet/word/verifyと同等にする）
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -290,3 +290,4 @@ ${contextPrompt}
 
 }
 
+module.exports = handler;

@@ -1,12 +1,12 @@
-// api/kensho.js（統合版）
+// api/kensho.js（統合版 OK-CommonJS）
 // op=db        : GET=SharePointからDB / POST=アップロードExcel(base64)からDB
 // op=template  : GET=テンプレDL（first/mass）
 // op=generate  : POST=初回検証ファイル生成
 // op=ai        : POST=AIコメント生成（単体）
 
-import xlsx from "xlsx";
-import ExcelJS from "exceljs";
-import OpenAI from "openai";
+const xlsx = require("xlsx");
+const ExcelJS = require("exceljs");
+const OpenAI = require("openai");
 
 // ===== OpenAI =====
 const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
@@ -44,7 +44,7 @@ async function getAccessToken() {
 }
 
 async function downloadExcelBufferFromSharePoint() {
-    // DEBUG: Mainで何が入っているか確認（秘密情報は表示しない）
+  // DEBUG: Mainで何が入っているか確認（秘密情報は表示しない）
   const has = (v) => (v ? "OK" : "MISSING");
   console.log("[kensho] env check", {
     MANUAL_SHAREPOINT_FILE_URL: has(process.env.MANUAL_SHAREPOINT_FILE_URL),
@@ -375,10 +375,10 @@ async function handleGenerate(req, res) {
   const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
   const { selectedLabels, productInfo, images } = body;
 
-// selectedLabels は未選択でも許可する（未選択=抽出0件のテンプレ生成）
-const safeLabels = Array.isArray(selectedLabels)
-  ? selectedLabels.filter(v => (v ?? "").toString().trim())
-  : [];
+  // selectedLabels は未選択でも許可する（未選択=抽出0件のテンプレ生成）
+  const safeLabels = Array.isArray(selectedLabels)
+    ? selectedLabels.filter(v => (v ?? "").toString().trim())
+    : [];
 
 
   // 1) SharePointのdatabase.xlsxを取得
@@ -394,11 +394,11 @@ const safeLabels = Array.isArray(selectedLabels)
   if (!wsTpl) throw new Error("SheetError: 初回検証フォーマット が見つかりません");
 
   // C1 に選択語句（カンマ区切り）
-wsTpl.getCell("C1").value = `選択語句：${safeLabels.length ? safeLabels.join(",") : "（なし）"}`;
+  wsTpl.getCell("C1").value = `選択語句：${safeLabels.length ? safeLabels.join(",") : "（なし）"}`;
 
 
   // 3) 検証項目リストから抽出（A=大分類、B〜Hを機械コピー）
-const chosen = new Set(safeLabels);
+  const chosen = new Set(safeLabels);
 
   const extracted = [];
   for (let r = 3; r <= wsList.rowCount; r++) {
@@ -595,7 +595,7 @@ const chosen = new Set(safeLabels);
 }
 
 // ===== main handler =====
-export default async function handler(req, res) {
+async function handler(req, res) {
   // 最低限のCORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
@@ -617,3 +617,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: "UnexpectedError", detail: String(err?.message || err) });
   }
 }
+
+module.exports = handler;
