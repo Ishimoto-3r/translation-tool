@@ -414,7 +414,10 @@ function createCloseIcon() {
 }
 
 // 初期化
-document.addEventListener("DOMContentLoaded", () => {
+// DOMContentLoadedではなくloadイベントを使用（CSS等全リソース読み込み後に実行）
+window.addEventListener("load", () => {
+    console.log("Navigation: 初期化開始");
+
     // スタイル挿入
     const styleEl = document.createElement("style");
     styleEl.textContent = STYLE;
@@ -422,18 +425,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // 既存のnav削除
     const existingNav = document.querySelector(".tool-nav");
-    if (existingNav) existingNav.remove();
+    if (existingNav) {
+        console.log("Navigation: 既存のnavを削除");
+        existingNav.remove();
+    }
+
+    // ランチャー作成（最初に作成）
+    const launcher = document.createElement("div");
+    launcher.className = "launcher-overlay";
+    document.body.insertBefore(launcher, document.body.firstChild);
 
     // ヘッダー作成
     const header = document.createElement("header");
     header.className = "app-header";
-    // 内部は後でrenderHeaderで描画
     document.body.insertBefore(header, document.body.firstChild);
-
-    // ランチャー作成
-    const launcher = document.createElement("div");
-    launcher.className = "launcher-overlay";
-    document.body.insertBefore(launcher, document.body.firstChild);
 
     // 描画関数
     function renderHeader() {
@@ -476,7 +481,13 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
 
         // ランチャー開閉イベント再設定
-        header.querySelector(".launcher-btn").addEventListener("click", toggleLauncher);
+        const launcherBtn = header.querySelector(".launcher-btn");
+        if (launcherBtn) {
+            launcherBtn.addEventListener("click", toggleLauncher);
+            console.log("Navigation: ランチャーボタンのイベントリスナー設定完了");
+        } else {
+            console.error("Navigation Error: ランチャーボタンが見つかりません", header.innerHTML);
+        }
     }
 
     function renderLauncher() {
@@ -566,8 +577,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // 初回描画
+    console.log("Navigation: 初回描画開始");
     renderHeader();
     renderLauncher();
+    console.log("Navigation: 初期化完了");
 
     // イベント: ピン留め変更時に再描画
     window.addEventListener('pinned-tools-changed', () => {
