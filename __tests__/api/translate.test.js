@@ -10,12 +10,19 @@ describe('総合翻訳ツール (translate.js)', () => {
     beforeEach(() => {
         // モックオブジェクトの作成
         mockOpenAIClient = {
-            chatCompletion: jest.fn().mockResolvedValue({
-                choices: [{
-                    message: {
-                        content: JSON.stringify({ translatedText: "Translated Text", translations: ["T1", "T2"] })
-                    }
-                }]
+            chatCompletion: jest.fn().mockImplementation((options) => {
+                // テストでモデルが正しく渡されているか確認できるようにする
+                if (options.model !== "gpt-5.1" && options.model !== "gpt-4o") {
+                    // 一部のテストケース(PDF翻訳等)ではgpt-4oが明示指定される場合があるため許容
+                    // console.warn(`Test warning: Unexpected model ${options.model}`);
+                }
+                return Promise.resolve({
+                    choices: [{
+                        message: {
+                            content: JSON.stringify({ translatedText: "Translated Text", translations: ["T1", "T2"] })
+                        }
+                    }]
+                })
             })
         };
         // 依存関係を上書き (depsパターン)

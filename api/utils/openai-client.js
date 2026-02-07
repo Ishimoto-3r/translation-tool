@@ -25,7 +25,7 @@ class OpenAIClient {
             throw new Error("OPENAI_API_KEY_MISSING");
         }
 
-        const requestModel = model || process.env.MODEL_TRANSLATE || "gpt-4-turbo";
+        const requestModel = model || process.env.MODEL_TRANSLATE || "gpt-5.1";
 
         // systemPromptがある場合はmessagesの先頭に追加（破壊的変更を避けるためコピー使用）
         const requestMessages = [...messages];
@@ -40,9 +40,10 @@ class OpenAIClient {
         };
 
         // ガード処理: o1系モデル以外では reasoning_effort / verbosity を除去する
-        // ※OpenAI APIはサポート外のパラメータを送ると400エラーになるため
+        // ただし、gpt-5系もこれらをサポートするため除去しない
         const isO1Model = requestModel.startsWith("o1-");
-        if (!isO1Model) {
+        const isGpt5Model = requestModel.startsWith("gpt-5");
+        if (!isO1Model && !isGpt5Model) {
             delete options.reasoning_effort;
             delete options.verbosity;
         }
