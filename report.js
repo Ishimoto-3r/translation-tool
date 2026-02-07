@@ -83,36 +83,26 @@ function toggleSections() {
 // --- 実行ボタンのクリック処理 ---
 generateButton.addEventListener('click', async () => {
 
-    // エラークリア
-    UI.clearAllErrors();
-    resultOutput.classList.remove('error-message');
-    resultOutput.textContent = '（ここに結果が表示されます）';
-
     // 必須項目のバリデーション
-    let hasError = false;
-
     if (inquiryInput.value.trim() === "") {
-        UI.showError('inquiry', '「1. 問い合わせ内容」を入力してください。');
-        hasError = true;
+        resultOutput.innerHTML = '<span class="error-message">エラー: 「1. 問い合わせ内容」を入力してください。</span>';
+        inquiryInput.focus();
+        return;
     }
-
     if (!checkY.checked && !checkN.checked) {
-        // チェックボックス用は簡易的にトースト化、あるいは専用エリアに出す
-        UI.showToast('「2. 再現有無」を選択してください。', 'error');
-        hasError = true;
+        resultOutput.innerHTML = '<span class="error-message">エラー: 「2. 再現有無」を選択してください。</span>';
+        return;
     }
-
     if (verificationInput.value.trim() === "") {
-        UI.showError('verification', '「3. 検証内容」を入力してください。');
-        hasError = true;
+        resultOutput.innerHTML = '<span class="error-message">エラー: 「3. 検証内容」を入力してください。</span>';
+        verificationInput.focus();
+        return;
     }
-
-    if (hasError) return;
 
     // --- バリデーション (入力チェック) ---
     const verificationText = verificationInput.value.trim();
     if (verificationText.length > 3000) {
-        UI.showError('verification', `検証内容が長すぎます（現在${verificationText.length}文字）。3000文字以内で入力してください。`);
+        alert(`検証内容が長すぎます（現在${verificationText.length}文字）。3000文字以内で入力してください。`);
         return;
     }
 
@@ -121,6 +111,7 @@ generateButton.addEventListener('click', async () => {
     generateButton.innerHTML = '<div class="loader"></div> 生成中...';
     generateButton.disabled = true;
     resultOutput.textContent = 'GPT-5 APIに問い合わせ中です...';
+    resultOutput.classList.remove('error-message');
 
     // フォームデータを収集
     const aramCheck = document.getElementById('aram-wifi'); // ★追加
@@ -165,19 +156,19 @@ generateButton.addEventListener('click', async () => {
 
         const gptResponse = data.gptResponse;
 
+
+
         // 最終結果を表示
         resultOutput.textContent = gptResponse.trim();
-        UI.showToast("レポートが生成されました", "success");
 
     } catch (error) {
         console.error('API呼び出しエラー:', error);
-        const errMsg = error.message.includes("JSON.parse")
-            ? "サーバーから予期しない応答がありました。"
-            : error.message;
 
-        resultOutput.textContent = `エラー: ${errMsg}`;
-        resultOutput.classList.add('error-message');
-        UI.showToast(`生成エラー: ${errMsg}`, "error");
+        if (error.message.includes("JSON.parse")) {
+            resultOutput.innerHTML = `<span class="error-message">エラー: サーバーから予期しない応答がありました。<br>ファイルパス (api/report.js) が正しいか確認してください。</span>`;
+        } else {
+            resultOutput.innerHTML = `<span class="error-message">エラーが発生しました: ${error.message}</span>`;
+        }
 
     } finally {
         // ローディング終了
@@ -228,15 +219,34 @@ ${isAramWifi ? '- ★重要★ 文末（備考の前あたり）に「お客様�
 }
 
 
+// --- トースト通知を表示する関数 ---
+function showToast(message) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('show');
+    }, 10);
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            if (container.contains(toast)) {
+                container.removeChild(toast);
+            }
+        }, 500);
+    }, 3000);
+}
+
 // --- クリップボードにコピーする関数 (iFrame対応) ---
 function copyReportToClipboard() {
     const textToCopy = resultOutput.textContent;
     if (resultOutput.classList.contains('error-message') || textToCopy === '（ここに結果が表示されます）' || textToCopy.trim() === '') {
-        UI.showToast("コピーする内容がありません。", "error");
+        showToast("コピーする内容がありません。");
         return;
     }
-
-    // UIユーティリティを使用していない箇所（独自のコピーロジックが必要な場合のみ残す）
     const textArea = document.createElement("textarea");
     textArea.value = textToCopy;
     textArea.style.position = "absolute";
@@ -246,13 +256,13 @@ function copyReportToClipboard() {
     try {
         const successful = document.execCommand('copy');
         if (successful) {
-            UI.showToast("レポートをコピーしました。", "success");
+            showToast("レポートをコピーしました。");
         } else {
-            UI.showToast("コピーに失敗しました。", "error");
+            showToast("コピーに失敗しました。");
         }
     } catch (err) {
         console.error('コピーに失敗しました:', err);
-        UI.showToast("コピーに失敗しました。", "error");
+        showToast("コピーに失敗しました。");
     }
     document.body.removeChild(textArea);
 }
@@ -279,9 +289,7 @@ function clearAllInputs() {
     checkN.checked = true;
     checkY.checked = false;
     toggleSections();
-
-    UI.clearAllErrors();
-    UI.showToast("入力内容をクリアしました。", "info");
+    showToast("入力内容をクリアしました。");
 }
 
 // --- 初期化処理 ---

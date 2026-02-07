@@ -20,10 +20,6 @@ function showError(msg) {
   const box = $("errorBox");
   box.textContent = msg;
   box.classList.remove("hidden");
-
-  if (typeof UI !== 'undefined' && UI.showToast) {
-    UI.showToast(msg, "error");
-  }
 }
 
 function showDndNotice(msg) {
@@ -43,9 +39,6 @@ function clearError() {
   const box = $("errorBox");
   box.textContent = "";
   box.classList.add("hidden");
-
-  // トースト系UIのクリアがあれば呼ぶ
-  // UI.clearAllErrors() // これはインプットのエラーを消すやつなので違うかもだが。
 }
 
 function setBusy(on, title = "処理中", step = "", msg = "処理しています。画面は操作できません。", hint = "") {
@@ -58,8 +51,8 @@ function setBusy(on, title = "処理中", step = "", msg = "処理していま�
 
   // 入力をまとめて無効化（二重押し防止）
   const disableIds = [
-    "pdfInput", "dropzone", "pdfUrlInput", "btnExtract", "btnGenerate",
-    "lblLiion", "lblLegal", "modelInput", "productInput"
+    "pdfInput","dropzone","pdfUrlInput","btnExtract","btnGenerate",
+    "lblLiion","lblLegal","modelInput","productInput"
   ];
   for (const id of disableIds) {
     const el = $(id);
@@ -97,7 +90,7 @@ function setPdfStatus() {
   const url = ($("pdfUrlInput") && $("pdfUrlInput").value ? $("pdfUrlInput").value.trim() : "");
 
   if (pdfFile) {
-    $("pdfStatus").textContent = `選択中: ${pdfFile.name} (${Math.round(pdfFile.size / 1024)} KB)`;
+    $("pdfStatus").textContent = `選択中: ${pdfFile.name} (${Math.round(pdfFile.size/1024)} KB)`;
     $("pdfNameHint").textContent = pdfFile.name;
     return;
   }
@@ -222,11 +215,11 @@ function renderOpGroups(containerId, groups) {
 
 function escapeHtml(s) {
   return String(s)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
 }
 
 async function api(op, payload) {
@@ -422,18 +415,16 @@ async function runExtract() {
     if (!$("modelInput").value.trim() && extracted.model) $("modelInput").value = extracted.model;
     if (!$("productInput").value.trim() && extracted.productName) $("productInput").value = extracted.productName;
 
-    // 抽出：初期は未チェック
+    // 仕様：初期未チェック
     renderCheckboxList("specList", extracted.specs, { defaultChecked: false });
+
+    // 動作：初期未チェック（タイトル連動あり）
     renderOpGroups("opList", extracted.ops);
+
+    // 付属品：初期全チェック（要件）
     renderCheckboxList("accList", extracted.accs, { defaultChecked: true });
 
     $("overlayBar").style.width = "100%";
-
-    // 成功通知
-    if (typeof UI !== 'undefined' && UI.showToast) {
-      UI.showToast("抽出が完了しました", "success");
-    }
-
   } catch (e) {
     showError("AI抽出に失敗しました: " + e.message);
   } finally {
@@ -489,11 +480,6 @@ async function runGenerate() {
     URL.revokeObjectURL(a.href);
 
     $("overlayBar").style.width = "100%";
-
-    if (typeof UI !== 'undefined' && UI.showToast) {
-      UI.showToast("Excelが生成されました", "success");
-    }
-
   } catch (e) {
     showError("Excel生成に失敗しました: " + e.message);
   } finally {

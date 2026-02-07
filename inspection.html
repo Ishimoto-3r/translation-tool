@@ -7,18 +7,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>検品リスト作成</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="css/style.css">
-  <script src="js/ui-utils.js" defer></script>
   <script src="/inspection.js" defer></script>
 
   <style>
-    /* Tailwindと共存のための調整 */
     body {
-      background-color: #f3f4f6;
-      color: #1f2937;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
+      margin: 0;
+      padding: 0;
     }
 
-    /* 固有スタイルは維持 */
     .tool-nav {
       position: sticky;
       top: 0;
@@ -117,7 +114,6 @@
 
 <body class="bg-gray-100 text-gray-800">
   <script src="/navigation.js" defer></script>
-  <div id="toast-container"></div>
 
   <!-- overlay -->
   <div id="overlay" class="overlay" aria-hidden="true">
@@ -134,14 +130,14 @@
     </div>
   </div>
 
-  <main class="container">
-    <div class="bg-white rounded-2xl shadow p-6 border border-gray-200" style="padding: 2rem;">
-      <h1 class="text-2xl font-bold mb-4" style="text-align:center;">検品リスト作成ツール</h1>
+  <main class="max-w-5xl mx-auto px-4 py-8">
+    <div class="bg-white rounded-2xl shadow p-6 border border-gray-200">
+      <h1 class="text-2xl font-bold">検品リスト作成ツール</h1>
 
       <!-- 入力 -->
       <section class="mt-6">
         <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6">
-          <div class="flex items-center justify-between gap-3 mb-2">
+          <div class="flex items-center justify-between gap-3">
             <div class="font-bold text-base">入力</div>
             <div class="text-sm text-gray-500" id="pdfStatus">未選択</div>
           </div>
@@ -156,16 +152,17 @@
           </div>
 
           <!-- URL入力（容量が大きいファイルはURL推奨） -->
-          <div class="mt-4 form-group">
-            <label class="form-label block text-sm font-bold">マニュアルURL（容量が大きい場合はこちら）</label>
+          <div class="mt-4">
+            <label class="block text-sm font-bold">マニュアルURL（容量が大きい場合はこちら）</label>
             <div class="text-xs text-gray-500 mt-1">
               ※ドラッグ＆ドロップは4MBまで。超える場合はURLを貼り付けてください（ファイル直リンクのみ）。
             </div>
-            <div class="text-xs text-gray-500 mt-1 mb-1">
+            <div class="text-xs text-gray-500 mt-1">
               <a href="https://3rrr-btob.jp/manual/" target="_blank" rel="noopener noreferrer"
                 class="text-blue-600 underline">マニュアル検索はこちら</a>
             </div>
-            <input id="pdfUrlInput" type="url" class="form-control" placeholder="例：https://www.example.com/manual" />
+            <input id="pdfUrlInput" type="url" class="mt-2 w-full border border-gray-300 rounded-xl px-3 py-2"
+              placeholder="例：https://www.example.com/manual" />
           </div>
 
           <div class="mt-8 flex items-center justify-between gap-4 flex-wrap">
@@ -175,20 +172,22 @@
                 抽出結果を確認し、必要なものだけチェックして検品リストに反映します（初期は未チェック）。
               </div>
             </div>
-            <button id="btnExtract" class="btn btn-primary">
+            <button id="btnExtract" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700">
               ファイル内容をAIに読み取らせる
             </button>
           </div>
           <div class="mt-2 text-xs text-gray-500">抽出結果を確認 → 必要な項目だけチェック → Excel生成</div>
 
           <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="form-group">
-              <label class="form-label block text-sm font-bold mb-1">型番（URLから自動取得）</label>
-              <input id="modelInput" type="text" class="form-control" placeholder="URLから自動取得" />
+            <div>
+              <label class="block text-sm font-bold mb-1">型番（URLから自動取得）</label>
+              <input id="modelInput" type="text" class="w-full border border-gray-300 rounded-xl px-3 py-2"
+                placeholder="URLから自動取得" />
             </div>
-            <div class="form-group">
-              <label class="form-label block text-sm font-bold mb-1">製品名（URLから自動取得）</label>
-              <input id="productInput" type="text" class="form-control" placeholder="URLから自動取得" />
+            <div>
+              <label class="block text-sm font-bold mb-1">製品名（URLから自動取得）</label>
+              <input id="productInput" type="text" class="w-full border border-gray-300 rounded-xl px-3 py-2"
+                placeholder="URLから自動取得" />
             </div>
           </div>
         </div>
@@ -197,7 +196,7 @@
       <!-- 抽出結果 -->
       <section class="mt-8">
         <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6">
-          <div class="flex items-center justify-between gap-3 mb-2">
+          <div class="flex items-center justify-between gap-3">
             <div class="font-bold text-base">抽出結果</div>
             <div id="extractStatus" class="text-xs text-gray-500"></div>
           </div>
@@ -225,7 +224,7 @@
       <!-- 選択 & 出力 -->
       <section class="mt-8">
         <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6">
-          <div class="font-bold text-base mb-2">選択 & 出力</div>
+          <div class="font-bold text-base">選択 & 出力</div>
 
           <div class="mt-4">
             <h2 class="text-lg font-bold flex items-center">
@@ -258,7 +257,7 @@
           </div>
 
           <div class="mt-8 flex items-center gap-3 flex-wrap">
-            <button id="btnGenerate" class="btn btn-secondary">
+            <button id="btnGenerate" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold hover:bg-black">
               検品リストExcel生成
             </button>
             <div class="text-sm text-gray-500" id="genHint"></div>

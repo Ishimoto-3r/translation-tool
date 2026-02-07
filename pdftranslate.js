@@ -60,10 +60,6 @@ function showError(msg) {
         errorBox.textContent = msg;
         errorBox.classList.remove("hidden");
     }
-    // トーストでも表示
-    if (typeof UI !== 'undefined' && UI.showToast) {
-        UI.showToast(msg, "error");
-    }
     console.error(msg);
 }
 
@@ -712,7 +708,6 @@ async function handleExecute() {
             }
 
             updateStatus("完了", "Done", "翻訳が完了しました。PDFをダウンロードしています...");
-            UI.showToast("翻訳が完了しました！", "success");
 
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
@@ -729,7 +724,7 @@ async function handleExecute() {
                         新しいタブでPDFを開きました。開かない場合は下のボタンをクリックしてください。
                     </div>
                     <a href="${url}" download="translated.pdf" 
-                       class="btn btn-primary">
+                       class="inline-block px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition">
                         翻訳済みPDFをダウンロード
                     </a>
                     <div class="mt-3 text-sm text-gray-600">

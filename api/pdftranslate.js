@@ -344,12 +344,9 @@ const { PDF_TRANSLATE_PROMPTS } = require("./utils/prompts");
 
 // Vision APIで翻訳（テキストのみ取得、bbox禁止）
 async function translateImageWithVision(imageDataUrl, targetLang) {
-    try {
-        if (!PDF_TRANSLATE_PROMPTS) {
-            throw new Error("Prompts configuration not loaded");
-        }
-        const prompt = PDF_TRANSLATE_PROMPTS.VISION_USER_TEMPLATE(targetLang);
+    const prompt = PDF_TRANSLATE_PROMPTS.VISION_USER_TEMPLATE(targetLang);
 
+    try {
         const completion = await deps.openaiClient.chatCompletion({
             model: "gpt-4o",
             messages: [
