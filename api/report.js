@@ -32,16 +32,13 @@ export default async function handler(request, response) {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-model: MODEL_REPORT,
+        model: MODEL_REPORT,
 
         messages: [
           { "role": "user", "content": finalPrompt }
         ],
         // --- ★★★ 修正 (temperatureを削除) ★★★ ---
         // "temperature": 0.3, // ⬅️ この行を削除
-        "reasoning_effort": "low", 
-        "verbosity": "low"
-        // --- ★★★ ここまで ★★★ ---
       })
     });
 
@@ -53,7 +50,7 @@ model: MODEL_REPORT,
       const errorMessage = data.error?.message || `OpenAI API error: ${apiResponse.status}`;
       return response.status(apiResponse.status).json({ error: errorMessage });
     }
-    
+
     // 6. 成功した結果をフロントエンドに返す
     const gptResponse = data.choices[0].message.content.trim();
     response.status(200).json({ gptResponse: gptResponse });

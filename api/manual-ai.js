@@ -94,8 +94,6 @@ export default async function handler(req, res) {
       const completion = await client.chat.completions.create({
         model: MODEL_MANUAL_IMAGE,
         messages,
-        reasoning_effort: MANUAL_IMAGE_REASONING,
-        verbosity: MANUAL_IMAGE_VERBOSITY,
       });
 
       const text = completion.choices[0]?.message?.content ?? "";
@@ -134,11 +132,9 @@ export default async function handler(req, res) {
     const completion = await client.chat.completions.create({
       model: isCheck ? MODEL_MANUAL_CHECK : MODEL_MANUAL_IMAGE,
       messages,
-      reasoning_effort: isCheck ? MANUAL_CHECK_REASONING : MANUAL_IMAGE_REASONING,
-      verbosity: isCheck ? MANUAL_CHECK_VERBOSITY : MANUAL_IMAGE_VERBOSITY,
     });
 
-    
+
     const text = completion.choices[0]?.message?.content ?? "";
     return res.status(200).json({ text });
   } catch (err) {

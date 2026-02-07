@@ -39,6 +39,14 @@ class OpenAIClient {
             ...rest
         };
 
+        // ガード処理: o1系モデル以外では reasoning_effort / verbosity を除去する
+        // ※OpenAI APIはサポート外のパラメータを送ると400エラーになるため
+        const isO1Model = requestModel.startsWith("o1-");
+        if (!isO1Model) {
+            delete options.reasoning_effort;
+            delete options.verbosity;
+        }
+
         if (jsonMode) {
             options.response_format = { type: "json_object" };
         }
