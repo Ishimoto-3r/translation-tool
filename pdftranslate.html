@@ -12,109 +12,19 @@
         // PDF.js worker設定
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
     </script>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="js/ui-utils.js" defer></script>
     <script src="pdftranslate.js" defer></script>
 
     <style>
+        /* Tailwindと共存させるための調整 */
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
-            margin: 0;
-            padding: 0;
+            /* style.cssのbodyスタイルを適用 */
+            background-color: #f3f4f6;
+            color: #1f2937;
         }
 
-        .tool-nav {
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            background: #374151;
-            padding: 10px 16px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, .12);
-            display: flex;
-            justify-content: center;
-            gap: 14px;
-            align-items: center;
-            flex-wrap: wrap
-        }
-
-        .nav-groupbox {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 10px;
-            border: 1px solid rgba(255, 255, 255, .14);
-            border-radius: 10px;
-            background: rgba(255, 255, 255, .04)
-        }
-
-        .nav-heading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            width: 100%;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: .08em;
-            color: rgba(243, 244, 246, .85)
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-wrap: wrap
-        }
-
-        .tool-nav a {
-            color: #f3f4f6;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, .06)
-        }
-
-        .tool-nav a:hover {
-            background: rgba(255, 255, 255, .12)
-        }
-
-        .tool-nav a.active {
-            background: #172554;
-            color: #fff
-        }
-
-        /* overlay */
-        .overlay {
-            position: fixed;
-            inset: 0;
-            z-index: 2000;
-            background: rgba(17, 24, 39, .45);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            padding: 16px;
-        }
-
-        .overlay.show {
-            display: flex;
-        }
-
-        .overlay-card {
-            width: min(560px, 100%);
-            background: #111827;
-            color: #fff;
-            border-radius: 14px;
-            padding: 18px 18px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
-            border: 1px solid rgba(255, 255, 255, .12);
-        }
-
-        .mono {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-        }
-
-        /* プレビュー用スタイル */
+        /* プレビューエリアなど固有のスタイルは維持 */
         .page-preview-item {
             border: 2px solid #e5e7eb;
             border-radius: 8px;
@@ -138,11 +48,15 @@
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
+
+        /* ナビゲーションバー (navigation.jsが生成するが、style.cssと競合しないように) */
     </style>
 </head>
 
 <body class="bg-gray-100 text-gray-800">
     <script src="/navigation.js" defer></script>
+
+    <div id="toast-container"></div>
 
 
     <!-- overlay -->
@@ -160,14 +74,16 @@
         </div>
     </div>
 
-    <main class="max-w-5xl mx-auto px-4 py-8">
-        <div class="bg-white rounded-2xl shadow p-6 border border-gray-200">
-            <h1 class="text-2xl font-bold">検品用マニュアル翻訳</h1>
+    <main class="container">
+        <!-- class="container" applies max-width and styling from style.css -->
+        <div class="bg-white rounded-2xl shadow p-6 border border-gray-200" style="padding: 2rem;">
+            <h1 class="text-2xl font-bold mb-4" style="text-align:center;">検品用マニュアル翻訳</h1>
 
             <!-- 入力 -->
             <section class="mt-6">
+                <!-- Tailwindのクラスを残しつつ、構造を維持 -->
                 <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6">
-                    <div class="font-bold text-base">入力</div>
+                    <div class="font-bold text-base mb-2">入力</div>
                     <div class="text-xs text-gray-600 mt-1">※ PDFファイルまたはURLのどちらか一方を指定してください</div>
 
                     <div id="dropzone"
@@ -180,21 +96,19 @@
                     </div>
 
                     <!-- URL入力 -->
-                    <div class="mt-4">
-                        <label class="block text-sm font-bold">マニュアルURL</label>
-                        <div class="text-xs text-gray-500 mt-1">
+                    <div class="mt-4 form-group">
+                        <label class="form-label block text-sm font-bold">マニュアルURL</label>
+                        <div class="text-xs text-gray-500 mt-1 mb-1">
                             <a href="https://3rrr-btob.jp/manual/" target="_blank" rel="noopener noreferrer"
                                 class="text-blue-600 underline">マニュアル検索はこちら</a>
                         </div>
-                        <input id="pdfUrlInput" type="url"
-                            class="mt-2 w-full border border-gray-300 rounded-xl px-3 py-2"
+                        <input id="pdfUrlInput" type="url" class="form-control"
                             placeholder="例：https://www.example.com/manual" />
                     </div>
 
-                    <div class="mt-6">
-                        <label class="block text-sm font-bold mb-2">翻訳方向</label>
-                        <select id="directionSelect"
-                            class="w-full border border-gray-300 rounded-xl px-3 py-2 bg-white">
+                    <div class="mt-6 form-group">
+                        <label class="form-label block text-sm font-bold mb-2">翻訳方向</label>
+                        <select id="directionSelect" class="form-control">
                             <option value="ja-zh" selected>日本語 → 中国語</option>
                             <option value="ja-en">日本語 → 英語</option>
                             <option value="ja-ko">日本語 → 韓国語</option>
@@ -221,10 +135,8 @@
                             <!-- ページ選択用コントロール -->
                             <div id="pageSelectionControls" class="flex items-center gap-3">
                                 <span id="selectionCount" class="text-sm font-bold text-blue-600">0ページ 選択中</span>
-                                <button id="btnSelectAll"
-                                    class="text-sm px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-100">すべて選択</button>
-                                <button id="btnDeselectAll"
-                                    class="text-sm px-3 py-1 border border-gray-300 rounded-lg hover:bg-gray-100">すべて解除</button>
+                                <button id="btnSelectAll" class="btn btn-secondary btn-sm">すべて選択</button>
+                                <button id="btnDeselectAll" class="btn btn-secondary btn-sm">すべて解除</button>
                             </div>
                         </div>
 
@@ -248,8 +160,7 @@
                     </div>
 
                     <div class="mt-8 flex items-center justify-end">
-                        <button id="btnExecute"
-                            class="px-8 py-3 rounded-xl bg-blue-600 text-white font-bold hover:bg-blue-700 transition">
+                        <button id="btnExecute" class="btn btn-primary font-bold transition w-full md:w-auto px-8">
                             翻訳を実行する
                         </button>
                     </div>
@@ -259,7 +170,7 @@
             <!-- 結果表示 -->
             <section class="mt-8">
                 <div class="bg-gray-50 border border-gray-200 rounded-2xl p-6">
-                    <div class="font-bold text-base">結果表示</div>
+                    <div class="font-bold text-base mb-2">結果表示</div>
                     <div id="resultArea"
                         class="mt-4 p-8 bg-white border border-gray-200 rounded-xl min-h-[150px] flex items-center justify-center text-gray-500 border-dashed">
                         ここに翻訳後のファイルが表示されます

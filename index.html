@@ -5,409 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale:1.0">
     <title>AI翻訳ツール</title>
-    <style>
-        /* 共通レイアウト */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f3f4f6;
-            color: #1f2937;
-        }
-
-        /* ナビゲーションバー */
-        .tool-nav {
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            background: #374151;
-            padding: 10px 16px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, .12);
-            display: flex;
-            justify-content: center;
-            gap: 14px;
-            align-items: center;
-            flex-wrap: wrap
-        }
-
-        .nav-groupbox {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 10px;
-            border: 1px solid rgba(255, 255, 255, .14);
-            border-radius: 10px;
-            background: rgba(255, 255, 255, .04)
-        }
-
-        .nav-heading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            width: 100%;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: .08em;
-            color: rgba(243, 244, 246, .85)
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-wrap: wrap
-        }
-
-        .tool-nav a {
-            color: #f3f4f6;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, .06)
-        }
-
-        .tool-nav a:hover {
-            background: rgba(255, 255, 255, .12)
-        }
-
-        .tool-nav a.active {
-            background: #172554;
-            color: #fff
-        }
-
-        /* コンテナ */
-        .container {
-            max-width: 1200px;
-            margin: 2rem auto;
-            padding: 1.5rem 2rem;
-            background-color: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-            display: flex;
-            flex-direction: column;
-            gap: 32px;
-        }
-
-        /* 統一ヘッダーデザイン */
-        #main-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #3b82f6;
-            padding-bottom: 0.75rem;
-            margin-bottom: 0.5rem;
-        }
-
-        h1 {
-            font-size: 1.75rem;
-            margin: 0;
-            color: #111827;
-            font-weight: 700;
-        }
-
-        /* 各翻訳セクション */
-        .section {
-            background: #fff;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            overflow: hidden;
-            border: 1px solid #e5e7eb;
-        }
-
-        .section-header {
-            background-color: #f9fafb;
-            padding: 12px 20px;
-            border-bottom: 1px solid #e5e7eb;
-            color: #374151;
-            display: grid;
-            grid-template-columns: 1fr auto 1fr;
-            align-items: center;
-        }
-
-        #jp-cn-header {
-            border-top: 4px solid #2563eb;
-        }
-
-        #any-jp-header {
-            border-top: 4px solid #6b7280;
-        }
-
-        #jp-en-header {
-            border-top: 4px solid #16a34a;
-        }
-
-        #jp-kr-header {
-            border-top: 4px solid #f59e0b;
-        }
-
-        .header-title {
-            /* ★変更点: 文字サイズを 1.25rem -> 1.875rem に変更 */
-            font-size: 1.875rem;
-            font-weight: 700;
-            text-align: center;
-            grid-column: 2 / 3;
-        }
-
-        .header-right-content {
-            grid-column: 3 / 4;
-            justify-self: end;
-        }
-
-        .header-spacer-left {
-            grid-column: 1 / 2;
-            justify-self: start;
-        }
-
-        .translation-grid {
-            display: flex;
-            align-items: stretch;
-            padding: 20px;
-            gap: 10px;
-        }
-
-        .textarea-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .controls {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-            min-height: 48px;
-        }
-
-        .textarea-label {
-            font-size: 0.875rem;
-            font-weight: 600;
-            color: #4b5563;
-        }
-
-        textarea {
-            width: 100%;
-            height: 300px;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 12px;
-            font-size: 1rem;
-            box-sizing: border-box;
-            resize: vertical;
-            font-family: inherit;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-
-        textarea:focus {
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-            outline: none;
-        }
-
-        /* ボタン類 */
-        .button-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 0 8px;
-            justify-content: space-between;
-            position: relative;
-            min-height: 300px;
-            /* ★変更点: ボタンの幅(65px)より広い最小幅を確保 */
-            min-width: 80px;
-        }
-
-        .translate-btn {
-            background-color: #3b82f6;
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 65px;
-            height: 65px;
-            font-size: 50px;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: background-color 0.2s;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-        }
-
-        .translate-btn.reverse {
-            background-color: #10b981;
-            position: absolute;
-            bottom: 0;
-            left: 50%;
-            transform: translateX(-50%);
-            top: auto;
-        }
-
-        .translate-btn:hover:not(:disabled) {
-            background-color: #2563eb;
-            transform: translate(-50%, -50%) scale(1.05);
-        }
-
-        .translate-btn.reverse:hover:not(:disabled) {
-            background-color: #059669;
-            transform: translateX(-50%) scale(1.05);
-        }
-
-        .translate-btn:disabled {
-            background-color: #9ca3af;
-            cursor: not-allowed;
-            transform: translate(-50%, -50%);
-        }
-
-        .translate-btn.reverse:disabled {
-            transform: translateX(-50%);
-        }
-
-        .section-clear-btn {
-            background-color: #ef4444;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 12px 24px;
-            min-width: 190px;
-            box-sizing: border-box;
-            text-align: center;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        .section-clear-btn:hover {
-            background-color: #dc2626;
-        }
-
-        .copy-btn-large {
-            background-color: #3b82f6;
-            color: white;
-            padding: 12px 24px;
-            min-width: 380px;
-            box-sizing: border-box;
-            text-align: center;
-            border: none;
-            border-radius: 8px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        .copy-btn-large:hover {
-            background-color: #2563eb;
-        }
-
-        /* 比較ログエリア */
-        #comparison-log-container {
-            padding: 0;
-            background: #fff;
-        }
-
-        #comparison-log-header {
-            cursor: pointer;
-            background: #f9fafb;
-            border-top: 1px solid #e5e7eb;
-            padding: 10px 20px;
-            display: grid;
-            grid-template-columns: auto 1fr auto;
-            align-items: center;
-            font-weight: 600;
-            color: #374151;
-        }
-
-        #comparison-log-header span:first-child {
-            justify-self: start;
-        }
-
-        #comparison-log-header span[id="log-toggle-btn"] {
-            justify-self: end;
-        }
-
-        #comparison-log-header:hover {
-            background-color: #f3f4f6;
-        }
-
-        #comparison-log-text {
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            padding: 16px;
-            margin: 16px;
-            margin-top: 0;
-            border-radius: 8px;
-            white-space: pre-wrap;
-            font-family: monospace;
-            min-height: 50px;
-            font-size: 0.9rem;
-        }
-
-        .log-copy-btn-area {
-            padding: 16px;
-            text-align: right;
-        }
-
-        /* Toast通知 */
-        #toast-container {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1000;
-        }
-
-        .toast {
-            background-color: #1f2937;
-            color: #f9fafb;
-            padding: 12px 20px;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            opacity: 0;
-            transition: opacity 0.3s, transform 0.3s;
-            transform: translateY(20px);
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-
-        .toast.show {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        /* ローダーのCSS */
-        .loader {
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-top: 4px solid #ffffff;
-            border-radius: 50%;
-            width: 24px;
-            height: 24px;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="css/style.css">
 </head>
 
 <body>
 
     <script src="/navigation.js" defer></script>
+    <script src="js/ui-utils.js" defer></script>
+    <script src="/app.js" defer></script>
 
-    <div id="toast-container"></div>
+    <!-- Toast Container -->
+    <div class="toast-container"></div>
 
     <div class="container">
         <div id="main-header">
@@ -417,7 +25,7 @@
         <div class="section">
             <div class="section-header" id="jp-cn-header">
                 <div class="header-spacer-left">
-                    <button class="section-clear-btn" title="一括クリア"
+                    <button class="btn btn-danger" title="一括クリア"
                         onclick="clearText(['jp-input', 'cn-output'])">クリア</button>
                 </div>
                 <span class="header-title">日本語 → 中国語</span>
@@ -427,9 +35,9 @@
             <div class="translation-grid">
                 <div class="textarea-container">
                     <div class="controls">
-                        <label for="jp-input" class="textarea-label">原文 (日本語)</label>
+                        <label for="jp-input" class="form-label">原文 (日本語)</label>
                     </div>
-                    <textarea id="jp-input" placeholder="ここに日本語を入力"></textarea>
+                    <textarea id="jp-input" class="form-control" placeholder="ここに日本語を入力"></textarea>
                 </div>
                 <div class="button-container">
                     <button class="translate-btn" title="翻訳"
@@ -439,11 +47,11 @@
                 </div>
                 <div class="textarea-container">
                     <div class="controls">
-                        <label for="cn-output" class="textarea-label">訳文 (中国語)</label>
-                        <button class="copy-btn-large"
+                        <label for="cn-output" class="form-label">訳文 (中国語)</label>
+                        <button class="btn btn-secondary"
                             onclick="copyToClipboard('cn-output', '訳文 (中国語) をコピーしました')">コピー</button>
                     </div>
-                    <textarea id="cn-output" placeholder="中国語の訳文" readonly></textarea>
+                    <textarea id="cn-output" class="form-control" placeholder="中国語の訳文" readonly></textarea>
                 </div>
             </div>
 
@@ -453,7 +61,7 @@
             </div>
             <div id="comparison-log" style="display: none;">
                 <div class="log-copy-btn-area">
-                    <button class="copy-btn-large" onclick="copyComparisonLog()">コピー</button>
+                    <button class="btn btn-secondary" onclick="copyComparisonLog()">コピー</button>
                 </div>
                 <div id="comparison-log-text"></div>
             </div>
@@ -462,7 +70,7 @@
         <div class="section">
             <div class="section-header" id="any-jp-header">
                 <div class="header-spacer-left">
-                    <button class="section-clear-btn" title="一括クリア"
+                    <button class="btn btn-danger" title="一括クリア"
                         onclick="clearText(['any-input', 'jp-output'])">クリア</button>
                 </div>
                 <span class="header-title">任意の言語 → 日本語</span>
@@ -472,9 +80,9 @@
             <div class="translation-grid">
                 <div class="textarea-container">
                     <div class="controls">
-                        <label for="any-input" class="textarea-label">原文 (任意の言語)</label>
+                        <label for="any-input" class="form-label">原文 (任意の言語)</label>
                     </div>
-                    <textarea id="any-input" placeholder="ここに任意の言語を入力"></textarea>
+                    <textarea id="any-input" class="form-control" placeholder="ここに任意の言語を入力"></textarea>
                 </div>
                 <div class="button-container">
                     <button class="translate-btn" title="翻訳"
@@ -482,11 +90,11 @@
                 </div>
                 <div class="textarea-container">
                     <div class="controls">
-                        <label for="jp-output" class="textarea-label">訳文 (日本語)</label>
-                        <button class="copy-btn-large"
+                        <label for="jp-output" class="form-label">訳文 (日本語)</label>
+                        <button class="btn btn-secondary"
                             onclick="copyToClipboard('jp-output', '訳文 (日本語) をコピーしました')">コピー</button>
                     </div>
-                    <textarea id="jp-output" placeholder="日本語の訳文" readonly></textarea>
+                    <textarea id="jp-output" class="form-control" placeholder="日本語の訳文" readonly></textarea>
                 </div>
             </div>
         </div>
@@ -494,7 +102,7 @@
         <div class="section">
             <div class="section-header" id="jp-en-header">
                 <div class="header-spacer-left">
-                    <button class="section-clear-btn" title="一括クリア"
+                    <button class="btn btn-danger" title="一括クリア"
                         onclick="clearText(['jp-en-input', 'en-output'])">クリア</button>
                 </div>
                 <span class="header-title">日本語 → 英語</span>
@@ -504,9 +112,9 @@
             <div class="translation-grid">
                 <div class="textarea-container">
                     <div class="controls">
-                        <label for="jp-en-input" class="textarea-label">原文 (日本語)</label>
+                        <label for="jp-en-input" class="form-label">原文 (日本語)</label>
                     </div>
-                    <textarea id="jp-en-input" placeholder="ここに日本語を入力"></textarea>
+                    <textarea id="jp-en-input" class="form-control" placeholder="ここに日本語を入力"></textarea>
                 </div>
                 <div class="button-container">
                     <button class="translate-btn" title="翻訳"
@@ -514,11 +122,11 @@
                 </div>
                 <div class="textarea-container">
                     <div class="controls">
-                        <label for="en-output" class="textarea-label">訳文 (英語)</label>
-                        <button class="copy-btn-large"
+                        <label for="en-output" class="form-label">訳文 (英語)</label>
+                        <button class="btn btn-secondary"
                             onclick="copyToClipboard('en-output', '訳文 (英語) をコピーしました')">コピー</button>
                     </div>
-                    <textarea id="en-output" placeholder="英語の訳文" readonly></textarea>
+                    <textarea id="en-output" class="form-control" placeholder="英語の訳文" readonly></textarea>
                 </div>
             </div>
         </div>
@@ -526,7 +134,7 @@
         <div class="section">
             <div class="section-header" id="jp-kr-header">
                 <div class="header-spacer-left">
-                    <button class="section-clear-btn" title="一括クリア"
+                    <button class="btn btn-danger" title="一括クリア"
                         onclick="clearText(['jp-kr-input', 'kr-output'])">クリア</button>
                 </div>
                 <span class="header-title">日本語 → 韓国語</span>
@@ -536,9 +144,9 @@
             <div class="translation-grid">
                 <div class="textarea-container">
                     <div class="controls">
-                        <label for="jp-kr-input" class="textarea-label">原文 (日本語)</label>
+                        <label for="jp-kr-input" class="form-label">原文 (日本語)</label>
                     </div>
-                    <textarea id="jp-kr-input" placeholder="ここに日本語を入力"></textarea>
+                    <textarea id="jp-kr-input" class="form-control" placeholder="ここに日本語を入力"></textarea>
                 </div>
                 <div class="button-container">
                     <button class="translate-btn" title="翻訳"
@@ -546,11 +154,11 @@
                 </div>
                 <div class="textarea-container">
                     <div class="controls">
-                        <label for="kr-output" class="textarea-label">訳文 (韓国語)</label>
-                        <button class="copy-btn-large"
+                        <label for="kr-output" class="form-label">訳文 (韓国語)</label>
+                        <button class="btn btn-secondary"
                             onclick="copyToClipboard('kr-output', '訳文 (韓国語) をコピーしました')">コピー</button>
                     </div>
-                    <textarea id="kr-output" placeholder="韓国語の訳文" readonly></textarea>
+                    <textarea id="kr-output" class="form-control" placeholder="韓国語の訳文" readonly></textarea>
                 </div>
             </div>
         </div>

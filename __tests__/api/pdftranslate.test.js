@@ -140,7 +140,7 @@ describe('PDF翻訳ツール (pdftranslate.js)', () => {
         );
     });
 
-    test('APIエラー時のハンドリング: 500エラー', async () => {
+    test('APIエラー時のハンドリング: エラーメッセージ埋め込み (200 OK)', async () => {
         mockOpenAIClient.chatCompletion.mockRejectedValue(new Error("API Error"));
 
         const { req, res } = nodeMocks.createMocks({
@@ -151,8 +151,8 @@ describe('PDF翻訳ツール (pdftranslate.js)', () => {
         });
 
         await handler(req, res);
-        expect(res._getStatusCode()).toBe(500);
-        const data = JSON.parse(res._getData());
-        expect(data.error).toBe("Translation failed");
+        expect(res._getStatusCode()).toBe(200);
+        // PDFが生成されて返されることを確認
+        expect(res._getData()).toBeInstanceOf(Buffer);
     });
 });

@@ -5,103 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>修理レポート作成ツール</title>
+    <link rel="stylesheet" href="css/style.css">
+    <!-- 追加の固有スタイル -->
     <style>
-        /* --- CSS (あなたの提供したCSSをすべてここに貼り付け) --- */
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Hiragino Kaku Gothic ProN', 'Meiryo', sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f3f4f6;
-            color: #1f2937;
-        }
-
-        #toast-container {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            z-index: 1000;
-        }
-
-        .toast {
-            background-color: #1f2937;
-            color: #f9fafb;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 0.5rem;
-            opacity: 0;
-            transition: opacity 0.5s, transform 0.5s;
-            transform: translateX(100%);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        }
-
-        .toast.show {
-            opacity: 1;
-            transform: translateX(0);
-        }
-
-        .container {
-            max-width: 800px;
-            margin: 2rem auto;
-            padding: 1.5rem 2rem;
-            background-color: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-        }
-
-        #main-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 2px solid #3b82f6;
-            padding-bottom: 0.75rem;
-            margin-bottom: 1.5rem;
-        }
-
-        h1 {
-            text-align: center;
-            color: #111827;
-            padding-bottom: 0;
-            margin-top: 0;
-            margin-bottom: 0;
-            font-size: 1.75rem;
-        }
-
-        .form-group {
-            margin-bottom: 1.75rem;
-        }
-
-        label {
-            display: block;
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-            color: #374151;
-            font-size: 0.9rem;
-        }
-
-        input[type="text"],
-        textarea {
-            width: 100%;
-            padding: 0.75rem;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-family: inherit;
-            box-sizing: border-box;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-
-        input[type="text"]:focus,
-        textarea:focus {
-            outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-        }
-
-        textarea {
-            height: 120px;
-            resize: vertical;
-        }
-
         .checkbox-group label {
             display: inline-block;
             margin-right: 1.5rem;
@@ -146,109 +52,10 @@
             background-color: #f3f4f6;
         }
 
-        button#generate-report {
-            display: block;
-            width: 100%;
-            padding: 0.85rem 1rem;
-            background-color: #3b82f6;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background-color 0.3s, box-shadow 0.3s;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            margin-bottom: 0;
-        }
-
-        button#generate-report:hover:not(:disabled) {
-            background-color: #2563eb;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-        }
-
-        button#generate-report:disabled {
-            background-color: #93c5fd;
-            cursor: not-allowed;
-            opacity: 0.8;
-        }
-
-        .loader {
-            border: 4px solid rgba(255, 255, 255, 0.3);
-            border-top: 4px solid #ffffff;
-            border-radius: 50%;
-            width: 18px;
-            height: 18px;
-            animation: spin 1s linear infinite;
-            display: inline-block;
-            vertical-align: middle;
-            margin-right: 0.5rem;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        .hidden {
-            display: none;
-        }
-
-        #result-area-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 0.5rem;
-        }
-
         #result-area {
             margin-top: 2.5rem;
             border-top: 1px solid #e5e7eb;
             padding-top: 1.5rem;
-        }
-
-        #result-area h2 {
-            font-size: 1.25rem;
-            color: #111827;
-            margin-top: 0;
-            margin-bottom: 0;
-        }
-
-        button.copy-btn-small {
-            padding: 0.4rem 0.8rem;
-            background-color: #4b5563;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        button.copy-btn-small:hover {
-            background-color: #374151;
-        }
-
-        button.clear-btn-small {
-            padding: 0.4rem 0.8rem;
-            background-color: #ef4444;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 0.875rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-
-        button.clear-btn-small:hover {
-            background-color: #dc2626;
         }
 
         #result-output {
@@ -262,100 +69,25 @@
             line-height: 1.6;
             color: #374151;
         }
-
-        .error-message {
-            color: #dc2626;
-            font-weight: 600;
-        }
-
-        .warning-text {
-            margin-top: 0.5rem;
-            font-size: 0.9rem;
-            color: #dc2626;
-            /* 赤 */
-        }
-
-        /* --- ★ここから追加★ ナビゲーションバー --- */
-        .tool-nav {
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            background: #374151;
-            padding: 10px 16px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, .12);
-            display: flex;
-            justify-content: center;
-            gap: 14px;
-            align-items: center;
-            flex-wrap: wrap
-        }
-
-        .nav-groupbox {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 10px;
-            border: 1px solid rgba(255, 255, 255, .14);
-            border-radius: 10px;
-            background: rgba(255, 255, 255, .04)
-        }
-
-        .nav-heading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            width: 100%;
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: .08em;
-            color: rgba(243, 244, 246, .85)
-        }
-
-        .nav-links {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-wrap: wrap
-        }
-
-        .tool-nav a {
-            color: #f3f4f6;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, .06)
-        }
-
-        .tool-nav a:hover {
-            background: rgba(255, 255, 255, .12)
-        }
-
-        .tool-nav a.active {
-            background: #172554;
-            color: #fff
-        }
     </style>
 </head>
 
 <body>
 
     <script src="/navigation.js" defer></script>
+    <script src="js/ui-utils.js" defer></script>
+    <script src="/report.js" defer></script>
 
-
-    <div id="toast-container"></div>
+    <div class="toast-container"></div>
 
     <div class="container">
         <div id="main-header">
             <h1>修理レポート作成ツール</h1>
-            <button id="clear-all-btn-top" class="clear-btn-small">入力内容をクリア</button>
+            <button id="clear-all-btn-top" class="btn btn-danger btn-sm">入力内容をクリア</button>
         </div>
 
         <div class="form-group">
-            <label>0. 購入から5年以上経過していますか？（お客様の申告で可）</label>
+            <label class="form-label">0. 購入から5年以上経過していますか？（お客様の申告で可）</label>
             <div class="checkbox-group">
                 <label for="over5y-y">
                     <input type="checkbox" id="over5y-y" value="y">
@@ -366,18 +98,18 @@
                     <span></span> いいえ
                 </label>
             </div>
-            <div id="over5y-warning" class="warning-text hidden">
+            <div id="over5y-warning" class="text-error hidden">
                 商品の状態によっては修理不可の提案が可能です。ご検討ください。
             </div>
         </div>
 
         <div class="form-group">
-            <label for="inquiry">1. お客様からの問い合わせ内容</label>
-            <textarea id="inquiry" placeholder="（例）電源が入らない"></textarea>
+            <label for="inquiry" class="form-label">1. お客様からの問い合わせ内容</label>
+            <textarea id="inquiry" class="form-control" placeholder="（例）電源が入らない" style="height: 120px;"></textarea>
         </div>
 
         <div class="form-group">
-            <label>2. 不具合は再現しましたか？</label>
+            <label class="form-label">2. 不具合は再現しましたか？</label>
             <div class="checkbox-group">
                 <label for="reproduced-y">
                     <input type="checkbox" id="reproduced-y" value="y">
@@ -388,13 +120,15 @@
                     <span></span> いいえ
                 </label>
             </div>
-            
+
             <!-- ★Aram/Wi-Fi用チェックボックス (再現しない場合のみ表示) -->
-            <div id="aram-wifi-section" class="checkbox-group hidden" style="margin-top: 1rem; background-color: #eff6ff; padding: 10px; border: 1px solid #bfdbfe; border-radius: 8px;">
+            <div id="aram-wifi-section" class="checkbox-group hidden"
+                style="margin-top: 1rem; background-color: #eff6ff; padding: 10px; border: 1px solid #bfdbfe; border-radius: 8px;">
                 <label for="aram-wifi" style="width: 100%; margin-right: 0; color: #1e40af;">
                     <input type="checkbox" id="aram-wifi" value="y">
                     <span></span> <strong>【Aram製品】</strong>Wi-Fi接続トラブルで再現しない場合<br>
-                    <span style="font-size: 0.85em; font-weight: normal; color: #3b82f6; display: block; margin-top: 4px; margin-left: 28px;">
+                    <span
+                        style="font-size: 0.85em; font-weight: normal; color: #3b82f6; display: block; margin-top: 4px; margin-left: 28px;">
                         ※チェックを入れると、検証内容に「電波干渉の可能性とチャネル変更の提案」を自動追記します。
                     </span>
                 </label>
@@ -402,44 +136,48 @@
         </div>
 
         <div class="form-group">
-            <label for="verification">3. 検証内容（必須）</label>
-            <textarea id="verification" placeholder="試行・条件・観察結果を必ず記載してください"></textarea>
+            <label for="verification" class="form-label">3. 検証内容（必須）</label>
+            <textarea id="verification" class="form-control" placeholder="試行・条件・観察結果を必ず記載してください"
+                style="height: 120px;"></textarea>
         </div>
 
         <div id="section-reproduced-y-cause" class="form-group hidden">
-            <label for="cause">4. 原因として考えられること</label>
-            <textarea id="cause" placeholder="入力がない場合、AIが検証内容から推測します"></textarea>
+            <label for="cause" class="form-label">4. 原因として考えられること</label>
+            <textarea id="cause" class="form-control" placeholder="入力がない場合、AIが検証内容から推測します"
+                style="height: 120px;"></textarea>
         </div>
 
         <div id="section-reproduced-n-question" class="form-group hidden">
-            <label for="question">4. お客様への質問</label>
-            <textarea id="question" placeholder="（例）特定の操作手順や、使用環境（温度・湿度）など"></textarea>
+            <label for="question" class="form-label">4. お客様への質問</label>
+            <textarea id="question" class="form-control" placeholder="（例）特定の操作手順や、使用環境（温度・湿度）など"
+                style="height: 120px;"></textarea>
         </div>
 
         <div id="section-reproduced-y-action" class="form-group hidden">
-            <label for="action">5. 必要な処置</label>
-            <textarea id="action" placeholder="（例）基板Aの交換"></textarea>
+            <label for="action" class="form-label">5. 必要な処置</label>
+            <textarea id="action" class="form-control" placeholder="（例）基板Aの交換" style="height: 120px;"></textarea>
         </div>
 
         <div class="form-group">
-            <label for="remarks" id="remarks-label">6. 備考</label>
-            <textarea id="remarks" placeholder="（例）同ロットの別個体では再現しなかった"></textarea>
+            <label for="remarks" id="remarks-label" class="form-label">6. 備考</label>
+            <textarea id="remarks" class="form-control" placeholder="（例）同ロットの別個体では再現しなかった"
+                style="height: 120px;"></textarea>
         </div>
 
-        <button id="generate-report">最終レポートを生成</button>
+        <button id="generate-report" class="btn btn-primary" style="width: 100%;">最終レポートを生成</button>
 
         <div id="result-area">
             <div id="result-area-header">
                 <h2>最終出力レポート</h2>
-                <button id="copy-report-btn" class="copy-btn-small">コピー</button>
+                <button id="copy-report-btn" class="btn btn-secondary btn-sm">コピー</button>
             </div>
             <div id="result-output">（ここに結果が表示されます）</div>
         </div>
     </div>
+</body>
 
 
-
-    <script src="/report.js" defer></script>
+<script src="/report.js" defer></script>
 </body>
 
 </html>
