@@ -6,13 +6,19 @@
 
 const xlsx = require("xlsx");
 const ExcelJS = require("exceljs");
-const OpenAI = require("openai");
+const logger = require("./utils/logger");
+const openaiClient = require("./utils/openai-client");
+
+// 依存関係コンテナ
+const deps = {
+  logger,
+  openaiClient
+};
 
 // ===== OpenAI =====
 const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
 const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
 const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ===== SharePoint (Microsoft Graph) =====
 async function getAccessToken() {
@@ -46,7 +52,7 @@ async function getAccessToken() {
 async function downloadExcelBufferFromSharePoint() {
   // DEBUG: Mainで何が入っているか確認（秘密情報は表示しない）
   const has = (v) => (v ? "OK" : "MISSING");
-  console.log("[kensho] env check", {
+  deps.logger.info("kensho", "env check", {
     MANUAL_SHAREPOINT_FILE_URL: has(process.env.MANUAL_SHAREPOINT_FILE_URL),
     MANUAL_TENANT_ID: has(process.env.MANUAL_TENANT_ID),
     MANUAL_CLIENT_ID: has(process.env.MANUAL_CLIENT_ID),
@@ -236,7 +242,9 @@ async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }
     }
   }
 
-  const completion = await client.chat.completions.create({
+  deps.logger.info("kensho", `Calling AI Suggest with model ${MODEL}`);
+
+  const completion = await deps.openaiClient.chatCompletion({
     model: MODEL,
     messages: [
       { role: "system", content: sys },
@@ -244,6 +252,7 @@ async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }
     ],
     reasoning_effort: REASONING,
     verbosity: VERBOSITY,
+    // jsonMode: true // Optional but useful if model supports it robustly. Current prompt asks for JSON.
   });
 
   const raw = completion.choices[0]?.message?.content ?? "{}";
@@ -251,7 +260,12 @@ async function aiSuggest({ productInfo, selectedLabels, existingChecks, images }
   const e = raw.lastIndexOf("}");
   const jsonText = s >= 0 && e > s ? raw.slice(s, e + 1) : "{}";
 
-  const obj = JSON.parse(jsonText);
+  let obj = {};
+  try {
+    obj = JSON.parse(jsonText);
+  } catch (e) {
+    deps.logger.warn("kensho", "JSON Parse Error in aiSuggest", { raw: raw.slice(0, 100) });
+  }
 
   return {
     items: Array.isArray(obj.items) ? obj.items : [],
@@ -351,7 +365,9 @@ async function handleAi(req, res) {
     }
   }
 
-  const completion = await client.chat.completions.create({
+  deps.logger.info("kensho", "Calling AI (handleAi) endpoint");
+
+  const completion = await deps.openaiClient.chatCompletion({
     model: MODEL,
     messages: [
       { role: "system", content: sys },
@@ -605,17 +621,21 @@ async function handler(req, res) {
 
   try {
     const op = (req.query?.op || "").toString();
+    deps.logger.info("kensho", `Request received op=${op}`);
 
     if (op === "db") return await handleDb(req, res);
     if (op === "template") return await handleTemplate(req, res);
     if (op === "generate") return await handleGenerate(req, res);
     if (op === "ai") return await handleAi(req, res);
 
+    deps.logger.warn("kensho", `Unknown op: ${op}`);
     return res.status(404).json({ error: "NotFound", detail: "Unknown op" });
   } catch (err) {
-    console.error(err);
+    deps.logger.error("kensho", "Unexpected error", { error: err.message });
     return res.status(500).json({ error: "UnexpectedError", detail: String(err?.message || err) });
   }
 }
 
 module.exports = handler;
+module.exports._deps = deps;
+

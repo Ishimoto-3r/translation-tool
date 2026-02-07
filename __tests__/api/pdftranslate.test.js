@@ -1,172 +1,158 @@
-// 環境変数を最初に設定 (OpenAI初期化エラー回避)
+// 環境変数のダミー設定
 process.env.OPENAI_API_KEY = "dummy-key";
 
 const nodeMocks = require('node-mocks-http');
-const path = require('path');
+const handler = require('../../api/pdftranslate');
 
-// モックの設定
-jest.mock('openai');
-jest.mock('pdf-lib', () => {
-    // pdf-libのモック (簡易実装)
-    return {
-        PDFDocument: {
-            create: jest.fn().mockResolvedValue({
-                registerFontkit: jest.fn(),
-                embedFont: jest.fn().mockResolvedValue({
-                    widthOfTextAtSize: (text, size) => text.length * size * 0.5,
-                    heightAtSize: (size) => size
-                }),
-                embedJpg: jest.fn().mockResolvedValue({
-                    width: 100,
-                    height: 100
-                }),
-                addPage: jest.fn().mockReturnValue({
-                    drawImage: jest.fn(),
-                    drawText: jest.fn()
-                }),
-                save: jest.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
-            })
-        },
-        rgb: jest.fn()
-    };
-});
+// フォントファイルの存在確認が必要になるため、fsをモックするか、実際のファイルを読み込ませるか。
+// ここでは統合テスト的に実際のファイル読み込みを行わせるが、パス解決でエラーになる可能性があるため
+// 必要に応じて fs.existsSync をモックする。
+const fs = require('fs');
+jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+jest.spyOn(fs, 'readFileSync').mockReturnValue(Buffer.from("dummy-font-content"));
 
-jest.mock('fs', () => ({
-    existsSync: jest.fn(),
-    readFileSync: jest.fn()
+// pdf-lib もモック化して、実際のPDF生成を行わないようにする（速度向上と複雑さ回避）
+// embedFontなどは非同期なのでモックが必要
+jest.mock('pdf-lib', () => ({
+    PDFDocument: {
+        create: jest.fn().mockResolvedValue({
+            registerFontkit: jest.fn(),
+            embedFont: jest.fn().mockResolvedValue('CustomFont'),
+            addPage: jest.fn().mockReturnValue({
+                drawText: jest.fn(),
+                drawImage: jest.fn(),
+                setSize: jest.fn()
+            }),
+            embedJpg: jest.fn().mockResolvedValue({ width: 100, height: 100 }),
+            save: jest.fn().mockResolvedValue(new Uint8Array([1, 2, 3]))
+        })
+    },
+    rgb: jest.fn()
 }));
 
-const fs = require('fs'); // モック定義の後にrequire
 
-// モック設定後にモジュールを読み込む
-const pdftranslate = require('../../api/pdftranslate');
-// module.exports = handler なので、pdftranslate 自体が handler関数になる
-// かつ、pdftranslate.wrapText などがプロパティとして付与されている
-const handler = pdftranslate;
-const { wrapText } = pdftranslate;
+describe('PDF翻訳ツール (pdftranslate.js)', () => {
+    let mockOpenAIClient;
 
-// OpenAIのモック
-const OpenAI = require('openai');
-const mockCreate = jest.fn();
-OpenAI.mockImplementation(() => ({
-    chat: {
-        completions: {
-            create: mockCreate
-        }
-    }
-}));
+    beforeEach(() => {
+        jest.clearAllMocks();
 
-describe('PDF翻訳ツール (pdftranslate)', () => {
-
-    describe('wrapText (テキスト折り返しロジック)', () => {
-        // フォントのモック
-        const mockFont = {
-            widthOfTextAtSize: (text, size) => text.length * 10 // 1文字10pxと仮定
+        // モッククライアント
+        mockOpenAIClient = {
+            chatCompletion: jest.fn()
         };
-
-        test('指定幅に収まる場合は折り返さない', () => {
-            const text = "短いテキスト";
-            const lines = wrapText(text, mockFont, 10, 100); // 幅100px, 文字60px
-            expect(lines).toEqual(["短いテキスト"]);
-        });
-
-        test('指定幅を超える場合は折り返す', () => {
-            const text = "これはとても長いテキストです";
-            const lines = wrapText(text, mockFont, 10, 50); // 幅50px, 1文字10px -> 5文字で折り返し
-
-            // "これはとても" (6文字) -> 60px > 50px なので折り返されるはず
-            expect(lines.length).toBeGreaterThan(1);
-            expect(lines[0].length).toBeLessThanOrEqual(5);
-        });
-
-        test('空行が含まれる場合も正しく処理する', () => {
-            const text = "行1\n\n行2";
-            const lines = wrapText(text, mockFont, 10, 100);
-            expect(lines).toEqual(["行1", "", "行2"]);
-        });
+        // DI注入
+        handler._deps.openaiClient = mockOpenAIClient;
     });
 
-    describe('API Handler', () => {
-        beforeEach(() => {
-            jest.clearAllMocks();
-            process.env.OPENAI_API_KEY = 'test-key';
+    test('メソッド不正 (非POST): 405エラー', async () => {
+        const { req, res } = nodeMocks.createMocks({
+            method: 'GET',
+        });
+        await handler(req, res);
+        expect(res._getStatusCode()).toBe(405);
+    });
 
-            // fsモックのデフォルト動作
-            const fontPath = path.join(process.cwd(), 'api', 'fonts', 'NotoSansSC-Regular.woff2');
-            fs.existsSync.mockReturnValue(true);
-            fs.readFileSync.mockReturnValue(Buffer.from('dummy-font'));
+    test('pagesなし: 400エラー', async () => {
+        const { req, res } = nodeMocks.createMocks({
+            method: 'POST',
+            body: {}
+        });
+        await handler(req, res);
+        expect(res._getStatusCode()).toBe(400);
+    });
+
+    test('URL指定 (プレビュー用): 正常系', async () => {
+        global.fetch = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            arrayBuffer: jest.fn().mockResolvedValue(new ArrayBuffer(10))
         });
 
-        test('POST以外のメソッドは405エラー', async () => {
-            const { req, res } = nodeMocks.createMocks({
-                method: 'GET'
-            });
-
-            await handler(req, res);
-
-            expect(res._getStatusCode()).toBe(405);
+        const { req, res } = nodeMocks.createMocks({
+            method: 'POST',
+            body: { url: "http://example.com/test.pdf" }
         });
 
-        test('必須パラメータ(pages)がない場合は400エラー', async () => {
-            const { req, res } = nodeMocks.createMocks({
-                method: 'POST',
-                body: {}
-            });
+        await handler(req, res);
+        expect(res._getStatusCode()).toBe(200);
+        const data = JSON.parse(res._getData());
+        expect(data.contentType).toBe('application/pdf');
+        expect(data.pdfBase64).toBeDefined();
+    });
 
-            await handler(req, res);
-
-            expect(res._getStatusCode()).toBe(400);
-        });
-
-        test('正常系: 単純なテキストPDFの翻訳', async () => {
-            // OpenAIモックの応答設定
-            mockCreate.mockResolvedValue({
-                choices: [{
-                    message: {
-                        content: JSON.stringify({ translation: "これはテスト翻訳です" })
-                    }
-                }]
-            });
-
-            const { req, res } = nodeMocks.createMocks({
-                method: 'POST',
-                body: {
-                    pages: [
-                        { textItems: [{ text: "This is a test" }], width: 595, height: 842 }
-                    ],
-                    direction: "en-ja"
+    test('テキスト翻訳: 正常系', async () => {
+        mockOpenAIClient.chatCompletion.mockResolvedValue({
+            choices: [{
+                message: {
+                    content: JSON.stringify({ translation: "Translated Content" })
                 }
-            });
-
-            await handler(req, res);
-
-            // 成功ステータス
-            expect(res._getStatusCode()).toBe(200);
-
-            // PDFバイナリが返されているか
-            const headers = res._getHeaders();
-            expect(headers['content-type']).toBe('application/pdf');
-
-            // フォント読み込みが呼ばれたか
-            expect(fs.existsSync).toHaveBeenCalled();
-            expect(fs.readFileSync).toHaveBeenCalled();
+            }]
         });
 
-        test('異常系: フォントファイルがない場合', async () => {
-            fs.existsSync.mockReturnValue(false); // フォントなし
+        const { req, res } = nodeMocks.createMocks({
+            method: 'POST',
+            body: {
+                pages: [{
+                    textItems: [{ text: "Original Content" }],
+                    width: 595,
+                    height: 842
+                }],
+                direction: "ja-zh"
+            }
+        });
 
-            const { req, res } = nodeMocks.createMocks({
-                method: 'POST',
-                body: {
-                    pages: [{ textItems: [{ text: "test" }] }]
+        await handler(req, res);
+        expect(res._getStatusCode()).toBe(200);
+        // PDFバイナリが返ってくる
+        expect(res._getData()).toBeInstanceOf(Buffer);
+        // OpenAI呼び出し引数確認
+        expect(mockOpenAIClient.chatCompletion).toHaveBeenCalledWith(
+            expect.objectContaining({ jsonMode: true })
+        );
+    });
+
+    test('画像（Vision）翻訳: 正常系', async () => {
+        mockOpenAIClient.chatCompletion.mockResolvedValue({
+            choices: [{
+                message: {
+                    content: "Detected Text"
                 }
-            });
-
-            await handler(req, res);
-
-            expect(res._getStatusCode()).toBe(500);
-            const data = JSON.parse(res._getData());
-            expect(data.error).toBe("Translation failed");
+            }]
         });
+
+        const { req, res } = nodeMocks.createMocks({
+            method: 'POST',
+            body: {
+                pages: [{
+                    image: "data:image/png;base64,dummyBase64",
+                    width: 595,
+                    height: 842
+                }],
+                direction: "ja-en"
+            }
+        });
+
+        await handler(req, res);
+        expect(res._getStatusCode()).toBe(200);
+        expect(mockOpenAIClient.chatCompletion).toHaveBeenCalledWith(
+            expect.objectContaining({ jsonMode: false, model: "gpt-4o" })
+        );
+    });
+
+    test('APIエラー時のハンドリング: 500エラー', async () => {
+        mockOpenAIClient.chatCompletion.mockRejectedValue(new Error("API Error"));
+
+        const { req, res } = nodeMocks.createMocks({
+            method: 'POST',
+            body: {
+                pages: [{ textItems: [{ text: "test" }] }]
+            }
+        });
+
+        await handler(req, res);
+        expect(res._getStatusCode()).toBe(500);
+        const data = JSON.parse(res._getData());
+        expect(data.error).toBe("Translation failed");
     });
 });

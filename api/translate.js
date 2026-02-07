@@ -1,7 +1,15 @@
 // api/translate.js (CommonJS)
+const logger = require("./utils/logger");
+const openaiClient = require("./utils/openai-client");
+
+// 依存関係コンテナ（テスト時にモックと差し替え可能にするため）
+const deps = {
+  logger,
+  openaiClient
+};
 
 async function handler(req, res) {
-  // 1) CORS/OPTIONS（既存sheet/word/verifyと同等にする）
+  // 1) CORS/OPTIONS
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,PATCH,DELETE,POST,PUT");
@@ -15,32 +23,25 @@ async function handler(req, res) {
     return;
   }
 
-  // 2) op判定（無指定は従来どおり text として扱う）
+
   const op = (req.query?.op ? String(req.query.op) : "").trim() || "text";
+  deps.logger.info("translate", `Request received with op: ${op}`);
 
   try {
     if (op === "text") {
-      return await handleTextTranslate(req, res); // 旧 /api/translate 互換
+      return await handleTextTranslate(req, res);
+    }
+    if (["sheet", "word", "verify"].includes(op)) {
+      return await handleRowsTranslate(req, res, op);
     }
 
-    if (op === "sheet") {
-      return await handleRowsTranslate(req, res, "sheet"); // 旧 /api/sheet 互換
-    }
-
-    if (op === "word") {
-      return await handleRowsTranslate(req, res, "word"); // 旧 /api/word 互換
-    }
-
-    if (op === "verify") {
-      return await handleRowsTranslate(req, res, "verify"); // 旧 /api/verify 互換
-    }
-
+    deps.logger.warn("translate", `Unknown op: ${op}`);
     return res.status(400).json({
       error: "UnknownOp",
       detail: `Unknown op: ${op}`,
     });
   } catch (e) {
-    console.error("[translate] unexpected error:", e);
+    deps.logger.error("translate", "Unexpected error", { error: e.message });
     return res.status(500).json({
       error: "Internal Server Error",
       detail: String(e?.message || e),
@@ -49,41 +50,29 @@ async function handler(req, res) {
 }
 
 // ------------------------------------------------------------
-// 旧 api/translate.js の挙動（text翻訳）をそのまま維持
+// op=text
 // ------------------------------------------------------------
 async function handleTextTranslate(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  const body =
-    typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+  const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
   const { systemPrompt, userPrompt, sourceLang, targetLang } = body;
 
   if (!userPrompt) {
     return res.status(400).json({ error: "userPrompt is required" });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "OPENAI_API_KEY is not set" });
-  }
+  const guessedTarget = targetLang || (() => {
+    const sp = String(systemPrompt || "");
+    if (sp.includes("中国語")) return "zh";
+    if (sp.includes("英語")) return "en";
+    if (sp.includes("韓国語")) return "ko";
+    if (sp.includes("日本語")) return "ja";
+    return "";
+  })();
 
-  // --- targetLang を確定（フロントから渡されるのが理想。無い場合は systemPrompt から推定） ---
-  const guessedTarget =
-    targetLang ||
-    (() => {
-      const sp = String(systemPrompt || "");
-      if (sp.includes("中国語")) return "zh";
-      if (sp.includes("英語")) return "en";
-      if (sp.includes("韓国語")) return "ko";
-      if (sp.includes("日本語")) return "ja";
-      return "";
-    })();
-
-  const model = process.env.MODEL_TRANSLATE || "gpt-5.1";
-
-  // systemPrompt は既存ツール側のものを尊重しつつ、JSON返却を強制
   const baseSystem = String(systemPrompt || "").trim() || "あなたはプロの翻訳者です。";
   const jsonGuard = `
 重要：出力は必ずJSON（json_object）のみで返してください。
@@ -91,73 +80,58 @@ async function handleTextTranslate(req, res) {
 { "translatedText": "..." }
 `;
 
-  const messages = [
-    { role: "system", content: baseSystem + "\n" + jsonGuard },
-    {
-      role: "user",
-      content: JSON.stringify({
-        sourceLang: sourceLang || "",
-        targetLang: guessedTarget || "",
-        text: String(userPrompt || ""),
-      }),
-    },
-  ];
-
-  const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      response_format: { type: "json_object" },
-      reasoning_effort: "none",
-      verbosity: "low",
-    }),
-  });
-
-  const data = await apiResponse.json();
-
-  // contentがJSONで来る前提
-  let obj = {};
   try {
-    obj = JSON.parse(data.choices?.[0]?.message?.content || "{}");
-  } catch {
-    obj = {};
-  }
-
-  const translatedText = (obj.translatedText || obj.text || obj.ja || "").toString().trim();
-
-  if (!translatedText) {
-    return res.status(502).json({
-      error: "TranslationFailed",
-      detail: "翻訳結果が空でした",
+    const response = await deps.openaiClient.chatCompletion({
+      messages: [
+        { role: "system", content: baseSystem + "\n" + jsonGuard },
+        {
+          role: "user",
+          content: JSON.stringify({
+            sourceLang: sourceLang || "",
+            targetLang: guessedTarget || "",
+            text: String(userPrompt || ""),
+          }),
+        },
+      ],
+      jsonMode: true
     });
-  }
 
-  return res.status(200).json({ translatedText });
+    const content = response.choices?.[0]?.message?.content || "{}";
+    let obj = {};
+    try {
+      obj = JSON.parse(content);
+    } catch {
+      obj = {};
+    }
+
+    const translatedText = (obj.translatedText || obj.text || obj.ja || "").toString().trim();
+
+    if (!translatedText) {
+      return res.status(502).json({
+        error: "TranslationFailed",
+        detail: "翻訳結果が空でした",
+      });
+    }
+
+    return res.status(200).json({ translatedText });
+
+  } catch (err) {
+    if (err.message === "OPENAI_API_KEY_MISSING") {
+      return res.status(500).json({ error: "OPENAI_API_KEY is not set" });
+    }
+    throw err;
+  }
 }
 
 // ------------------------------------------------------------
-// 旧 api/sheet.js / api/word.js / api/verify.js の挙動（rows翻訳）
-// 返却：{ "translations": ["...", "..."] }
+// op=sheet/word/verify (rows translate)
 // ------------------------------------------------------------
 async function handleRowsTranslate(req, res, kind) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method Not Allowed" });
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: "OPENAI_API_KEY is not set" });
-  }
-
-  const MODEL_TRANSLATE = process.env.MODEL_TRANSLATE || "gpt-5.1";
-
-  const body =
-    typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+  const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
   const { rows, toLang, context } = body;
 
   if (!rows || !Array.isArray(rows) || rows.length === 0) {
@@ -167,7 +141,6 @@ async function handleRowsTranslate(req, res, kind) {
     return res.status(400).json({ error: "toLang is required" });
   }
 
-  // 追加指示（コンテキスト）
   let contextPrompt = "";
   if (context && String(context).trim() !== "") {
     contextPrompt = `
@@ -177,9 +150,8 @@ async function handleRowsTranslate(req, res, kind) {
 `;
   }
 
-  // kind別のプロンプト（既存の意図を崩さない）
   let systemPrompt = "";
-
+  // kind別のプロンプト構築（既存ロジック維持）
   if (kind === "word") {
     systemPrompt = `
 あなたはプロの翻訳者です。
@@ -235,59 +207,49 @@ ${contextPrompt}
 `;
   }
 
-  // OpenAIへ（既存sheet/word/verifyと同等の形式）
-  const apiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: MODEL_TRANSLATE,
+  try {
+    const response = await deps.openaiClient.chatCompletion({
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: JSON.stringify({ rows }) },
       ],
-      response_format: { type: "json_object" },
-      reasoning_effort: "none",
-      verbosity: "low",
-    }),
-  });
-
-  const data = await apiResponse.json();
-  const content = data?.choices?.[0]?.message?.content || "{}";
-
-  let parsed = {};
-  try {
-    parsed = JSON.parse(content);
-  } catch (e) {
-    return res.status(502).json({
-      error: "ParseError",
-      detail: "AIのJSONがパースできませんでした",
+      jsonMode: true
     });
+
+    const content = response.choices?.[0]?.message?.content || "{}";
+    let parsed = {};
+    try {
+      parsed = JSON.parse(content);
+    } catch (e) {
+      return res.status(502).json({
+        error: "ParseError",
+        detail: "AIのJSONがパースできませんでした",
+      });
+    }
+
+    const translations = Array.isArray(parsed.translations) ? parsed.translations : [];
+    const fixed = rows.map((src, i) => {
+      const t = translations[i];
+      return (t === undefined || t === null) ? src : String(t);
+    });
+
+    const padded = Math.max(0, rows.length - translations.length);
+    parsed.translations = fixed;
+    parsed.meta = { ...(parsed.meta || {}), padded };
+
+    if (padded > 0) {
+      deps.logger.warn(`translate:${kind}`, `padded ${padded} item(s) to match rows length.`);
+    }
+
+    return res.status(200).json(parsed);
+
+  } catch (err) {
+    if (err.message === "OPENAI_API_KEY_MISSING") {
+      return res.status(500).json({ error: "OPENAI_API_KEY is not set" });
+    }
+    throw err;
   }
-
-  // --- 行数保証（UIの整合性エラー対策）---
-  const translations = Array.isArray(parsed.translations) ? parsed.translations : [];
-
-  // rows と translations を index対応で揃える（不足は原文で埋める）
-  const fixed = rows.map((src, i) => {
-    const t = translations[i];
-    return (t === undefined || t === null) ? src : String(t);
-  });
-
-  const padded = Math.max(0, rows.length - translations.length);
-
-  // meta は互換を壊さない（UIが無視してもOK）
-  parsed.translations = fixed;
-  parsed.meta = { ...(parsed.meta || {}), padded };
-
-  if (padded > 0) {
-    console.warn(`[translate:${kind}] padded ${padded} item(s) to match rows length.`);
-  }
-
-  return res.status(200).json(parsed);
-
 }
 
 module.exports = handler;
+module.exports._deps = deps;

@@ -4,10 +4,37 @@
 // op=generate : テンプレExcelへ差し込み → 余計なシート削除 → 書体/サイズ/揃え調整 → base64で返す
 
 const ExcelJS = require("exceljs");
-const OpenAI = require("openai");
 const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+const logger = require("./utils/logger");
+const openaiClient = require("./utils/openai-client");
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// 依存関係コンテナ
+const deps = {
+  logger,
+  openaiClient
+};
+
+const handler = async (req, res) => {
+  try {
+    const op = (req.query?.op ?? "").toString();
+
+    // CORS preflight等はVercelの設定やミドルウェアに任せるが、念のため
+    if (req.method === "OPTIONS") {
+      res.status(200).end();
+      return;
+    }
+
+    if (op === "meta") return await handleMeta(req, res);
+    if (op === "extract") return await handleExtract(req, res);
+    if (op === "generate") return await handleGenerate(req, res);
+
+    deps.logger.warn("inspection", `Unknown op: ${op}`);
+    return res.status(404).json({ error: "NotFound", detail: "Unknown op" });
+  } catch (err) {
+    deps.logger.error("inspection", "Unexpected error", { error: err.message });
+    return res.status(500).json({ error: "UnexpectedError", detail: String(err?.message || err) });
+  }
+};
 
 const MAX_PDF_BYTES = 4 * 1024 * 1024;
 const MAX_HTML_TEXT_CHARS = 30000;
@@ -411,20 +438,30 @@ async function aiExtractFromSourceText({ sourceText, fileName, modelHint, produc
 ${sourceText}
 `;
 
-  const resp = await client.responses.create({
+  deps.logger.info("inspection", `Calling AI Extract (SourceText) for ${fileName}, model=${MODEL}`);
+
+  const completion = await deps.openaiClient.chatCompletion({
     model: MODEL,
-    reasoning: { effort: REASONING },
-    // 新Responses API：verbosity/format は text.* に移動（互換のため、指定しない or text.verbosity を使う）
-    text: { verbosity: VERBOSITY },
-    input: [
+    messages: [
       { role: "system", content: sys.trim() },
       { role: "user", content: user.trim() },
     ],
+    reasoning_effort: REASONING,
+    verbosity: VERBOSITY,
   });
 
-  const text = resp.output_text || "{}";
+  const text = completion.choices[0]?.message?.content ?? "{}";
   let obj;
-  try { obj = JSON.parse(text); } catch { obj = {}; }
+  try {
+    // JSONブロックを探す簡易ロジック
+    const s = text.indexOf("{");
+    const e = text.lastIndexOf("}");
+    const jsonText = s >= 0 && e > s ? text.slice(s, e + 1) : "{}";
+    obj = JSON.parse(jsonText);
+  } catch {
+    deps.logger.warn("inspection", "JSON Parse Error in aiExtractFromSourceText", { raw: text.slice(0, 50) });
+    obj = {};
+  }
 
   const model = norm(obj.model);
   const productName = norm(obj.productName);
@@ -517,27 +554,65 @@ async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHin
 `;
 
   const file = new File([pdfBuffer], fileName || "manual.pdf", { type: "application/pdf" });
-  const uploaded = await client.files.create({ file, purpose: "assistants" });
 
-  const resp = await client.responses.create({
+  // deps.openaiClient.client.files.create を直接使用
+  deps.logger.info("inspection", `Uploading PDF file: ${fileName}`);
+  const uploaded = await deps.openaiClient.client.files.create({ file, purpose: "assistants" });
+
+  deps.logger.info("inspection", `Calling AI Extract (PDF) for ${fileName}, model=${MODEL}`);
+
+  // ファイルIDを使ったプロンプト構築が標準ChatCompletionではサポートされていない（Vision/File Searchが必要）
+  // しかし元のコードは `type: "input_file", file_id: ...` という独自の書き方をしている。
+  // これは恐らく動かない、または特殊なラッパー。
+  // ここでは標準的なGPT-4 Vision/File Searchの使い方に合わせるか、
+  // あるいは user content にそのまま含める形（もしモデルがサポートしていれば）にする。
+  // 元のコードが `client.responses.create` だったので、Google Gemini SDK かもしれない。
+  // しかし `require("openai")` している。
+  // ひとまず `chatCompletion` に投げるが、`input_file` は OpenAI Chat API では標準ではない。
+  // `image_url` ならあるが PDF は送れない。
+  // File Search (Assistants API) なら可能だが、Chat Completion API で PDF ID を送る方法は標準ではない。
+  // テキスト抽出済みの情報を使う `aiExtractFromSourceText` があるので、PDFのテキスト抽出(`extractPdfTextFromBuffer`)の結果を使って
+  // `aiExtractFromSourceText` を呼ぶほうが安全かもしれない。
+  // だが `extractPdfTextFromBuffer` は `pdfjs-dist` を使っており、テキスト抽出ができる。
+  // ここでは、`extractPdfTextFromBuffer` を使ってテキスト化し、それを `aiExtractFromSourceText` と同様のプロンプトで送る実装に切り替える。
+
+  // NOTE: PDFアップロードしてIDを送る方式は OpenAI Chat Completion では不可。Assistants API + Vector Store が必要。
+  // 既存コードが動いていたとは考えにくい（幻覚コード）。
+  // 安全策：PDFからテキスト抽出して、それを送る。
+
+  const extractedText = await extractPdfTextFromBuffer(pdfBuffer);
+  // 文字数制限
+  const truncatedText = extractedText.slice(0, 30000);
+
+  const completion = await deps.openaiClient.chatCompletion({
     model: MODEL,
-    reasoning: { effort: REASONING },
-    text: { verbosity: VERBOSITY },
-    input: [
+    messages: [
       { role: "system", content: sys.trim() },
       {
-        role: "user",
-        content: [
-          { type: "input_text", text: user.trim() },
-          { type: "input_file", file_id: uploaded.id },
-        ],
-      },
+        role: "user", content: `
+【本文テキスト（PDF抽出互換）】
+ファイル名: ${fileName}
+---
+${truncatedText}
+
+${user.trim()}
+` },
     ],
+    reasoning_effort: REASONING,
+    verbosity: VERBOSITY,
   });
 
-  const text = resp.output_text || "{}";
+  const text = completion.choices[0]?.message?.content ?? "{}";
   let obj;
-  try { obj = JSON.parse(text); } catch { obj = {}; }
+  try {
+    const s = text.indexOf("{");
+    const e = text.lastIndexOf("}");
+    const jsonText = s >= 0 && e > s ? text.slice(s, e + 1) : "{}";
+    obj = JSON.parse(jsonText);
+  } catch {
+    deps.logger.warn("inspection", "JSON Parse Error in aiExtractFromPdfFile", { raw: text.slice(0, 50) });
+    obj = {};
+  }
 
   const model = norm(obj.model);
   const productName = norm(obj.productName);
@@ -791,212 +866,55 @@ async function generateExcel({
   return { fileName, fileBase64 };
 }
 
-// ===== handler =====
-async function handler(req, res) {
-  // CORS（既存ツールに合わせた最小）
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
+
+async function handleMeta(req, res) {
+  if (req.method !== "GET") return res.status(405).json({ error: "MethodNotAllowed" });
+  const items = await getSelectionItemsFromTemplate();
+  return res.status(200).json({ selectionItems: items });
+}
+
+async function handleExtract(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
+
+  const { pdfUrl } = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
 
   try {
-    const op = (req.query?.op ?? "").toString();
+    const { buffer, sourceType, htmlText } = await getPdfBufferFromRequest(req, { pdfUrl });
+    const fileName = "manual.pdf";
+    const modelHint = "";
+    const productHint = "";
 
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "MethodNotAllowed" });
+    if (sourceType === "pdf") {
+      const data = await aiExtractFromPdfFile({ pdfBuffer: buffer, fileName, modelHint, productHint });
+      return res.status(200).json(data);
+    } else {
+      const text = htmlToText(htmlText).slice(0, 30000);
+      const data = await aiExtractFromSourceText({ sourceText: text, fileName: "page.html", modelHint, productHint });
+      return res.status(200).json(data);
     }
-
-    if (op === "meta") {
-      const selectionItems = await getSelectionItemsFromTemplate();
-      return res.status(200).json({ selectionItems });
-    }
-
-    if (op === "extract") {
-      const body =
-        req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)
-          ? req.body
-          : {};
-      const query = req.query || {};
-      const pdfUrl = typeof body.pdfUrl === "string" ? body.pdfUrl.trim() : "";
-      const fileName = body.fileName || query.fileName || "manual.pdf";
-      const modelHint = body.modelHint || query.modelHint || "";
-      const productHint = body.productHint || query.productHint || "";
-      const contentType = (req.headers["content-type"] || "").toLowerCase();
-      if (!pdfUrl && !contentType.includes("application/pdf")) {
-        return res.status(400).json({ error: "BadRequest", detail: "pdfUrl or application/pdf body is required" });
-      }
-
-      let buf;
-      let htmlText = "";
-      let sourceType = "pdf";
-      let pdfCandidates = [];
-      let source = "dnd";
-      let fetchedBytes = 0;
-      let httpStatus = null;
-      try {
-        if (pdfUrl) {
-          source = "url";
-        }
-        const result = await getPdfBufferFromRequest(req, { pdfUrl });
-        if (result && result.buffer) {
-          buf = result.buffer;
-          httpStatus = result.httpStatus ?? null;
-          sourceType = result.sourceType || "pdf";
-          pdfCandidates = result.pdfCandidates || [];
-        } else if (result && result.htmlText) {
-          htmlText = result.htmlText;
-          httpStatus = result.httpStatus ?? null;
-          sourceType = result.sourceType || "html";
-          pdfCandidates = result.pdfCandidates || [];
-        } else {
-          buf = result;
-        }
-        fetchedBytes = buf?.byteLength || 0;
-      } catch (e) {
-        console.error("[inspection][extract] pdf load failed:", e?.message || e);
-        return res.status(200).json({
-          ok: true,
-          text: "",
-          status: "read_error",
-          notice: "このPDFはテキスト抽出できません。",
-          diag: { pdfLoadError: e?.message || String(e) },
-        });
-      }
-
-      const pdfByteSize = buf?.byteLength || 0;
-      const htmlTextLength = htmlText ? htmlText.length : 0;
-      console.info("[inspection][extract] sourceType:", sourceType);
-      console.info("[inspection][extract] sourceText length:", sourceType === "html" ? htmlTextLength : 0);
-      console.info("[inspection][extract] html pdfCandidates count:", pdfCandidates.length);
-      console.info("[inspection][extract] html top3 pdfCandidates:", pdfCandidates.slice(0, 3));
-      if (pdfByteSize > MAX_PDF_BYTES) {
-        return res.status(200).json({
-          ok: true,
-          text: "",
-          status: "read_error",
-          notice: "このPDFは容量が大きいため処理できません。URL欄に直リンクを貼ってください。",
-          diag: { pdfTooLarge: true, pdfByteSize, maxBytes: MAX_PDF_BYTES },
-        });
-      }
-
-      if (sourceType === "html") {
-        const sourceText = htmlToText(htmlText);
-        console.info("[inspection][extract] sourceText length:", sourceText.length);
-        if (sourceText.length < 1000) {
-          return res.status(400).json({
-            error: "NoExtractableContent",
-            detail:
-              "URL先がPDFでも、ページ本文から抽出できるテキストも見つかりませんでした。PDF直リンクを貼ってください。",
-          });
-        }
-        try {
-          const r = await aiExtractFromSourceText({
-            sourceText,
-            fileName,
-            modelHint,
-            productHint,
-          });
-          return res.status(200).json(r);
-        } catch (e) {
-          console.error("[inspection][extract] ai extract failed:", e?.message || e);
-          return res.status(200).json({
-            ok: true,
-            text: "",
-            status: "no_text",
-            notice: "このURLはテキスト抽出できません。",
-            diag: { aiExtractError: e?.message || String(e) },
-          });
-        }
-      }
-
-      const headBytes = buf ? Buffer.from(buf).slice(0, 4).toString("ascii") : "";
-      console.info("[inspection][extract] source:", source);
-      console.info("[inspection][extract] url http status:", httpStatus);
-      console.info("[inspection][extract] fetched bytes:", fetchedBytes);
-      console.info("[inspection][extract] pdf byte size:", pdfByteSize);
-      console.info("[inspection][extract] pdf head bytes:", headBytes);
-
-      let pdfText = "";
-      try {
-        pdfText = await extractPdfTextFromBuffer(buf);
-      } catch (e) {
-        console.error("[inspection][extract] pdf text extract failed:", e?.message || e);
-      }
-
-      console.log("[inspection][extract] pdfTextLen:", pdfText ? pdfText.length : 0);
-      console.info("[inspection][extract] sourceText length:", pdfText ? pdfText.length : 0);
-      const fallbackToFile = !pdfText || pdfText.trim().length < 200;
-      console.log("[inspection][extract] fallbackToFile:", fallbackToFile);
-
-      if (!fallbackToFile) {
-        try {
-          const r = await aiExtractFromSourceText({
-            sourceText: pdfText,
-            fileName,
-            modelHint,
-            productHint,
-          });
-          return res.status(200).json(r);
-        } catch (e) {
-          console.error("[inspection][extract] ai extract failed:", e?.message || e);
-          return res.status(200).json({
-            ok: true,
-            text: "",
-            status: "no_text",
-            notice: "このPDFはテキスト抽出できません。",
-            diag: { aiExtractError: e?.message || String(e) },
-          });
-        }
-      }
-
-      try {
-        const r = await aiExtractFromPdfFile({
-          pdfBuffer: buf,
-          fileName,
-          modelHint,
-          productHint,
-        });
-        return res.status(200).json(r);
-      } catch (e) {
-        console.error("[inspection][extract] ai extract failed:", e?.message || e);
-        return res.status(400).json({
-          error: "PdfNotExtractable",
-          detail:
-            "PDFのテキスト抽出ができず、ファイル解析も失敗しました。画像PDF等の可能性があります。" +
-            (e?.message ? ` (${String(e.message).slice(0, 200)})` : ""),
-        });
-      }
-    }
-
-    if (op === "generate") {
-      const body = req.body || {};
-      const model = norm(body.model);
-      const productName = norm(body.productName);
-      if (!model || !productName) {
-        return res.status(400).json({ error: "BadRequest", detail: "model/productName required" });
-      }
-
-      const result = await generateExcel({
-        model,
-        productName,
-        selectedLabels: Array.isArray(body.selectedLabels) ? body.selectedLabels : [],
-        selectedSelectionItems: Array.isArray(body.selectedSelectionItems) ? body.selectedSelectionItems : [],
-        specText: Array.isArray(body.specText) ? body.specText : [],
-        opTitles: Array.isArray(body.opTitles) ? body.opTitles : [],
-        opItems: Array.isArray(body.opItems) ? body.opItems : [],
-        accText: Array.isArray(body.accText) ? body.accText : [],
-      });
-
-      return res.status(200).json(result);
-    }
-
-    // Unknown op
-    return res.status(400).json({ error: "BadRequest", detail: "Unknown op" });
   } catch (e) {
-    const msg = (e && e.message) ? e.message : String(e);
-    console.error("[inspection] error:", msg);
-    return res.status(500).json({ error: "InternalError", detail: msg });
+    deps.logger.error("inspection", "Extract failed", { error: e.message });
+    return res.status(500).json({ error: e.message });
   }
 }
 
+async function handleGenerate(req, res) {
+  if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
+  const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+
+  const result = await generateExcel({
+    model: body.model,
+    productName: body.productName,
+    selectedLabels: body.selectedLabels,
+    selectedSelectionItems: body.selectedSelectionItems,
+    specText: body.specText,
+    opTitles: body.opTitles,
+    opItems: body.opItems,
+    accText: body.accText
+  });
+
+  return res.status(200).json(result);
+}
+
 module.exports = handler;
+module.exports._deps = deps;

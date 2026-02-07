@@ -4,25 +4,23 @@ process.env.OPENAI_API_KEY = "dummy-key";
 const nodeMocks = require('node-mocks-http');
 const handler = require('../../api/translate');
 
-// Global fetch mock
-global.fetch = jest.fn();
-
 describe('総合翻訳ツール (translate.js)', () => {
+    let mockOpenAIClient;
 
     beforeEach(() => {
-        jest.clearAllMocks();
-        // Default Fetch Mock (OpenAI)
-        global.fetch.mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: jest.fn().mockResolvedValue({
+        // モックオブジェクトの作成
+        mockOpenAIClient = {
+            chatCompletion: jest.fn().mockResolvedValue({
                 choices: [{
                     message: {
                         content: JSON.stringify({ translatedText: "Translated Text", translations: ["T1", "T2"] })
                     }
                 }]
             })
-        });
+        };
+        // 依存関係を上書き (depsパターン)
+        handler._deps.openaiClient = mockOpenAIClient;
+        // Loggerもモック化して余計なログ出力を抑制しても良いが、今回はloggerは実物(console出力)でもテストに支障はない
     });
 
     test('opなし: デフォルトでtextモードとして動作', async () => {
@@ -105,16 +103,12 @@ describe('総合翻訳ツール (translate.js)', () => {
     });
 
     test('OpenAI APIがエラーを返した場合 (502 ParseError)', async () => {
-        global.fetch.mockResolvedValue({
-            ok: true,
-            status: 200,
-            json: jest.fn().mockResolvedValue({
-                choices: [{
-                    message: {
-                        content: "Invalid JSON"
-                    }
-                }]
-            })
+        mockOpenAIClient.chatCompletion.mockResolvedValue({
+            choices: [{
+                message: {
+                    content: "Invalid JSON"
+                }
+            }]
         });
 
         const { req, res } = nodeMocks.createMocks({
@@ -123,7 +117,6 @@ describe('総合翻訳ツール (translate.js)', () => {
             body: { userPrompt: "Hello" }
         });
         await handler(req, res);
-        // textモードは空文字チェックで502になるか、パースエラーは空objになりtranslatedTextが空で502になる
         expect(res._getStatusCode()).toBe(502);
     });
 });

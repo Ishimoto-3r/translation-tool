@@ -1,15 +1,18 @@
 // PDF翻訳API - バックエンド
 // 追記型: 各ページ下部に中国語翻訳を追記
 
-const OpenAI = require("openai");
 const { PDFDocument, rgb } = require("pdf-lib");
 const fs = require("fs");
 const path = require("path");
 const fontkit = require("@pdf-lib/fontkit");
+const logger = require("./utils/logger");
+const openaiClient = require("./utils/openai-client");
 
-const client = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY
-});
+// 依存関係コンテナ
+const deps = {
+    logger,
+    openaiClient
+};
 
 const config = {
     maxDuration: 60,
@@ -39,7 +42,7 @@ async function handler(req, res) {
 
         // URLが指定された場合、PDFを取得してBase64で返す（プレビュー用）
         if (url && !pages) {
-            console.log('[URL Fetch] Fetching PDF from:', url);
+            deps.logger.info("pdftranslate", `[URL Fetch] Fetching PDF from: ${url}`);
             const response = await fetch(url);
             if (!response.ok) {
                 throw new Error(`Failed to fetch PDF: ${response.statusText}`);
@@ -57,7 +60,7 @@ async function handler(req, res) {
             return res.status(400).json({ error: "Invalid request: pages array required" });
         }
 
-        console.log(`Processing ${pages.length} page(s), Direction: ${direction}`);
+        deps.logger.info("pdftranslate", `Processing ${pages.length} page(s), Direction: ${direction}`);
 
         // 翻訳方向設定
         let targetLang;
@@ -77,11 +80,11 @@ async function handler(req, res) {
             default:
                 targetLang = "簡体字中国語"; // デフォルト
         }
-        console.log(`Target: ${targetLang}`);
+        deps.logger.debug("pdftranslate", `Target: ${targetLang}`);
 
         // フォント読み込み
         const fontPath = path.join(process.cwd(), "api", "fonts", "NotoSansSC-Regular.woff2");
-        console.log("Loading font from:", fontPath);
+        deps.logger.debug("pdftranslate", "Loading font from:", { fontPath });
 
         if (!fs.existsSync(fontPath)) {
             throw new Error(`Font file not found: ${fontPath}`);
@@ -104,14 +107,14 @@ async function handler(req, res) {
 
         for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
             const pageData = pages[pageIndex];
-            console.log(`\n=== Processing page ${pageIndex + 1}/${pages.length} ===`);
+            deps.logger.info("pdftranslate", `Processing page ${pageIndex + 1}/${pages.length}`);
 
             let translationText = "";
             let translationSource = "";
 
             // テキストPDF
             if (pageData.textItems && pageData.textItems.length > 0) {
-                console.log(`  Text items found: ${pageData.textItems.length}`);
+                deps.logger.debug("pdftranslate", `Page ${pageIndex + 1}: Text items found: ${pageData.textItems.length}`);
                 translationSource = "textLayer";
 
                 const texts = pageData.textItems.map(item => item.text);
@@ -121,13 +124,13 @@ async function handler(req, res) {
             }
             // 画像PDF
             else if (pageData.image) {
-                console.log(`  No text items, using Vision API...`);
+                deps.logger.debug("pdftranslate", `Page ${pageIndex + 1}: No text items, using Vision API...`);
                 translationSource = "vision";
 
                 translationText = await translateImageWithVision(pageData.image, targetLang);
             }
             else {
-                console.warn(`  Page ${pageIndex + 1}: No text or image data`);
+                deps.logger.warn("pdftranslate", `Page ${pageIndex + 1}: No text or image data`);
                 translationText = "";
             }
 
@@ -135,7 +138,7 @@ async function handler(req, res) {
             const hasChinese = /[\u4e00-\u9fff]/.test(translationText);
             const isEmpty = !translationText || translationText.trim().length === 0;
 
-            console.log(`  Translation result:`, {
+            deps.logger.info("pdftranslate", `Page ${pageIndex + 1} Result`, {
                 source: translationSource,
                 length: translationText.length,
                 isEmpty: isEmpty,
@@ -156,7 +159,7 @@ async function handler(req, res) {
             const pageData = pages[pageIndex];
             const translation = pageTranslations[pageIndex];
 
-            console.log(`\n=== Generating PDF pages for page ${pageIndex + 1} ===`);
+            deps.logger.debug("pdftranslate", `Generating PDF pages for page ${pageIndex + 1}`);
 
             let pageWidth;
             let pageHeight;
@@ -182,16 +185,12 @@ async function handler(req, res) {
                     width: pageWidth,
                     height: pageHeight
                 });
-
-                console.log(`  Original page (image): ${pageWidth} x ${pageHeight}`);
             }
             // テキストPDF（背景なし、白ページ）
             else {
                 pageWidth = pageData.width || 595;
                 pageHeight = pageData.height || 842;
                 originalPage = pdfDoc.addPage([pageWidth, pageHeight]);
-
-                console.log(`  Original page (blank): ${pageWidth} x ${pageHeight}`);
             }
 
             totalPages++;
@@ -220,20 +219,17 @@ async function handler(req, res) {
                 );
 
                 totalPages++;
-                console.log(`  Translation page added`);
+                deps.logger.debug("pdftranslate", `Page ${pageIndex + 1}: Translation page added`);
             }
         }
 
         // AI自己検証レポート
-        console.log("\n=== AI Self-Validation Report ===");
-        console.log(`Total pages: ${totalPages}`);
-        console.log(`Successfully translated: ${successfulTranslations}`);
-        console.log(`Failed: ${totalPages - successfulTranslations}`);
-        if (validationIssues.length > 0) {
-            console.log("Validation Issues:");
-            validationIssues.forEach(issue => console.log(`  - ${issue}`));
-        }
-        console.log("=================================\n");
+        deps.logger.info("pdftranslate", "AI Self-Validation Report", {
+            totalPages,
+            successfulTranslations,
+            failed: totalPages - successfulTranslations,
+            validationIssues
+        });
 
         // PDF保存
         const pdfBytes = await pdfDoc.save();
@@ -244,7 +240,7 @@ async function handler(req, res) {
         return res.status(200).send(Buffer.from(pdfBytes));
 
     } catch (error) {
-        console.error("API Error:", error);
+        deps.logger.error("pdftranslate", "API Error", { error: error.message });
         return res.status(500).json({
             error: "Translation failed",
             details: error.message
@@ -288,13 +284,11 @@ async function drawTranslationOnPage(page, translationText, font, pageWidth, pag
                 color: rgb(0, 0, 0)
             });
         } catch (drawErr) {
-            console.error(`Failed to draw text: ${drawErr.message}`);
+            deps.logger.warn("pdftranslate", `Failed to draw text line: ${drawErr.message}`);
         }
 
         yPos -= fontSize * 1.4;
     }
-
-    console.log(`  Translation: fontSize=${fontSize}, lines=${finalLines.length}`);
 }
 
 // テキスト折り返し（中国語対応）
@@ -375,7 +369,7 @@ Please provide the translation:
 `;
 
     try {
-        const completion = await client.chat.completions.create({
+        const completion = await deps.openaiClient.chatCompletion({
             model: "gpt-4o",
             messages: [
                 {
@@ -386,13 +380,15 @@ Please provide the translation:
                     ]
                 }
             ],
-            max_completion_tokens: 2000
+            // Vision API uses larger tokens usually
+            max_completion_tokens: 2000,
+            jsonMode: false
         });
 
         return completion.choices[0].message.content || "";
 
     } catch (error) {
-        console.error("Vision API error:", error);
+        deps.logger.error("pdftranslate", "Vision API error", { error: error.message });
         return `[Vision API エラー: ${error.message}]`;
     }
 }
@@ -400,7 +396,12 @@ Please provide the translation:
 // GPT APIでテキスト翻訳
 async function translateTextWithGPT(text, targetLang) {
     try {
-        const completion = await client.chat.completions.create({
+        // OpenAI Client Wrapper uses gpt-4-turbo by default, which is good for text
+        // But we want to specify gpt-4o for consistency or specific capability if needed.
+        // For simple translation, gpt-4-turbo (wrapper default) is fine.
+        // However, the original code used gpt-4o. Let's stick to gpt-4o.
+
+        const completion = await deps.openaiClient.chatCompletion({
             model: "gpt-4o",
             messages: [
                 {
@@ -422,14 +423,21 @@ async function translateTextWithGPT(text, targetLang) {
                     content: text
                 }
             ],
-            response_format: { type: "json_object" }
+            jsonMode: true
+            // response_format: { type: "json_object" } // Wrapper handles this based on jsonMode
         });
 
-        const result = JSON.parse(completion.choices[0].message.content);
-        return result.translation;
+        let result;
+        try {
+            result = JSON.parse(completion.choices[0].message.content);
+        } catch (e) {
+            deps.logger.warn("pdftranslate", "Failed to parse JSON response from GPT", { content: completion.choices[0].message.content });
+            return completion.choices[0].message.content; // Fallback to raw content
+        }
+        return result.translation || result.text || completion.choices[0].message.content;
 
     } catch (error) {
-        console.error("Translation API error:", error);
+        deps.logger.error("pdftranslate", "Translation API error", { error: error.message });
         return `[翻訳エラー: ${error.message}]`;
     }
 }
@@ -439,3 +447,4 @@ module.exports = handler;
 module.exports.config = config;
 module.exports.wrapText = wrapText;
 module.exports.drawTranslationOnPage = drawTranslationOnPage;
+module.exports._deps = deps;
