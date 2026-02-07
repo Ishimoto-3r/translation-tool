@@ -37,6 +37,9 @@ export default async function handler(req, res) {
     //   category, userType, notes,
     //   images: [{ name, dataUrl }, ...]
     // }
+    // api/utils/prompts.js からプロンプト定数を取得
+    const { MANUAL_AI_PROMPTS } = require("./utils/prompts");
+
     // 返却は { text } に統一（フロント互換）
     if ((mode || "") === "media-manual") {
       const notes = String(body.notes || "");
@@ -47,31 +50,9 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "NoImages" });
       }
 
-      const sys =
-        "あなたは日本語の取扱説明書向け原稿の作成者です。\n" +
-        "入力の画像（動画から抽出したフレーム）を観察し、作業手順の原稿を作成してください。\n" +
-        "文体は「です・ます」で統一します。\n\n" +
-        "【絶対条件】\n" +
-        "- 画像から断定できない仕様・数値・機能は推測で書かない（不明は不明として扱う）\n" +
-        "- 危険表現、過剰な注意、禁止事項、免責、買い替え提案は出力しない\n" +
-        "- 余計な前置きや結論は不要。原稿として使える文章だけを出力する\n\n" +
-        "【粒度】\n" +
-        "- simple: 手順数を絞り、要点のみ\n" +
-        "- standard: 通常の取説レベル\n" +
-        "- detailed: 迷いが出やすい箇所は補足して丁寧に（ただし推測は禁止）\n\n" +
-        "【出力形式（必須）】\n" +
-        "1) 1行目にタイトルを必ず出す：\n" +
-        "   例）■ 電池の交換 / ■ 組み立て / ■ 操作方法\n" +
-        "   ※備考に作業内容があれば、それを優先して具体的なタイトルにする\n" +
-        "2) 2行目以降は番号付きで手順を列挙：\n" +
-        "   1. 〜\n" +
-        "   2. 〜\n" +
-        "3) 最後に「確認事項：」を必要な場合のみ1〜3点\n";
+      const sys = MANUAL_AI_PROMPTS.MEDIA_MANUAL_SYSTEM;
 
-      const userText =
-        (notes ? `備考: ${notes}\n` : "") +
-        `粒度: ${granularity}\n` +
-        `画像枚数: ${images.length}\n`;
+      const userText = MANUAL_AI_PROMPTS.MEDIA_MANUAL_USER_TEMPLATE(notes, granularity, images.length);
 
       const userContent = [{ type: "text", text: userText }];
 

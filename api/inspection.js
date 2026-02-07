@@ -397,54 +397,21 @@ async function getSelectionItemsFromTemplate() {
 }
 
 // ===== AI extract =====
+// api/utils/prompts.js からプロンプト定数を取得
+const { INSPECTION_PROMPTS } = require("./utils/prompts");
+
 async function aiExtractFromSourceText({ sourceText, fileName, modelHint, productHint }) {
   const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
   const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
   const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
-
-  const sys = `
-あなたは取扱説明書（日本語）の内容から、検品リスト作成に必要な情報を抽出します。
-必ずJSONのみを返してください（説明文は不要）。
-`;
-
-  const user = `
-【目的】
-検品リストに入れる「仕様」「動作」「付属品」、および「型番」「製品名」を抽出します。
-
-【重要ルール】
-- 「動作」には、安全注意/禁止/中止/警告/注意（安全・取扱注意、禁止事項）は入れない。
-- 「動作」は、実際の操作/設定/表示/接続/保存など “できること” を箇条書きで。
-- 「動作」は、まとまりがある場合は title を1つ作り、その配下に items を並べる（例：メニュー設定系はまとめる）。
-- 「付属品」は、PDFに書かれているものをできるだけ拾う。表記揺れを整理する（例：USBケーブル/USBコード/ケーブル→USBケーブル）。
-- ただし「取扱説明書」は、PDF内の明記が無くても必ず付属品候補に入れる（表記は「取扱説明書」に統一）。
-- 型番/製品名は、PDF内の表記（例：3R-XXXX）やタイトル行から推定。見つからない場合は空文字。
-
-【ヒント（既に入力されている可能性あり）】
-- 型番ヒント: ${modelHint || ""}
-- 製品名ヒント: ${productHint || ""}
-
-【返却JSONスキーマ（厳守）】
-{
-  "model": "型番",
-  "productName": "製品名",
-  "specs": ["仕様の箇条書き", "..."],
-  "ops": [{"title":"見出し","items":["動作1","動作2"]}],
-  "accs": ["付属品1","付属品2","取扱説明書"]
-}
-
-【本文テキスト（抜粋元）】
-ファイル名: ${fileName}
----
-${sourceText}
-`;
 
   deps.logger.info("inspection", `Calling AI Extract (SourceText) for ${fileName}, model=${MODEL}`);
 
   const completion = await deps.openaiClient.chatCompletion({
     model: MODEL,
     messages: [
-      { role: "system", content: sys.trim() },
-      { role: "user", content: user.trim() },
+      { role: "system", content: INSPECTION_PROMPTS.SYSTEM },
+      { role: "user", content: INSPECTION_PROMPTS.USER_TEMPLATE(modelHint, productHint, fileName, sourceText) },
     ],
     reasoning_effort: REASONING,
     verbosity: VERBOSITY,

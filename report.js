@@ -99,6 +99,13 @@ generateButton.addEventListener('click', async () => {
         return;
     }
 
+    // --- バリデーション (入力チェック) ---
+    const verificationText = verificationInput.value.trim();
+    if (verificationText.length > 3000) {
+        alert(`検証内容が長すぎます（現在${verificationText.length}文字）。3000文字以内で入力してください。`);
+        return;
+    }
+
     // ローディング開始
     const originalButtonText = "最終レポートを生成";
     generateButton.innerHTML = '<div class="loader"></div> 生成中...';

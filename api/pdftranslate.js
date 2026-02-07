@@ -339,34 +339,12 @@ function wrapText(text, font, fontSize, maxWidth) {
     return lines;
 }
 
+// api/utils/prompts.js からプロンプト定数を取得
+const { PDF_TRANSLATE_PROMPTS } = require("./utils/prompts");
+
 // Vision APIで翻訳（テキストのみ取得、bbox禁止）
 async function translateImageWithVision(imageDataUrl, targetLang) {
-    const prompt = `
-Please perform OCR on this image and translate all Japanese text to ${targetLang}.
-
-Task:
-1. Read all Japanese text visible in this image (including titles, body text, model numbers, captions, etc.)
-2. Translate the read text to ${targetLang}
-3. Return only the translated text
-
-Important guidelines:
-- Read text from top to bottom, left to right
-- Include ALL text elements you can see
-- Keep model numbers and proper nouns unchanged (e.g., "3R-MFXS50", "Anyty")
-- Present translation in paragraph format
-- NO position information or JSON format needed
-- This is a standard OCR and translation task for a product manual
-
-Example output format:
-使用说明书
-3R-MFXS50
-Anyty
-可动式前端内窥镜
-3R-MFXS50
-[additional translated text...]
-
-Please provide the translation:
-`;
+    const prompt = PDF_TRANSLATE_PROMPTS.VISION_USER_TEMPLATE(targetLang);
 
     try {
         const completion = await deps.openaiClient.chatCompletion({
