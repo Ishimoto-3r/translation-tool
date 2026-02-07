@@ -36,7 +36,6 @@ class OpenAIClient {
         const options = {
             model: requestModel,
             messages: requestMessages,
-            reasoning_effort: "none", // 互換性維持
             ...rest
         };
 
