@@ -1,5 +1,5 @@
 // api/manual-ai.js
-import OpenAI from "openai";
+const OpenAI = require("openai");
 
 const MODEL_MANUAL_CHECK =
   process.env.MODEL_MANUAL_CHECK ||
@@ -18,7 +18,7 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "MethodNotAllowed" });
   }

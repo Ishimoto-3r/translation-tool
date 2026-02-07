@@ -1,5 +1,44 @@
+# 依存関係
 node_modules/
 
+# テストカバレッジ
 coverage/
 
+# OS固有ファイル
 .DS_Store
+Thumbs.db
+
+# テスト・デバッグファイル
+temp/
+*.test.pdf
+*.test.jpg
+*.test.png
+test_*.pdf
+test_*.json
+debug_*.js
+debug_*.mjs
+local_verify*.pdf
+*_test.pdf
+
+# バックアップファイル
+*.bak
+*.backup
+*.old
+
+# 一時ファイル
+*.tmp
+*.log
+extracted.jpg
+final_*.pdf
+
+# 環境変数（機密情報保護）
+.env
+.env.local
+.env.*.local
+
+# エディタ設定
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

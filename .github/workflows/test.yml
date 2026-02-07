@@ -1,0 +1,39 @@
+name: Test CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [20.x]
+
+    steps:
+    - name: リポジトリをチェックアウト
+      uses: actions/checkout@v4
+
+    - name: Node.js ${{ matrix.node-version }} をセットアップ
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+
+    - name: 依存関係をインストール
+      run: npm ci
+
+    - name: テストを実行
+      run: npm test -- --coverage
+
+    - name: カバレッジレポートをアップロード
+      uses: codecov/codecov-action@v4
+      if: always()
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./coverage/lcov.info
+        fail_ci_if_error: false

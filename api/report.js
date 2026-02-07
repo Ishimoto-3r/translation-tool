@@ -1,62 +1,80 @@
-// api/report.js
+// api/report.js (CommonJS統一版)
+const logger = require('./utils/logger');
+const openaiClient = require('./utils/openai-client');
+const { handleCorsPreFlight, validatePostMethod, sendErrorResponse, sendSuccessResponse } = require('./utils/api-helpers');
 
-export default async function handler(request, response) {
-  // 1. POSTリクエスト以外は拒否
-  if (request.method !== 'POST') {
-    return response.status(405).json({ error: 'Method Not Allowed' });
+// 依存関係コンテナ（テスト用）
+const deps = {
+  logger,
+  openaiClient
+};
+
+async function handler(request, response) {
+  // CORS preflight処理
+  if (handleCorsPreFlight(request, response)) {
+    return;
+  }
+
+  // POSTメソッドの検証
+  if (!validatePostMethod(request, response)) {
+    return;
   }
 
   try {
-
     const MODEL_REPORT = process.env.MODEL_REPORT || "gpt-5.2";
 
-    // 2. フロントエンド(report.js)から送られてきたプロンプトを取得
+    // リクエストボディから最終プロンプトを取得
     const { finalPrompt } = request.body;
 
     if (!finalPrompt) {
-      return response.status(400).json({ error: 'finalPrompt is required' });
+      return sendErrorResponse(response, 400, 'finalPromptが必要です', 'report');
     }
 
-    // 3. Vercelの環境変数から、安全にAPIキーを取得
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      console.error("OPENAI_API_KEY is not set in Vercel environment variables.");
-      return response.status(500).json({ error: 'サーバー側でAPIキーが設定されていません。' });
-    }
+    deps.logger.info('report', `Generating report with model: ${MODEL_REPORT}`);
 
-    // 4. このバックエンドから、OpenAIのAPIを叩く
-    const apiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: MODEL_REPORT,
-
-        messages: [
-          { "role": "user", "content": finalPrompt }
-        ],
-        // --- ★★★ 修正 (temperatureを削除) ★★★ ---
-        // "temperature": 0.3, // ⬅️ この行を削除
-      })
+    // OpenAI Client経由でAPIを呼び出し
+    const apiResponse = await deps.openaiClient.chatCompletion({
+      model: MODEL_REPORT,
+      messages: [
+        { role: "user", content: finalPrompt }
+      ]
     });
 
-    const data = await apiResponse.json();
+    // レスポンスの取得
+    const gptResponse = apiResponse.choices?.[0]?.message?.content?.trim();
 
-    // 5. OpenAI APIからのエラーハンドリング
-    if (!apiResponse.ok) {
-      console.error("OpenAI API Error:", data);
-      const errorMessage = data.error?.message || `OpenAI API error: ${apiResponse.status}`;
-      return response.status(apiResponse.status).json({ error: errorMessage });
+    if (!gptResponse) {
+      return sendErrorResponse(
+        response,
+        502,
+        'AIからレスポンスが得られませんでした',
+        'report'
+      );
     }
 
-    // 6. 成功した結果をフロントエンドに返す
-    const gptResponse = data.choices[0].message.content.trim();
-    response.status(200).json({ gptResponse: gptResponse });
+    // 成功レスポンス
+    sendSuccessResponse(response, 200, { gptResponse });
 
   } catch (error) {
-    console.error("Internal Server Error:", error);
-    response.status(500).json({ error: 'サーバー内部でエラーが発生しました。' });
+    if (error.message === "OPENAI_API_KEY_MISSING") {
+      return sendErrorResponse(
+        response,
+        500,
+        'OPENAI_API_KEYが設定されていません',
+        'report'
+      );
+    }
+
+    sendErrorResponse(
+      response,
+      500,
+      'サーバー内部でエラーが発生しました',
+      'report',
+      error
+    );
   }
 }
+
+module.exports = handler;
+module.exports._deps = deps;
+
