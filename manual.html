@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>マニュアル作成 | AxelAI</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="mock_style.css">
     <!-- PDF.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
     <script>
@@ -53,66 +54,6 @@
             /* Prevent full page scroll */
         }
 
-        /* Navigation Mock */
-        /* Navigation Manual */
-        .manual-nav {
-            background-color: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border-color);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
-            padding: 0.5rem 1rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: var(--shadow-sm);
-            height: 60px;
-        }
-
-        .manual-nav-brand {
-            display: flex;
-            align-items: center;
-            text-decoration: none;
-            gap: 0.5rem;
-            color: var(--text-main);
-            font-weight: 700;
-            font-size: 1.2rem;
-        }
-
-        .manual-nav-logo {
-            height: 32px;
-            width: auto;
-        }
-
-        .manual-nav-links {
-            display: flex;
-            gap: 0.5rem;
-            margin-left: 1rem;
-        }
-
-        .manual-nav-link {
-            text-decoration: none;
-            color: var(--text-muted);
-            font-weight: 600;
-            font-size: 0.9rem;
-            padding: 0.5rem 0.75rem;
-            border-radius: var(--radius-md);
-            transition: all 0.2s;
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-        }
-
-        .manual-nav-link:hover {
-            color: var(--primary-color);
-            background-color: rgba(59, 130, 246, 0.05);
-        }
-
-        .manual-nav-link.active {
-            color: var(--primary-color);
-            background-color: rgba(59, 130, 246, 0.1);
-        }
 
         /* Launcher Button */
         .launcher-btn {
@@ -723,23 +664,23 @@
             box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
         }
     </style>
+    <link rel="stylesheet" href="mock_style.css">
 </head>
 
 <body>
 
     <!-- Navigation Bar -->
-    <nav class="manual-nav">
+    <nav class="mock-nav">
         <div class="nav-left">
-            <a href="index.html" class="manual-nav-brand">
-                <img src="images/logo.png" alt="AxelAI" class="manual-nav-logo"
-                    style="height: 32px; margin-right: 10px;">
+            <a href="index.html" class="mock-nav-brand">
+                <img src="images/logo.png" alt="AxelAI" class="mock-nav-logo">
                 <span>AI翻訳ツール</span>
             </a>
-            <div class="manual-nav-links">
-                <a href="index.html" class="manual-nav-link"><i class="fas fa-globe"></i> 翻訳ツール</a>
-                <a href="manual.html" class="manual-nav-link active"><i class="fas fa-pen"></i> 原稿作成</a>
-                <a href="inspection.html" class="manual-nav-link"><i class="fas fa-list-alt"></i> 検品リスト</a>
-                <a href="pdftranslate.html" class="manual-nav-link"><i class="fas fa-book-open"></i> PDF翻訳</a>
+            <div class="mock-nav-links">
+                <a href="index.html" class="mock-nav-link"><i class="fas fa-globe"></i> 翻訳ツール</a>
+                <a href="manual.html" class="mock-nav-link active"><i class="fas fa-pen"></i> 原稿作成</a>
+                <a href="inspection.html" class="mock-nav-link"><i class="fas fa-list-alt"></i> 検品リスト</a>
+                <a href="pdftranslate.html" class="mock-nav-link"><i class="fas fa-book-open"></i> PDF翻訳</a>
             </div>
         </div>
         <button class="launcher-btn" title="アプリ一覧">
@@ -793,7 +734,6 @@
                                 <option value="10カ月間">10カ月間</option>
                                 <option value="11カ月間">11カ月間</option>
                                 <option value="1年間">1年間</option>
-                                <option value="2年間">2年間</option>
                             </select>
                         </div>
                     </div>
