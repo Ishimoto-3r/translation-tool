@@ -218,12 +218,157 @@
             gap: 0.75rem;
         }
 
-        /* Company Selection Card (Renamed from radio-card to match manual.html logic) */
-        .company-selection {
+        /* === DB参照（ジャンル選択）スタイルの復元 === */
+        .genre-wrap-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            background: #f3f4f6;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-content: flex-start;
+            min-height: 200px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+        }
+
+        .genre-selected-pinned {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            width: 100%;
+            background: #ffffff;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            padding: 6px 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
+            margin-bottom: 8px;
+        }
+
+        .genre-selected-pinned .pinned-title {
+            font-size: .75rem;
+            font-weight: 800;
+            color: #374151;
+            margin-right: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .genre-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #1e3a8a;
+            font-size: .75rem;
+            font-weight: 700;
+            border: 1px solid #c7d2fe;
+            max-width: 100%;
+        }
+
+        .genre-chip button {
+            width: 16px;
+            height: 16px;
+            border-radius: 999px;
+            background: rgba(30, 58, 138, .12);
+            color: #1e3a8a;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            line-height: 1;
+            border: none;
+            cursor: pointer;
+        }
+
+        .genre-chip button:hover {
+            background: rgba(30, 58, 138, .20);
+        }
+
+        .genre-group {
+            width: calc(33.33% - 6px);
+            min-width: 180px;
+            background: #fff;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
             display: flex;
             flex-direction: column;
-            gap: 0.75rem;
+            flex-shrink: 0;
+            overflow: hidden;
         }
+
+        @media (max-width: 1200px) {
+            .genre-group {
+                width: calc(50% - 6px);
+            }
+        }
+
+        .genre-group-header {
+            padding: 6px 8px;
+            font-size: .75rem;
+            font-weight: bold;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            color: #374151;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-top: 3px solid transparent;
+        }
+
+        .genre-group-content {
+            padding: 4px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        /* Checkbox Card for Genre Items */
+        .checkbox-card {
+            background: #fff;
+            border: 1px solid #f3f4f6;
+            border-radius: 3px;
+            padding: 4px 6px;
+            display: flex;
+            align-items: flex-start;
+            font-size: .8rem;
+            cursor: pointer;
+            transition: .1s;
+            margin-bottom: 2px;
+        }
+
+        .checkbox-card:hover {
+            border-color: #2563eb;
+            background: #eff6ff;
+        }
+
+        .checkbox-card input {
+            margin-right: 6px;
+            margin-top: 3px;
+            transform: scale(.9);
+            flex-shrink: 0;
+            position: relative;
+            z-index: 5;
+        }
+
+        /* Panel Title */
+        .panel-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 800;
+            color: #111827;
+        }
+
 
         .company-card {
             display: flex;
@@ -704,13 +849,24 @@
                 </div>
 
                 <!-- Checklist Area (Using ID genreArea for compatibility) -->
-                <div id="genreAreaContainer" class="h-full">
-                    <div class="flex justify-between items-center mb-2">
-                        <div class="text-sm font-bold text-gray-700">データベース参照</div>
+                <div id="genreAreaContainer" class="h-full flex flex-col overflow-hidden">
+                    <div class="flex justify-between items-center mb-2 px-1 flex-shrink-0">
+                        <div class="panel-title">
+                            <span>安全・注意ジャンル</span>
+                            <span class="text-xs text-gray-500">⚠️</span>
+                            <a href="https://3rhd.sharepoint.com/:x:/r/sites/doc_share/DocLib2/%E5%95%86%E5%93%81%E9%96%8B%E7%99%BA%E3%83%81%E3%83%BC%E3%83%A0/ai-manual-database/database.xlsx?d=w8deb5def816b4890aa586b309de54dc5&csf=1&web=1&e=QXQeD6"
+                                target="_blank" rel="noopener"
+                                class="ml-2 text-xs font-bold text-blue-600 underline hover:text-blue-800 flex items-center gap-1">
+                                <i class="fas fa-database"></i>
+                                database
+                            </a>
+                        </div>
                         <button onclick="clearChecks('genreArea')"
-                            class="text-xs text-red-500 hover:underline">全解除</button>
+                            class="text-[10px] text-red-500 hover:underline">全解除</button>
                     </div>
-                    <div id="genreArea" class="checklist-panel full-height">
+
+                    <!-- Original Structure for Genre Area -->
+                    <div id="genreArea" class="genre-wrap-area border rounded flex-1 mb-3">
                         <div
                             class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
                             <i class="fas fa-spinner fa-spin text-xl text-blue-500"></i>
@@ -719,7 +875,7 @@
                     </div>
 
                     <!-- Generate Button (Fixed at bottom of this view) -->
-                    <button id="genBtn" onclick="runGenerationProcess()" class="btn-generate">
+                    <button id="genBtn" onclick="runGenerationProcess()" class="btn-generate flex-shrink-0">
                         <i class="fas fa-pen-fancy mr-2"></i> 原稿を生成する
                     </button>
                 </div>
