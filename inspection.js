@@ -17,9 +17,12 @@ let extracted = {
 const $ = (id) => document.getElementById(id);
 
 function showError(msg) {
-  const box = $("errorBox");
-  box.textContent = msg;
-  box.classList.remove("hidden");
+  if (window.showToast) {
+    window.showToast(msg, true);
+  } else {
+    console.error(msg);
+    alert(msg);
+  }
 }
 
 function showDndNotice(msg) {
@@ -36,9 +39,7 @@ function showDndNotice(msg) {
 }
 
 function clearError() {
-  const box = $("errorBox");
-  box.textContent = "";
-  box.classList.add("hidden");
+  // Toast automatically clears, no operation needed for static box
 }
 
 function setBusy(on, title = "処理中", step = "", msg = "処理しています。画面は操作できません。", hint = "") {
@@ -51,8 +52,8 @@ function setBusy(on, title = "処理中", step = "", msg = "処理していま�
 
   // 入力をまとめて無効化（二重押し防止）
   const disableIds = [
-    "pdfInput","dropzone","pdfUrlInput","btnExtract","btnGenerate",
-    "lblLiion","lblLegal","modelInput","productInput"
+    "pdfInput", "dropzone", "pdfUrlInput", "btnExtract", "btnGenerate",
+    "lblLiion", "lblLegal", "modelInput", "productInput"
   ];
   for (const id of disableIds) {
     const el = $(id);
@@ -90,7 +91,7 @@ function setPdfStatus() {
   const url = ($("pdfUrlInput") && $("pdfUrlInput").value ? $("pdfUrlInput").value.trim() : "");
 
   if (pdfFile) {
-    $("pdfStatus").textContent = `選択中: ${pdfFile.name} (${Math.round(pdfFile.size/1024)} KB)`;
+    $("pdfStatus").textContent = `選択中: ${pdfFile.name} (${Math.round(pdfFile.size / 1024)} KB)`;
     $("pdfNameHint").textContent = pdfFile.name;
     return;
   }
@@ -215,11 +216,11 @@ function renderOpGroups(containerId, groups) {
 
 function escapeHtml(s) {
   return String(s)
-    .replaceAll("&","&amp;")
-    .replaceAll("<","&lt;")
-    .replaceAll(">","&gt;")
-    .replaceAll('"',"&quot;")
-    .replaceAll("'","&#039;");
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
 async function api(op, payload) {

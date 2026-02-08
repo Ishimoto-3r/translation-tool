@@ -1,0 +1,3237 @@
+﻿/* ---- グローバル ---- */
+let RAW_DATA = [];
+let SELECTED_COMPANY = "";
+let PARTS_IMAGES = [];
+let USAGE_IMAGES = [];
+let REF_TEXT = "";
+let LIB_READY = false;
+let toastTimer = null;
+let TEMPLATES = [];        // 定型文
+let AI_TERM_RULES = [];    // 表記ルール（表記ゆれ用）
+
+// ▼ AIチェック関連
+let AICHECK_TEXT = "";           // txt モード用：AIチェック対象のマニュアル本文
+let AICHECK_FILENAME = "";       // 元ファイル名
+let AICHECK_IS_DOCX = false;     // true: docx を AIチェック中 / false: txt モード
+let AICHECK_DOCX_BUFFER = null;  // docx モード用：元の .docx の ArrayBuffer
+let AICHECK_PARAGRAPHS = [];     // docx モード用：{ pid, text, section, pIndex }
+
+
+
+
+/* ---- 定数 ---- */
+const TERMINOLOGY = [
+    { p: /センサー/g, r: "センサ" },
+    { p: /モニター/g, r: "モニタ" },
+    { p: /バッテリー/g, r: "バッテリ" },
+    { p: /コンピューター/g, r: "コンピュータ" },
+    { p: /プリンター/g, r: "プリンタ" },
+    { p: /アダプター/g, r: "アダプタ" }
+];
+
+const SPEC_WARNING_LINE =
+    "※上記仕様値は参考元の取扱説明書に記載された情報であり、本製品の最終仕様とは異なる場合があります。必ず最新の仕様をご確認ください。";
+
+// ★ここから追加
+function getTemplateTexts(group) {
+    if (!Array.isArray(TEMPLATES)) return [];
+    return TEMPLATES
+        .filter(t => t.group === group)
+        .sort((a, b) => (a.order || 0) - (b.order || 0))
+        .map(t => t.text);
+}
+// ★ここまで追加
+
+/* ---- 初期化 ---- */
+window.onload = () => {
+    const checkLib = setInterval(() => {
+        if (typeof XLSX !== "undefined") {
+            clearInterval(checkLib);
+            LIB_READY = true;
+            document.getElementById("loadingOverlay").style.display = "none";
+            document.getElementById("genBtn").disabled = false;
+        }
+    }, 500);
+
+    setTimeout(() => {
+        if (!LIB_READY) {
+            clearInterval(checkLib);
+            alert("【重要】Excel読込プログラムがロードできませんでした。");
+            document.getElementById("loadingOverlay").style.display = "none";
+        }
+    }, 8000);
+
+    const sel = document.getElementById("warrantyPeriod");
+    ["未定(要確認)", "7日間", ...[...Array(11)].map((_, i) => `${i + 1}カ月間`), "1年間"]
+        .flat()
+        .forEach(t => {
+            const opt = document.createElement("option");
+            opt.value = t.includes("未定") ? "（保証期間）" : `ご購入から${t}`;
+            opt.innerText = t;
+            if (t === "1年間") opt.selected = true;
+            sel.appendChild(opt);
+        });
+
+    // Excel ドロップは廃止したのでここは何も呼ばない
+    // setupOverlayDrop("excelDrop", "excelInput", loadExcel);
+
+    setupOverlayDrop("partsImgDrop", "partsImgInput", f => loadImages(f, "parts"));
+    setupOverlayDrop("refDrop", "refInput", loadRefs);
+    // ★ マニュアルAIチェック用ドロップゾーン
+    setupOverlayDrop("aiCheckDrop", "aiCheckFile", handleAiCheckFiles);
+
+
+    window.addEventListener("paste", e => {
+        const items = e.clipboardData.items;
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image") !== -1) {
+                loadImages([items[i].getAsFile()], "parts");
+                break;
+            }
+        }
+    });
+
+    const saved = localStorage.getItem("manual_tool_api_key");
+    if (saved) {
+        API_KEY = saved;
+        const keyInput = document.getElementById("apiKey");
+        if (keyInput) keyInput.value = "********";
+    }
+
+    renderImageEditors();
+
+    // ★ ページ表示時に自動で SharePoint から Excel を読込
+    loadExcelFromServer();
+};
+
+
+async function loadExcelFromServer() {
+    const gArea = document.getElementById("genreArea");
+
+    // 読み込み中の表示
+    if (gArea) {
+        gArea.innerHTML = `
+      <div class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
+        <i class="fas fa-spinner fa-spin text-xl text-blue-500"></i>
+        <div>SharePoint からManual-databaseを読み込んでいます...</div>
+      </div>`;
+    }
+
+    try {
+        const res = await fetch("/api/manual-test");
+        if (!res.ok) {
+            throw new Error("HTTP " + res.status + " " + res.statusText);
+        }
+
+        const data = await res.json();
+        console.log("[loadExcelFromServer] response:", data);
+
+        // rows / templates / termRules を格納
+        RAW_DATA = Array.isArray(data.rows) ? data.rows : [];
+        TEMPLATES = Array.isArray(data.templates) ? data.templates : [];
+        AI_TERM_RULES = Array.isArray(data.termRules) ? data.termRules : [];
+
+        console.log("TEMPLATES:", TEMPLATES);
+        console.log("AI_TERM_RULES:", AI_TERM_RULES);
+        renderCheckboxes();
+
+
+    } catch (err) {
+        console.error("[loadExcelFromServer] error:", err);
+        if (gArea) {
+            gArea.innerHTML = `
+        <div class="w-full text-center text-sm text-red-500 py-10">
+          SharePoint からのデータ読み込みに失敗しました。<br>
+          ${err.message}
+        </div>`;
+        }
+    }
+}
+
+
+
+
+/* ---- 共通ヘルパー ---- */
+// showToast is provided by navigation.js
+
+function saveKey() {
+    alert("このバージョンではブラウザ側での APIキー設定は不要です（サーバー側で管理しています）。");
+}
+
+
+function selectCompany(code, el) {
+    SELECTED_COMPANY = code;
+
+    document.querySelectorAll(".company-card").forEach(c => {
+        c.classList.remove("selected");
+        const icon = c.querySelector("i");
+        if (icon) {
+            icon.className = "far fa-circle";   // 空の丸に戻す
+        }
+    });
+
+    el.classList.add("selected");
+    const icon = el.querySelector("i");
+    if (icon) {
+        icon.className = "fas fa-check-circle"; // 塗りつぶし丸に変更
+    }
+}
+
+// 画像ラベルだけの段落を除外（例：（画像1）, 画像1, (画像 1)）
+function isImageLabelOnlyParagraph(text) {
+    const s = String(text || "").trim();
+
+    // （画像1）/ (画像1) / （画像 1）/ 画像1 / 画像 1
+    if (/^[（(]?\s*画像\s*\d+\s*[)）]?$/.test(s)) return true;
+
+    // ついでに「図1」も同様に除外したい場合は有効化
+    // if (/^[（(]?\s*図\s*\d+\s*[)）]?$/.test(s)) return true;
+
+    return false;
+}
+
+
+
+/* === docx 段落解析＆コメント挿入用ヘルパー === */
+
+function isNumberingOnlyParagraph(text) {
+    if (!text) return false;
+    const s = String(text).trim();
+    if (!s) return false;
+
+    // 空白除去 + 文字種正規化（全角→半角など）
+    const t = s.normalize("NFKC").replace(/\s+/g, "");
+
+    // ①②③ / (1)(2) / （1）（2） / 1,2,3 / 1.2.3 / 1-2-3 等「番号だけ」系
+    const onlyNumSymbols =
+        /^[0-9０-９()（）［\[\]【】{}｛｝<>＜＞.,．，、・\-ー＋+×xX*＊#＃\u2460-\u2473\u2474-\u2487\u2776-\u277F]+$/;
+
+    if (onlyNumSymbols.test(t)) return true;
+
+    // 括弧付き数字が2回以上連続（例：(1)(2)(3) / （1）（2））
+    const repeatedParenNums = /^([（(]?\s*\d+\s*[)）]?\s*){2,}$/;
+    if (repeatedParenNums.test(s)) return true;
+
+    // 丸付き数字が3個以上含まれていて本文が短い（画像番号列など）
+    const circledCount = (s.match(/[\u2460-\u2473\u2474-\u2487\u2776-\u277F]/g) || []).length;
+    if (circledCount >= 3 && t.length <= 30) return true;
+
+    return false;
+}
+
+
+
+
+
+
+/**
+ * word/document.xml の w:p からテキストを抽出
+ */
+function extractTextFromParagraph(pElem) {
+    const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const texts = [];
+    const tNodes = pElem.getElementsByTagNameNS(wNs, "t");
+    for (let i = 0; i < tNodes.length; i++) {
+        texts.push(tNodes[i].textContent || "");
+    }
+    return texts.join("").replace(/\r/g, "");
+}
+
+
+// === docx 段落結合（AIチェック用）===
+// collected: [{ text, pIndex }]
+function mergeDocxParagraphsForAiCheck(collected) {
+    const out = [];
+    if (!Array.isArray(collected) || !collected.length) return out;
+
+    let buf = "";
+    let lastIndex = null;
+
+    const flush = () => {
+        const t = (buf || "").trim();
+        if (t) out.push({ text: t, pIndexLast: lastIndex });
+        buf = "";
+        lastIndex = null;
+    };
+
+    for (let i = 0; i < collected.length; i++) {
+        const curr = collected[i];
+        const next = collected[i + 1];
+
+        const currText = (curr.text || "").trim();
+        if (!currText) continue;
+
+        if (!buf) buf = currText;
+        else buf += " " + currText;
+
+        lastIndex = curr.pIndex;
+
+        const nextText = next ? (next.text || "").trim() : "";
+        if (shouldBreakBeforeNext(currText, nextText)) {
+            flush();
+        }
+    }
+    flush();
+    return out;
+}
+
+
+
+
+// ★修正版：docx(ArrayBuffer) → AICHECK_PARAGRAPHS を確実に構築（これ1つだけ残す）
+async function parseDocxParagraphsFromArrayBuffer(arrayBuffer) {
+    AICHECK_PARAGRAPHS = [];
+
+    if (typeof JSZip === "undefined") {
+        throw new Error("JSZip is not loaded.");
+    }
+
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const docFile = zip.file("word/document.xml");
+    if (!docFile) {
+        throw new Error("word/document.xml not found in docx");
+    }
+
+    const docXml = await docFile.async("text");
+
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(docXml, "application/xml");
+
+    // パースエラー検知
+    const perr = xmlDoc.getElementsByTagName("parsererror");
+    if (perr && perr.length) {
+        throw new Error("Failed to parse document.xml");
+    }
+
+    const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
+
+    const safetyHeads = new Set([
+        "■安全上のご注意", "■安全上の注意", "■ 安全上のご注意", "■ 安全上の注意",
+        "安全上のご注意", "安全上の注意"
+    ]);
+
+    const EXCLUDE_HEADINGS = new Set([
+        "■サポート・企業情報",
+        "■ご使用済みの製品の廃棄に関して",
+        "■電波に関する注意事項",
+        "■技適マーク",
+
+        // ★追加：仕様はAIチェック対象外
+        "■仕様",
+        "■ 仕様",
+        "仕様",
+        " 仕様",
+    ]);
+
+
+    // まず全文から「安全見出しがあるか」を確認
+    const allTexts = pList
+        .map(p => (extractTextFromParagraph(p) || "").trim())
+        .filter(Boolean);
+
+    const hasSafetyHeading = allTexts.some(t => safetyHeads.has(t));
+
+    // 収集
+    let currentHeading = "";
+    let inExcludedSection = false;
+    let startCollect = !hasSafetyHeading;
+
+    const collected = []; // { text, pIndex }
+
+    for (let i = 0; i < pList.length; i++) {
+        const p = pList[i];
+        const textRaw = extractTextFromParagraph(p);
+        const text = normalizeWordTextForAiCheck(textRaw);
+        if (!text) continue;
+
+        const isHeadingLike = text.startsWith("■") || safetyHeads.has(text);
+
+        if (isHeadingLike) {
+            currentHeading = text.startsWith("■") ? text : ("■" + text);
+            inExcludedSection = EXCLUDE_HEADINGS.has(currentHeading);
+
+            if (safetyHeads.has(text) || safetyHeads.has(currentHeading)) {
+                startCollect = true;
+            }
+            continue;
+        }
+
+        if (!startCollect) continue;
+        if (inExcludedSection) continue;
+
+        // 番号だけ段落は除外
+        if (isNumberingOnlyParagraph(text)) continue;
+
+        // <危険> / <警告> など「トークン見出し」だけの行は除外
+        if (/^<[^>]+>$/.test(text)) continue;
+
+        // （画像1）/ 画像1 など「画像ラベルだけ」の行は除外
+        if (isImageLabelOnlyParagraph(text)) continue;
+
+        collected.push({ text, pIndex: i });
+
+    }
+
+    // 段落結合（結合関数は既存のものを使う）
+    const merged = mergeDocxParagraphsForAiCheck(collected);
+
+    // PID 付与して AICHECK_PARAGRAPHS に格納
+    let pidCounter = 0;
+    for (const m of merged) {
+        const pid = "P" + String(pidCounter).padStart(3, "0");
+        pidCounter++;
+
+        AICHECK_PARAGRAPHS.push({
+            pid,
+            text: m.text,
+            section: "normal",
+            // 結合後コメント挿入位置：最後の段落
+            pIndex: m.pIndexLast
+        });
+    }
+
+    return AICHECK_PARAGRAPHS;
+}
+
+
+function normalizeWordTextForAiCheck(textRaw) {
+    let s = (textRaw || "");
+
+    // 1) 段落内の手動改行（Shift+Enter 等）を「消す」
+    //   ※ ここが今回の残り1件に一番効く
+    s = s.replace(/\r\n|\r|\n/g, "");
+
+    // 2) Word由来の余計な空白を整形（必要なら弱めてOK）
+    s = s.replace(/[ \t]+/g, " ");
+    s = s.replace(/　+/g, " ");            // 全角スペース連続を圧縮
+    s = s.replace(/\s+([、。．.!！？\?」』】）)\]])/g, "$1"); // 句読点/閉じ括弧の前の空白除去
+    s = s.replace(/([「『（【\[])\s+/g, "$1");              // 開き括弧直後の空白除去
+
+    return s.trim();
+}
+
+
+
+
+
+/* === AIチェック用：途中改行の段落結合ヘルパー === */
+
+// 見出し/箇条書き/注意ラベル/番号段落っぽいものは「別項目」として扱い、結合しない
+function isStructuralParagraph(text) {
+    if (!text) return false;
+    const s = String(text).trim();
+    if (!s) return true;
+
+    // 見出し
+    if (s.startsWith("■") || /^【.+】$/.test(s)) return true;
+
+    // 箇条書き/注意/危険ラベル等
+    if (s.startsWith("・") || s.startsWith("※")) return true;
+    if (/^<[^>]+>$/.test(s)) return true; // <危険> など
+
+    // 典型的な番号開始（1. / 1) / (1) / ① など）
+    if (/^(\(?\d+\)?[.\)）]|[\u2460-\u2473\u2474-\u2487\u2776-\u277F])\s*/.test(s)) return true;
+
+    // 「番号だけ段落」は構造扱い（すでに別関数でも除外してるが保険）
+    if (isNumberingOnlyParagraph(s)) return true;
+
+    return false;
+}
+
+// 文の終端っぽいか（「。」が無い文もあるので複数条件）
+function isSentenceEndLike(text) {
+    if (!text) return false;
+    const s = String(text).trim();
+    if (!s) return true;
+
+    // 明確な終端
+    if (/[。！？!?]$/.test(s)) return true;
+
+    // 閉じ記号で終わっていて、そこそこ長いなら終端扱い（注記/見出し風の完結文）
+    if (/[）\]】〕」]$/.test(s) && s.length >= 12) return true;
+
+    return false;
+}
+
+// 次段落が来たら「ここで結合を止めるべき」か
+function shouldBreakBeforeNext(currText, nextText) {
+    if (!nextText) return true;                 // 次が無い＝終わり
+    if (isStructuralParagraph(nextText)) return true; // 次が構造要素なら止める
+    if (isSentenceEndLike(currText)) return true;     // いまの段落が終端なら止める
+    return false;
+}
+
+
+
+/**
+ * docx モード用：AI からの返答 (P000: xxx / TOTAL: yyy) を
+ * { commentsByPid, totalComment } に変換し、不要コメントを除外
+ */
+// ★置き換え：AI 返答 → コメントマップへ
+function parseAiCheckResponse(rawText) {
+    const lines = (rawText || "").split(/\r?\n/);
+
+    const commentsByPid = {};
+    let totalComment = "";
+
+    const tmplSet = new Set((TEMPLATES || []).map(t => (t.text || "").trim()).filter(Boolean));
+    const findParagraphByPid = (pid) => AICHECK_PARAGRAPHS.find(p => p.pid === pid);
+
+    let currentPid = null;
+    let buf = [];
+
+    const flush = () => {
+        if (!currentPid) return;
+
+        let commentText = buf.join(" ").replace(/\s+/g, " ").trim();
+        commentText = removePageRefsFromComment(commentText);
+
+        const para = findParagraphByPid(currentPid);
+        currentPid = null;
+        buf = [];
+
+        if (!para || para.section === "support") return;
+
+        // 番号だけ段落は対象外
+        if (isNumberingOnlyParagraph(para.text)) return;
+
+        // 原文の書き写し（分析ゼロ）を捨てる
+        const norm = (s) => String(s || "").replace(/\s+/g, "").normalize("NFKC");
+        if (norm(commentText) === norm(para.text)) return;
+
+        const isTemplatePara = tmplSet.has((para.text || "").trim());
+        if (shouldSuppressComment(commentText, isTemplatePara, para)) return;
+
+        if (commentText) commentsByPid[para.pid] = commentText;
+    };
+
+    for (const raw of lines) {
+        const line = (raw || "").trim();
+        if (!line) continue;
+
+        if (/^TOTAL\s*:/i.test(line)) {
+            flush();
+            totalComment = removePageRefsFromComment(line.replace(/^TOTAL\s*:\s*/i, "").trim());
+            continue;
+        }
+
+        const m = line.match(/^P(\d{3})\s*[:：]\s*(.*)$/);
+        if (m) {
+            flush();
+            currentPid = "P" + m[1];
+            const first = (m[2] || "").trim();
+            if (first) buf.push(first);
+            continue;
+        }
+
+        // PIDの続き行は、同じコメントとして吸収（ここが重要）
+        if (currentPid) buf.push(line);
+    }
+
+    flush();
+
+    if (!totalComment) {
+        totalComment = "全体として重大な問題は見当たりませんでした。指摘が必要な箇所のみコメントしています。";
+    }
+
+    return { commentsByPid, totalComment };
+}
+
+
+
+// ★置き換え：コメント抑制ロジック（不要指摘をまとめて除外）
+function shouldSuppressComment(content, isTemplatePara, para) {
+    if (!content) return true;
+
+    // テンプレ段落は原則コメント禁止（現仕様維持）
+    if (isTemplatePara) return true;
+
+    const c = String(content).trim();
+    if (!c) return true;
+    // ===== 追加：表記ルールコメントの妥当性検証（from が本文に無ければ捨てる）=====
+    const isTerminologyTopic =
+        c.includes("表記ルール") || c.includes("表記ゆれ") || c.includes("用語") || /→/.test(c);
+
+    // コメントが表記ルール系っぽい場合だけ厳格チェック
+    if (isTerminologyTopic && para && typeof para.text === "string") {
+        const src = para.text;
+
+        // 1) コメント内に「from→to」が書かれている場合：from が本文に無ければ捨てる
+        const arrow = c.match(/(.+?)\s*→\s*(.+)/);
+        if (arrow) {
+            const fromWord = (arrow[1] || "").trim();
+            if (fromWord && !src.includes(fromWord)) {
+                return true;
+            }
+        }
+
+        // 2) 「表記ルール『from→to』と異なる」系：termRules から特定し、from が本文に無ければ捨てる
+        //    （今回の「インジケータは…異なるため…」誤爆をここで落とす）
+        if (Array.isArray(AI_TERM_RULES) && AI_TERM_RULES.length) {
+            const hit = AI_TERM_RULES.find(r => {
+                const f = (r.from || "").trim();
+                const t = (r.to || "").trim();
+                if (!f || !t) return false;
+                // コメントがこのルールに言及してそうか（from/to/「from→to」どれか）
+                return c.includes(f) || c.includes(t) || c.includes(`${f} → ${t}`) || c.includes(`${f}→${t}`);
+            });
+
+            if (hit) {
+                const f = (hit.from || "").trim();
+                const t = (hit.to || "").trim();
+
+                // 本文が to（正）を含むのに、from（誤）が無い = 「合ってるのに違う」系なので捨てる
+                if (t && src.includes(t) && (!f || !src.includes(f))) {
+                    return true;
+                }
+
+                // 本文に from が無いのに修正を求めるのは誤爆なので捨てる（より一般的）
+                if (f && !src.includes(f) && (c.includes("修正") || c.includes("修正します") || c.includes("置換") || c.includes("変更"))) {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // ===== 追加：表記ルール絡みの「推測・条件付きコメント」を全落とし =====
+    // 例）「〜がルールに反して『〜』となっている場合は…」のような仮定は不要指摘として除外
+    const looksLikeTerminologyComment =
+        c.includes("表記") || c.includes("表記ゆれ") || c.includes("用語") || c.includes("ルール") || /→/.test(c);
+
+    const hasSpeculativeConditional =
+        /(もし|場合|可能性|かもしれ|ように見え|となっている場合|場合は)/.test(c);
+
+    const isAssumptionStyle =
+        /(ルールに反(し|して)|反して).*(場合|可能性)/.test(c);
+
+    if (looksLikeTerminologyComment && (hasSpeculativeConditional || isAssumptionStyle)) {
+        return true;
+    }
+
+    // ===== 追加：表記ルール“適合”前提のクドい注釈を落とす =====
+    // 「反して/統一/提案」等があるのに、置換矢印(→)が無い＝曖昧指摘として落とす
+    const aggressiveTerms = /(反して|置換|置き換え|変更|統一|提案)/.test(c);
+    if (looksLikeTerminologyComment && aggressiveTerms && !/→/.test(c)) {
+        return true;
+    }
+
+    // ①「問題ありません/適切です」系は不要
+    const noIssuePhrases = [
+        "問題ありません",
+        "問題はありません",
+        "問題はない",
+        "修正の必要はありません",
+        "修正の必要はない",
+        "問題となる表現はありません",
+        "問題となる箇所はありません",
+        "ラベルとして適切です",
+        "適切です",
+        "妥当です",
+        "OKです",
+        "良いです",
+    ];
+    if (noIssuePhrases.some(p => c.includes(p))) return true;
+
+    // ①「と同様に/同様に」で始まるコメント（前提が無いと意味不明になりがち）
+    if (/^(と同様に|同様に|同じく)\s*[、，]/.test(c) || /^(と同様に|同様に|同じく)/.test(c)) {
+        return true;
+    }
+
+    // 括弧の表記ゆれ（全角/半角）指摘は不要
+    if (c.includes("全角") || c.includes("半角")) return true;
+    if (c.includes("括弧") && (c.includes("全角") || c.includes("半角") || c.includes("統一") || c.includes("揃"))) {
+        return true;
+    }
+
+    // スラッシュ（/ と ／）の半角全角指摘は不要
+    if (c.includes("スラッシュ") || c.includes("/と／") || c.includes("／と/") || c.includes("／") && c.includes("統一")) {
+        return true;
+    }
+
+    // 画像上の番号（赤丸番号など）に関するコメントは不要
+    // 例：「(3,5,9...)が重複」などの“番号列”＋「画像/番号/赤丸/各部の名称」絡みを除外
+    const hasNumberCluster =
+        /[（(]?\s*\d{1,2}(?:\s*[、,]\s*\d{1,2}){3,}\s*[)）]?/.test(c) ||
+        /(?:\d{1,2}\s*){4,}/.test(c);
+    const mentionsImageNumber =
+        c.includes("画像") || c.includes("番号") || c.includes("赤丸") || c.includes("各部の名称") || c.includes("ナンバリング");
+    if (hasNumberCluster && mentionsImageNumber) return true;
+    // 段落本文が「番号だけ」ならコメント自体を出さない（保険）
+    if (para && isNumberingOnlyParagraph(para.text)) return true;
+    // ②「そろえる/統一」系の曖昧コメントは落とす（置換が書かれていない限り不要）
+    const vagueUnify =
+        /(表記|書式|先頭).*(そろ|揃|統一)|他項目.*(そろ|揃|統一)|同じスタイル|同様に揃/;
+    const hasReplacementArrow = /→/.test(c);
+    if (vagueUnify.test(c) && !hasReplacementArrow) return true;
+    // ② 表記ルールに合っているのに言及してくる「くどい指摘」を捨てる
+    const redundantRulePhrases = [
+        "表記ルールに合っているため",
+        "表記ルールに合致しているため",
+        "ルールに合っているため",
+        "統一されているため",
+        "正しい表記です",
+        "適切な表記です",
+        "変更不要です",
+    ];
+    if (redundantRulePhrases.some(p => c.includes(p))) return true;
+
+    // ③ 「〜とすると分かりやすい」系の言い換え提案を捨てる（内容が変わらない“好み”提案）
+    if (/(?:とすると|にすると|とすれば).{0,20}(?:分かりやす|理解しやす|見やす|明確|視覚的に)/.test(c)) return true;
+
+    // ④ 「〜となります」を「〜します」等へ寄せるだけの語尾調整提案を捨てる（意味が同じなら不要）
+    if (/(?:〜|)と(なります|します)の表現/.test(c)) return true;
+
+    // ⑤ コメントが「本文の復唱」なら捨てる（今回の症状対策）
+    if (para && typeof para.text === "string") {
+        const base = para.text.trim();
+
+        // コメントから引用符っぽいものを剥がして比較
+        const stripped = c
+            .replace(/^[「『"”]+/, "")
+            .replace(/[」』"”]+$/, "")
+            .trim();
+
+        // ほぼ同一ならコメントとして無意味なので除外
+        if (stripped === base) return true;
+
+        // 長文で大部分が一致する場合も除外（ざっくり判定）
+        if (base.length >= 20 && stripped.length >= 20) {
+            const b = base.replace(/\s+/g, "");
+            const s = stripped.replace(/\s+/g, "");
+            if (s.includes(b) || b.includes(s)) return true;
+        }
+    }
+
+
+
+    return false; // 基本通す
+}
+
+
+
+
+
+
+/**
+ * docx モード用：元の document.xml にコメント段落を追記して新しい .docx を生成
+ */
+async function exportAiCheckedDocxWithComments(arrayBuffer, commentsByPid, totalComment, originalName) {
+    if (!arrayBuffer) {
+        throw new Error("元の docx データがありません。");
+    }
+
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const docXml = await zip.file("word/document.xml").async("text");
+
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(docXml, "application/xml");
+
+    const wNs = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+    const body = xmlDoc.getElementsByTagNameNS(wNs, "body")[0];
+    const pList = Array.from(xmlDoc.getElementsByTagNameNS(wNs, "p"));
+
+    // pid → 元 document.xml の段落インデックス
+    const indexByPid = new Map();
+    AICHECK_PARAGRAPHS.forEach(p => indexByPid.set(p.pid, p.pIndex));
+
+    // 挿入順（後ろから入れる）
+    const pidList = Object.keys(commentsByPid || {}).sort((a, b) => {
+        const ia = indexByPid.get(a);
+        const ib = indexByPid.get(b);
+        return (ia ?? 0) - (ib ?? 0);
+    });
+
+    // ★重要：表内段落でも「baseP の親」に insert する（body 固定だと表外に飛ぶ）
+    for (let i = pidList.length - 1; i >= 0; i--) {
+        const pid = pidList[i];
+        const idx = indexByPid.get(pid);
+        if (idx == null) continue;
+
+        const baseP = pList[idx];
+        if (!baseP) continue;
+
+        const commentText = (commentsByPid[pid] || "").trim();
+        if (!commentText) continue;
+
+        const parent = baseP.parentNode; // w:tc / w:body など
+        if (!parent) continue;
+
+        // コメント段落（赤字＋黄色ハイライト）
+        const commentP = xmlDoc.createElementNS(wNs, "w:p");
+        const r = xmlDoc.createElementNS(wNs, "w:r");
+        const rPr = xmlDoc.createElementNS(wNs, "w:rPr");
+
+        const color = xmlDoc.createElementNS(wNs, "w:color");
+        color.setAttribute("w:val", "FF0000");
+        const highlight = xmlDoc.createElementNS(wNs, "w:highlight");
+        highlight.setAttribute("w:val", "yellow");
+
+        rPr.appendChild(color);
+        rPr.appendChild(highlight);
+
+        const t = xmlDoc.createElementNS(wNs, "w:t");
+        t.textContent = commentText;
+
+        r.appendChild(rPr);
+        r.appendChild(t);
+        commentP.appendChild(r);
+
+        // baseP の直後に挿入
+        if (baseP.nextSibling) {
+            parent.insertBefore(commentP, baseP.nextSibling);
+        } else {
+            parent.appendChild(commentP);
+        }
+    }
+
+    // ■総評（w:body の末尾に追加）
+    if (totalComment && totalComment.trim()) {
+        const totalP = xmlDoc.createElementNS(wNs, "w:p");
+        const r = xmlDoc.createElementNS(wNs, "w:r");
+        const rPr = xmlDoc.createElementNS(wNs, "w:rPr");
+
+        const color = xmlDoc.createElementNS(wNs, "w:color");
+        color.setAttribute("w:val", "FF0000");
+        const highlight = xmlDoc.createElementNS(wNs, "w:highlight");
+        highlight.setAttribute("w:val", "yellow");
+
+        rPr.appendChild(color);
+        rPr.appendChild(highlight);
+
+        const t = xmlDoc.createElementNS(wNs, "w:t");
+        t.textContent = "■総評 " + totalComment;
+
+        r.appendChild(rPr);
+        r.appendChild(t);
+        totalP.appendChild(r);
+        body.appendChild(totalP);
+    }
+
+    const serializer = new XMLSerializer();
+    const newXml = serializer.serializeToString(xmlDoc);
+    zip.file("word/document.xml", newXml);
+
+    const outBlob = await zip.generateAsync({ type: "blob" });
+
+    let base = (originalName || "manual").replace(/\.docx$/i, "");
+    if (!base) base = "manual";
+    const fileName = `${base}_AIチェック.docx`;
+
+    saveAs(outBlob, fileName);
+}
+
+
+
+
+
+/* ---- ドロップ設定 ---- */
+function setupOverlayDrop(zoneId, inputId, handler) {
+    const z = document.getElementById(zoneId);
+    const i = document.getElementById(inputId);
+    if (!z || !i) return;
+
+    // ▼ ゾーンをクリックしたらファイル選択ダイアログを開く（念のため）
+    z.addEventListener("click", () => i.click());
+
+    // ▼ ファイル選択（click/ドロップの両方）で発火
+    i.addEventListener("change", e => {
+        const files = e.target.files;
+        if (files && files.length > 0) {
+            handler(files);
+        }
+        // 同じファイルを続けて選べるようにリセット
+        i.value = "";
+    });
+
+    // ▼ dragenter / dragover（ゾーン + input 両方で拾う）
+    ["dragenter", "dragover"].forEach(ev => {
+        [z, i].forEach(el => {
+            el.addEventListener(ev, e => {
+                e.preventDefault();
+                e.stopPropagation();
+                z.classList.add("dragover");
+            });
+        });
+    });
+
+    // ▼ dragleave / drop（ゾーン + input 両方で拾う）
+    ["dragleave", "drop"].forEach(ev => {
+        [z, i].forEach(el => {
+            el.addEventListener(ev, e => {
+                e.preventDefault();
+                e.stopPropagation();
+                z.classList.remove("dragover");
+            });
+        });
+    });
+
+    // ▼ 実際の drop でファイルを handler に渡す（ゾーン + input 両方）
+    const handleDrop = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const files = (e.dataTransfer && e.dataTransfer.files) || (e.target && e.target.files);
+        if (files && files.length > 0) {
+            handler(files);
+        }
+    };
+
+    z.addEventListener("drop", handleDrop);
+    i.addEventListener("drop", handleDrop);
+}
+
+
+/* ---- Excel 読込（強化版） ---- */
+function loadExcel(files) {
+    const statusEl = document.getElementById("excelStatus");
+
+    console.log("[loadExcel] 呼び出し:", files);
+
+    if (!files || !files.length) {
+        console.error("[loadExcel] files が空");
+        statusEl.innerText = "ファイルが読み込めません";
+        return;
+    }
+
+    const file = files[0];
+    if (!file) {
+        console.error("[loadExcel] files[0] が undefined");
+        statusEl.innerText = "ファイル読み込みエラー";
+        return;
+    }
+
+    statusEl.innerText = "読込中...";
+
+    const reader = new FileReader();
+
+    reader.onerror = e => {
+        console.error("[loadExcel] FileReader エラー:", e);
+        statusEl.innerText = "ファイルの読み込みに失敗しました";
+        alert("Excel の読み込みに失敗しました（FileReader error）");
+    };
+
+    reader.onload = e => {
+        try {
+            const arr = e.target.result;
+            console.log("[loadExcel] FileReader success");
+
+            if (typeof XLSX === "undefined") {
+                throw new Error("XLSX が読み込まれていません（CDN の読み込み失敗）");
+            }
+
+            const wb = XLSX.read(arr, { type: "array" });
+
+            if (!wb || !wb.SheetNames || wb.SheetNames.length === 0) {
+                throw new Error("Excel にシートがありません");
+            }
+
+            const sheet = wb.Sheets[wb.SheetNames[0]];
+            if (!sheet) {
+                throw new Error("最初のシートが読み取れません");
+            }
+
+            const data = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+            if (!Array.isArray(data) || data.length === 0) {
+                throw new Error("Excel の内容を読み取れません");
+            }
+
+            console.log("[loadExcel] シート行数:", data.length);
+
+            let lastLabel = "";
+            RAW_DATA = data.slice(1).map((row, idx) => {
+                if (!row || (row[1] == null && row[2] == null)) return null;
+
+                let label = (row[0] || "").toString().trim();
+                if (label === "") label = lastLabel; else lastLabel = label;
+
+                const category = (row[1] || "").toString().trim();
+                const content = (row[2] || "").toString().trim();
+
+                return { id: idx, label, category, content };
+            }).filter(r =>
+                r !== null &&
+                r.label &&
+                r.content &&
+                r.label !== "項目名"
+            );
+
+            console.log("[loadExcel] パース後件数:", RAW_DATA.length);
+
+            renderCheckboxes();
+
+            statusEl.innerText = `完了: ${RAW_DATA.length}件`;
+        }
+        catch (err) {
+            console.error("[loadExcel] 読込エラー:", err);
+            statusEl.innerText = "読込エラー";
+            alert("Excel 読込エラー: " + err.message);
+        }
+    };
+
+    reader.readAsArrayBuffer(file);
+}
+
+
+
+
+
+
+/* ---- 画像・資料 ---- */
+function loadImages(files, type) {
+    Array.from(files).forEach(f => {
+        const r = new FileReader();
+        r.onload = e => {
+            if (type === "parts") {
+                PARTS_IMAGES.push({
+                    id: Date.now() + Math.random(),
+                    name: f.name,
+                    dataUrl: e.target.result,
+                    badges: [],
+                    names: "",
+                    nameHint: ""
+                });
+                renderImageEditors();
+                updateFileList("partsPreview", PARTS_IMAGES, "parts");
+            } else {
+                USAGE_IMAGES.push({ name: f.name, dataUrl: e.target.result });
+                updateFileList("usageImgList", USAGE_IMAGES, "usage");
+            }
+        };
+        r.readAsDataURL(f);
+    });
+}
+
+function updateFileList(elId, list, type) {
+    const el = document.getElementById(elId);
+    if (type === "parts") {
+        el.innerHTML = list.map((f, i) =>
+            `<div class="inline-block relative m-1">
+                <img src="${f.dataUrl}" class="preview-thumb">
+                <span onclick="removeFile('parts',${i})"
+                      class="absolute top-0 right-0 bg-red-500 text-white text-[8px] px-1 cursor-pointer">×</span>
+            </div>`
+        ).join("");
+    } else {
+        el.innerHTML = list.map((f, i) =>
+            `<div class="file-item text-[10px] flex justify-between items-center">
+                <span>${f.name}</span>
+                <span class="text-red-500 cursor-pointer" onclick="removeFile('usage',${i})">×</span>
+            </div>`
+        ).join("");
+    }
+}
+
+window.removeFile = function (type, idx) {
+    if (type === "parts") {
+        PARTS_IMAGES.splice(idx, 1);
+        renderImageEditors();
+        updateFileList("partsPreview", PARTS_IMAGES, "parts");
+    } else {
+        USAGE_IMAGES.splice(idx, 1);
+        updateFileList("usageImgList", USAGE_IMAGES, "usage");
+    }
+};
+
+// ② 参考資料：画像 / PDF / Word / テキスト
+async function loadRefs(files) {
+    const el = document.getElementById("refFileList");
+    if (!files || !files.length) return;
+
+    for (let f of files) {
+        try {
+            // 画像ファイル → USAGE_IMAGES に保存（Word出力やAIコンテキスト用）
+            if (f.type && f.type.startsWith("image/")) {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const r = new FileReader();
+                    r.onload = e => resolve(e.target.result);
+                    r.onerror = reject;
+                    r.readAsDataURL(f);
+                });
+
+                USAGE_IMAGES.push({ name: f.name, dataUrl });
+                el.innerHTML += `
+          <div class="file-item text-[10px] flex items-center gap-1">
+            <span>[画像] ${f.name}</span>
+            <i class="fas fa-check text-green-500"></i>
+          </div>`;
+                continue;
+            }
+
+            // 文書系 → テキスト抽出
+            const txt = await extractTextFromFile(f);
+
+            // ★全文を保持する（トークン量はプロンプト側で制限する）
+            REF_TEXT += `\n【参考:${f.name}】\n${txt}\n`;
+
+            el.innerHTML += `
+        <div class="file-item text-[10px] flex items-center gap-1">
+          <span>[文書] ${f.name}</span>
+          <i class="fas fa-check text-green-500"></i>
+        </div>`;
+        } catch (e) {
+            console.error(e);
+            alert("ファイル読込失敗: " + f.name);
+        }
+    }
+}
+async function extractTextFromFile(file) {
+    const name = (file.name || "").toLowerCase();
+    const ext = name.includes(".") ? name.split(".").pop() : "";
+    const type = (file.type || "").toLowerCase();
+
+    // 1) plain text
+    if (type.startsWith("text/") || ext === "txt" || ext === "md" || ext === "csv") {
+        return await file.text();
+    }
+
+    // 2) PDF
+    if (type === "application/pdf" || ext === "pdf") {
+        return await extractPdfText(file);
+    }
+
+    // 3) DOCX（Word）
+    if (type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || ext === "docx") {
+        return await extractDocxText(file);
+    }
+
+    // その他は最低限：バイナリ扱い
+    return `（未対応形式: ${file.type || ext || "unknown"}）`;
+}
+
+async function extractDocxText(file) {
+    if (typeof mammoth === "undefined") {
+        throw new Error("mammoth が読み込まれていません（CDN確認）");
+    }
+    const ab = await file.arrayBuffer();
+    const res = await mammoth.extractRawText({ arrayBuffer: ab });
+    return (res && res.value ? res.value : "").trim();
+}
+
+async function extractPdfText(file) {
+    if (typeof pdfjsLib === "undefined") {
+        throw new Error("pdfjsLib が読み込まれていません（CDN確認）");
+    }
+
+    const ab = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
+
+    const texts = [];
+    for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        const pageText = content.items.map(it => (it && it.str) ? it.str : "").join(" ");
+        texts.push(pageText);
+    }
+    return texts.join("\n").trim();
+}
+
+
+// === マニュアル原稿AIチェック関連 ===
+function handleAiCheckFiles(files) {
+    if (!files || !files.length) return;
+    const file = files[0];
+    if (!file) return;
+
+    const statusEl = document.getElementById("aiCheckStatus");
+    const btn = document.getElementById("aiCheckBtn");
+    const drop = document.getElementById("aiCheckDrop");
+
+    // 拡張子判定（.docx のみ許可）
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+    if (ext !== "docx") {
+        alert("現在、AIチェックは .docx ファイルのみ対応しています。");
+        statusEl.textContent = "対応していないファイル形式です（.docxのみ対応）";
+        btn.disabled = true;
+        if (drop) drop.classList.remove("has-file");
+        AICHECK_FILENAME = "";
+        AICHECK_IS_DOCX = false;
+        AICHECK_DOCX_BUFFER = null;
+        AICHECK_PARAGRAPHS = [];
+        return;
+    }
+
+    AICHECK_FILENAME = file.name || "manual";
+    statusEl.textContent = "読込中...";
+    btn.disabled = true;
+    if (drop) {
+        drop.classList.add("has-file");
+    }
+
+    // docx をそのまま保持しつつ、段落解析
+    file.arrayBuffer()
+        .then(async (ab) => {
+            AICHECK_IS_DOCX = true;
+            AICHECK_DOCX_BUFFER = ab;
+
+            // 段落リストを作成（AICHECK_PARAGRAPHS を埋める）
+            await parseDocxParagraphsFromArrayBuffer(ab);
+
+            const paraCount = AICHECK_PARAGRAPHS.length;
+            const charCount = AICHECK_PARAGRAPHS
+                .reduce((sum, p) => sum + (p.text || "").length, 0);
+
+            statusEl.textContent =
+                `選択中：${AICHECK_FILENAME}（段落数 ${paraCount} / 文字数 約${charCount}）`;
+            btn.disabled = paraCount === 0;
+        })
+        .catch(e => {
+            console.error(e);
+            alert("Wordファイルの読み込みに失敗しました。");
+            statusEl.textContent = "読み込みエラー";
+            btn.disabled = true;
+            if (drop) drop.classList.remove("has-file");
+            AICHECK_IS_DOCX = false;
+            AICHECK_DOCX_BUFFER = null;
+            AICHECK_PARAGRAPHS = [];
+        });
+}
+
+
+
+
+// docx ファイルを HTML + 画像付きの Document に変換し、行テキストを抽出
+async function loadDocxToHtmlDocument(file) {
+    const arrayBuffer = await file.arrayBuffer();
+
+    // 画像も含めて HTML 生成
+    const result = await mammoth.convertToHtml(
+        { arrayBuffer },
+        {
+            convertImage: mammoth.images.inline(function (element) {
+                return element.read("base64").then(function (imageBuffer) {
+                    return {
+                        src: "data:" + element.contentType + ";base64," + imageBuffer
+                    };
+                });
+            })
+        }
+    );
+
+    const html = result.value || "";
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+
+    const lines = extractTextLinesFromDoc(doc);
+
+    return { doc, lines };
+}
+
+// プレーンテキスト（.txt）から簡易 HTML Document を作る
+function createHtmlDocFromPlainText(text) {
+    const doc = document.implementation.createHTMLDocument("");
+    const body = doc.body;
+
+    const srcLines = (text || "").split(/\r?\n/);
+    const lines = [];
+
+    srcLines.forEach((line, index) => {
+        const p = doc.createElement("p");
+        p.textContent = line;
+        p.setAttribute("data-ai-line-index", String(index));
+        body.appendChild(p);
+        lines.push((line || "").replace(/\r?\n/g, " ").trim());
+    });
+
+    return { doc, lines };
+}
+
+// HTML Document から「校正対象の行テキスト」とインデックス属性を付与
+function extractTextLinesFromDoc(doc) {
+    const body = doc.body;
+    const blocks = Array.from(
+        body.querySelectorAll("h1,h2,h3,h4,h5,h6,p,li")
+    );
+
+    const lines = [];
+    let index = 0;
+
+    blocks.forEach(el => {
+        const text = (el.textContent || "")
+            .replace(/\r?\n/g, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+        // 行として扱う（空行も位置合わせのため保持）
+        el.setAttribute("data-ai-line-index", String(index));
+        lines.push(text);
+        index++;
+    });
+
+    return lines;
+}
+
+
+
+
+// ★AIチェックは .docx 専用に固定する
+// AIチェック用プロンプト（docx専用ラッパー）
+function buildAiCheckPrompt() {
+    return buildAiCheckPromptForDocx();
+}
+
+// ★置き換え：docx モード用プロンプト
+function buildAiCheckPromptForDocx() {
+    const tmplLines = (TEMPLATES || []).map(t => t.text).join("\n");
+    const ruleLines = (AI_TERM_RULES || [])
+        .map(r => `${r.from} → ${r.to}`)
+        .join("\n");
+
+    const listText = (AICHECK_PARAGRAPHS || [])
+        .filter(p => p.section !== "support")
+        .map(p => `${p.pid}\n${p.text}`)
+        .join("\n\n");
+
+    return `
+あなたは日本語の取扱説明書を専門とするテクニカルライター兼校正者です。
+日本語だけで回答してください。
+
+目的：
+1. 誤字脱字・文法・不自然表現を指摘する。
+2. 読みやすさ改善を“積極的に”提案する（分割提案／冗長性削減／重複の整理／曖昧さ解消）。
+3. 表記ルールに反する表現があれば統一表記を提案する。
+
+重要ルール：
+- 体裁やレイアウトに関する指摘は禁止（空白/インデント/全半角/句読点の統一/フォント/揃え等）。
+- 改行方式（Shift+Enter など）による、一文が長すぎるなどの指摘は不要。
+- 「問題ありません」「適切です」「良いです」「このままでよい」など
+  “修正不要”を伝えるコメントは禁止。指摘がない段落は出力しない。
+- テンプレート文章一覧は database 由来の定型文だが、
+  “誤字脱字”だけでなく「読みやすさ（分割/冗長/誤解防止）」や「表記ルール違反」も改善余地があれば指摘してよい。
+  ただし、テンプレ文の“内容改変”を強制するのではなく、改善提案として簡潔に書く。
+- 【推測禁止】表記ルール違反が“本文から確実に確認できない”限り、表記ルール関連のコメントを出してはいけません。
+- 【条件文禁止】表記ルール関連のコメントで「もし〜なら」「〜の場合」「〜となっている場合は」「可能性があります」等の条件付き・仮定表現は禁止です。
+- 表記ルールに“合致している”場合は、その語について一切コメントしない（“合っているのでOK”も禁止）。
+- 表記ゆれ（表記ルール関連）を指摘できるのは、本文中に「from（誤）」が実際に存在するときだけです。
+- 表記ゆれを指摘する場合は、必ず「from→to」を1つだけ書く（候補を複数出す／推測で書くのは禁止）。
+- 「表記をそろえる／揃える／統一する／他項目と同じにする」など、置換内容が特定できない曖昧なコメントは禁止です。
+- 表記ルール一覧に無い単語は、表記ゆれとして指摘しないでください。
+- 表記ルールに関連するコメントは「違反がある場合のみ」出す（違反が無いなら沈黙）。
+- 表記ルール違反を指摘する場合は、必ず「本文に実際に含まれている誤表記（from）」をそのまま引用し、from→to を書くこと。
+  本文に from が存在しない場合、表記ルール関連のコメントは一切出してはいけない。
+- コメント本文に「原文そのもの」を書くのは禁止（引用・復唱禁止）。
+- コメントは必ず「何をどう直すか」だけを書く（例：『冗長なので「〜」を削除』）。
+
+
+
+- 語尾や言い回しの好み（例：「〜すると分かりやすい」等）の提案は禁止。
+  改善提案は「誤解・誤操作・安全リスクの低減」または「手順の欠落補完」がある場合に限る。
+
+
+番号・ページ番号ルール：
+- コメント本文にページ番号（P123 等）を書かない。
+
+出力フォーマット（厳守）：
+P000: コメント本文
+P010: コメント本文
+TOTAL: 総評本文
+※Markdownや箇条書きは禁止。すべてプレーンテキスト。
+
+表記ルール一覧：
+${ruleLines || "（ルールなし）"}
+
+テンプレート文章一覧：
+${tmplLines || "（なし）"}
+
+チェック対象の段落一覧：
+${listText}
+`.trim();
+}
+
+// ★置き換え：ページ番号表記をコメントから徹底的に除去
+// ★置き換え：ページ番号表記をコメントから徹底的に除去（P/Ｐ/p対応）
+function removePageRefsFromComment(text) {
+    if (!text) return "";
+
+    let s = text;
+
+    // P / Ｐ / p を許容
+    const P = "[PＰp]";
+
+    // 1) 括弧付き: （P108-P109）, (Ｐ108〜109) 等
+    s = s.replace(new RegExp(`[（(]\\s*${P}\\s*\\d{1,4}(?:\\s*[〜~\\-－]\\s*${P}?\\s*\\d{1,4})?(?:\\s*[、,や]\\s*${P}?\\s*\\d{1,4}(?:\\s*[〜~\\-－]\\s*\\d{1,4})?)*\\s*[)）]`, "g"), "");
+
+    // 2) 範囲: P108-P109, Ｐ108〜109
+    s = s.replace(new RegExp(`${P}\\s*\\d{1,4}\\s*[〜~\\-－]\\s*${P}?\\s*\\d{1,4}`, "g"), "");
+
+    // 3) 複数: P108, P181 / P108や181
+    s = s.replace(new RegExp(`${P}\\s*\\d{1,4}\\s*[、,や]\\s*${P}?\\s*\\d{1,4}`, "g"), "");
+
+    // 4) 単独: P108 / P108ページ
+    s = s.replace(new RegExp(`${P}\\s*\\d{1,4}\\s*ページ?`, "g"), "");
+    s = s.replace(new RegExp(`${P}\\s*\\d{1,4}`, "g"), "");
+
+    // 後処理
+    s = s.replace(/[、,や]\s*(?=。|$)/g, "");
+    s = s.replace(/\s{2,}/g, " ");
+    s = s.replace(/^[、,や\s]+/, "").replace(/[、,や\s]+$/, "");
+
+    return s.trim();
+}
+
+
+async function runAiCheck() {
+    // docx が読み込まれているかチェック
+    if (!AICHECK_DOCX_BUFFER || !Array.isArray(AICHECK_PARAGRAPHS) || !AICHECK_PARAGRAPHS.length) {
+        alert("先にマニュアル原稿の Word ファイル（.docx）をドラッグ＆ドロップしてください。");
+        return;
+    }
+
+    const statusEl = document.getElementById("aiCheckStatus");
+    const btn = document.getElementById("aiCheckBtn");
+    const loading = document.getElementById("loadingOverlay");
+    const loadText = document.getElementById("loadingText");
+
+    const setStep = (stepText) => {
+        if (statusEl) statusEl.textContent = stepText;
+        if (loadText) loadText.textContent = stepText;
+    };
+
+    loading.style.display = "flex";
+    btn.disabled = true;
+
+    try {
+        // 1/3
+        setStep("1/3：AIチェック用の指示文を準備しています…");
+        const prompt = buildAiCheckPrompt();  // docx モード固定
+
+        // 2/3
+        setStep("2/3：AIに送信中です（応答待ち: 数十秒かかる場合があります）…");
+        const aiTextRaw = await callAI(prompt, null);
+
+        // ★追加：表示/解析/マージの前にフィルタを通す
+        const aiText = filterAiCheckOutput(aiTextRaw);
+
+        // 指摘が無い場合は何も表示せず、そのまま終了
+        if (!aiText || !aiText.trim()) {
+            setStep("AIチェック完了（指摘なし）");
+            return;
+        }
+
+
+        // 3/3：コメント解析→Word に追記
+        setStep("3/3：コメントを解析し、Wordに追記しています…");
+        const { commentsByPid, totalComment } = parseAiCheckResponse(aiText);
+
+
+        await exportAiCheckedDocxWithComments(
+            AICHECK_DOCX_BUFFER,
+            commentsByPid,
+            totalComment,
+            AICHECK_FILENAME
+        );
+
+        showToast("AIチェック結果のWordファイルを作成しました");
+        setStep("完了：AIチェック付きWordファイルをダウンロードしました。");
+    } catch (e) {
+        console.error(e);
+        setStep("エラーが発生しました。詳細はコンソールを確認してください。");
+        showToast("AIチェック中にエラーが発生しました: " + e.message, true);
+    } finally {
+        loading.style.display = "none";
+        btn.disabled = false;
+    }
+}
+
+
+
+// AIチェック結果 → 元Word由来HTMLにコメントをマージしてから Word 出力
+async function exportAiCheckedWord(aiText, originalName) {
+    if (!AICHECK_DOC) {
+        alert("元のマニュアル文書が読み込まれていません。もう一度ファイルを選択してください。");
+        return;
+    }
+
+
+    // ★追加：マージ前にフィルタ
+    const filtered = filterAiCheckOutput(aiText);
+
+    // ★ まず AIコメント（【コメント】行）を AICHECK_DOC にマージ
+    mergeAiCommentsIntoDoc(filtered);
+
+
+    // ★ フォントと画像の基本スタイルを追加
+    // head 要素が無い場合は作る
+    let head = AICHECK_DOC.head;
+    if (!head) {
+        head = AICHECK_DOC.createElement("head");
+        const htmlEl = AICHECK_DOC.documentElement || AICHECK_DOC.getElementsByTagName("html")[0];
+        if (htmlEl) {
+            htmlEl.insertBefore(head, htmlEl.firstChild);
+        }
+    }
+    const styleEl = AICHECK_DOC.createElement("style");
+    styleEl.type = "text/css";
+    styleEl.textContent = `
+        body {
+            font-family: "Meiryo UI", "Meiryo", "MS PGothic", sans-serif;
+        }
+        p, li, span {
+            font-family: inherit;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+        }
+    `;
+    head.appendChild(styleEl);
+
+    // HTML 文字列として取り出し
+    const html =
+        "<!DOCTYPE html>" +
+        "<html>" +
+        AICHECK_DOC.documentElement.innerHTML +
+        "</html>";
+
+    if (!window.htmlDocx || typeof window.htmlDocx.asBlob !== "function") {
+        alert("html-docx-js が読み込めていません。ネットワーク状況を確認してください。");
+        return;
+    }
+
+    // HTML → docx Blob に変換
+    const blob = window.htmlDocx.asBlob(html);
+
+    let base = (originalName || "manual").replace(/\.docx$/i, "");
+    if (!base) base = "manual";
+    const fileName = `${base}_AIチェック.docx`;
+
+    saveAs(blob, fileName);
+}
+
+
+
+// AIから返ってきたテキスト（元行＋【コメント】行）を、AICHECK_DOC にマージする
+function mergeAiCommentsIntoDoc(aiText) {
+    if (!aiText || !aiText.trim()) return;
+    if (!AICHECK_DOC || !Array.isArray(AICHECK_TEXT_LINES)) return;
+
+    const lines = aiText.split(/\r?\n/);
+    const commentsMap = {};   // key: 元行index, value: [コメント文字列,...]
+
+    let currentIndex = -1;    // 直近の「元行」がマッチしたインデックス
+
+    for (let raw of lines) {
+        const trimmed = raw.trim();
+        if (!trimmed) continue;
+
+        // コメント行
+        if (trimmed.startsWith("【コメント】")) {
+            const body = trimmed.replace(/^【コメント】\s*/, "");
+            if (!body) continue;
+            if (currentIndex < 0) continue;  // 対応する元行なし
+
+            if (!commentsMap[currentIndex]) {
+                commentsMap[currentIndex] = [];
+            }
+            commentsMap[currentIndex].push(body);
+            continue;
+        }
+
+        // それ以外は「元の本文行」とみなして、AICHECK_TEXT_LINES から対応する index を探す
+        const target = trimmed;
+        let found = -1;
+        for (let i = currentIndex + 1; i < AICHECK_TEXT_LINES.length; i++) {
+            const base = (AICHECK_TEXT_LINES[i] || "").trim();
+            if (!base) continue;
+            if (base === target) {
+                found = i;
+                break;
+            }
+        }
+        if (found !== -1) {
+            currentIndex = found;
+        } else {
+            // 見つからない場合はスキップ（AI側で余計な説明行が入った等）
+        }
+    }
+
+    // 実際に DOM にコメント行を挿入
+    const body = AICHECK_DOC.body;
+
+    Object.keys(commentsMap).forEach(key => {
+        const idx = Number(key);
+        const comments = commentsMap[idx];
+        if (!comments || !comments.length) return;
+
+        const selector = `[data-ai-line-index="${idx}"]`;
+        const baseEl = body.querySelector(selector);
+        if (!baseEl) return;
+
+        // 基準要素の末尾に <br>＋<span> でコメントを追記する
+        comments.forEach(text => {
+            // 改行（同じ段落内で改行）
+            const br = AICHECK_DOC.createElement("br");
+            baseEl.appendChild(br);
+
+            // コメント本体（赤字＋黄色、斜体にはしない）
+            const span = AICHECK_DOC.createElement("span");
+            span.textContent = text;
+            span.style.color = "red";
+            span.style.backgroundColor = "yellow";
+            span.style.fontStyle = "normal";  // ★ 斜体禁止
+
+            baseEl.appendChild(span);
+        });
+    });
+}
+
+
+
+
+/* ---- 安全ジャンル描画（Excel側でジャンル指定版） ---- */
+
+/**
+ * RAW_DATA には /api/manual-test から
+ *  { id, label, category, content,
+ *    uiGenre, uiGenreOrder, uiItemOrder, uiHidden }
+ * が入っている前提
+ */
+function renderCheckboxes() {
+    const gArea = document.getElementById("genreArea");
+    const fArea = document.getElementById("funcArea");   // 無い場合もある
+    gArea.innerHTML = "";
+    if (fArea) fArea.innerHTML = "";
+
+    // 選択済み（上部固定）エリアを先頭に作成
+    const pinned = document.createElement("div");
+    pinned.id = "genreSelectedPinned";
+    pinned.className = "genre-selected-pinned";
+    pinned.innerHTML = `
+      <span class="pinned-title">📌 選択済み <span id="genreSelectedCount" class="text-gray-500 font-extrabold"></span></span>
+      <span id="genreSelectedEmpty" class="text-[10px] text-gray-400">未選択</span>
+      <span id="genreSelectedChips" class="flex flex-wrap gap-2"></span>
+    `;
+    gArea.appendChild(pinned);
+
+    // change/click の監視（1回だけ）
+    setupGenrePinnedHandlers();
+
+    if (!Array.isArray(RAW_DATA) || !RAW_DATA.length) {
+        gArea.innerHTML = `
+          <div class="w-full text-center text-sm text-gray-500 py-10">
+            データが読み込まれていません。
+          </div>`;
+        return;
+    }
+
+    // 1) ラベル単位にまとめる（表示対象のみ）
+    const labelMap = new Map();
+    RAW_DATA.forEach(r => {
+        if (r.uiHidden) return;            // 表示対象外はスキップ
+        const key = r.label || "";
+        if (!key) return;
+
+        if (!labelMap.has(key)) {
+            labelMap.set(key, {
+                label: key,
+                uiGenre: r.uiGenre || "その他",
+                uiGenreOrder: (typeof r.uiGenreOrder === "number" && !isNaN(r.uiGenreOrder))
+                    ? r.uiGenreOrder
+                    : 999,
+                uiItemOrder: (typeof r.uiItemOrder === "number" && !isNaN(r.uiItemOrder))
+                    ? r.uiItemOrder
+                    : 9999
+            });
+        }
+    });
+
+    if (!labelMap.size) {
+        gArea.innerHTML = `
+          <div class="w-full text-center text-sm text-gray-500 py-10">
+            表示対象のラベルがありません。
+          </div>`;
+        return;
+    }
+
+    // 2) ジャンルごとにグルーピング
+    const genreMap = new Map();  // key: uiGenre
+    labelMap.forEach(info => {
+        const gName = info.uiGenre || "その他";
+        if (!genreMap.has(gName)) {
+            genreMap.set(gName, {
+                name: gName,
+                order: info.uiGenreOrder ?? 999,
+                labels: []
+            });
+        }
+        genreMap.get(gName).labels.push(info);
+    });
+
+    // 3) ジャンルの並び順でソート
+    const genreList = Array.from(genreMap.values())
+        .sort((a, b) => {
+            const ao = a.order ?? 999;
+            const bo = b.order ?? 999;
+            if (ao !== bo) return ao - bo;
+            return a.name.localeCompare(b.name, "ja");
+        });
+
+    // 4) ジャンル内のラベルも「ジャンル内表示順 → ラベル名」でソート
+    genreList.forEach(g => {
+        g.labels.sort((a, b) => {
+            const ao = a.uiItemOrder ?? 9999;
+            const bo = b.uiItemOrder ?? 9999;
+            if (ao !== bo) return ao - bo;
+            return a.label.localeCompare(b.label, "ja");
+        });
+    });
+
+    // 5) UI を実際に描画
+    genreList.forEach(g => {
+        const div = document.createElement("div");
+        div.className = "genre-group";
+
+        div.innerHTML = `
+            <div class="genre-group-header">
+                <span>${g.name}</span>
+                <span onclick="toggleGroup(this)"
+                      class="cursor-pointer text-blue-600 text-[10px]">
+                    解除
+                </span>
+            </div>
+        `;
+
+        const body = document.createElement("div");
+        body.className = "genre-group-content";
+
+        g.labels.forEach(info => {
+            body.appendChild(createCheck(info.label));
+        });
+
+        div.appendChild(body);
+        gArea.appendChild(div);
+    });
+
+    // 初期反映
+    updateGenrePinned();
+}
+
+// --- 選択済み（上部固定） ---
+let GENRE_PINNED_WIRED = false;
+
+function setupGenrePinnedHandlers() {
+    if (GENRE_PINNED_WIRED) return;
+    const gArea = document.getElementById("genreArea");
+    if (!gArea) return;
+
+    // チェックの変化を監視
+    gArea.addEventListener("change", (e) => {
+        const t = e.target;
+        if (t && t.matches && t.matches("input[type='checkbox']")) {
+            updateGenrePinned();
+        }
+    });
+
+    // チップの × クリックで解除
+    gArea.addEventListener("click", (e) => {
+        const btn = e.target.closest && e.target.closest("button[data-genre-remove]");
+        if (!btn) return;
+        const enc = btn.getAttribute("data-genre-remove") || "";
+        if (!enc) return;
+        let label = "";
+        try { label = decodeURIComponent(enc); } catch (_) { label = enc; }
+
+        const cb = gArea.querySelector(`input[type='checkbox'][value="${CSS.escape(label)}"]`);
+        if (cb) cb.checked = false;
+        updateGenrePinned();
+    });
+
+    GENRE_PINNED_WIRED = true;
+}
+
+function updateGenrePinned() {
+    const gArea = document.getElementById("genreArea");
+    const pinned = document.getElementById("genreSelectedPinned");
+    if (!gArea || !pinned) return;
+
+    const chipsBox = document.getElementById("genreSelectedChips");
+    const empty = document.getElementById("genreSelectedEmpty");
+    const count = document.getElementById("genreSelectedCount");
+    if (!chipsBox || !empty || !count) return;
+
+    const checked = Array.from(gArea.querySelectorAll(".genre-group input[type='checkbox']:checked"))
+        .map(c => c.value)
+        .filter(v => v);
+
+    chipsBox.innerHTML = "";
+    count.textContent = checked.length ? `(${checked.length})` : "";
+    empty.style.display = checked.length ? "none" : "inline";
+
+    checked.forEach(label => {
+        const enc = encodeURIComponent(label);
+        const chip = document.createElement("span");
+        chip.className = "genre-chip";
+        chip.innerHTML = `
+          <span>${escapeHtml(label)}</span>
+          <button type="button" data-genre-remove="${enc}" aria-label="解除">×</button>
+        `;
+        chipsBox.appendChild(chip);
+    });
+}
+
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+// escapeHtmlAttr は不要（data属性には encodeURIComponent を使用）
+
+/** ラベル用チェックボックスを 1 個つくる */
+function createCheck(label) {
+    const l = document.createElement("label");
+    l.className = "checkbox-card";
+    l.innerHTML = `<input type="checkbox" value="${label}"><span>${label}</span>`;
+    return l;
+}
+
+
+/* ---- 各部の名称エディタ ---- */
+function renumberBadges(img) {
+    img.badges.forEach((b, i) => { b.num = i + 1; });
+}
+
+// 画像ごとに「バッジ数」と「名称行数」をそろえる
+function syncBadgesAndNames(img) {
+    if (!img) return;
+
+    // 名称を行単位にばらす（空行は除外）
+    const lines = (img.names || "")
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(l => l !== "");
+
+    // どちらかが 0 のときは無理に合わせない（手動編集中の可能性あり）
+    if (!img.badges || img.badges.length === 0 || lines.length === 0) {
+        img.names = lines.join("\n");
+        return;
+    }
+
+    // バッジ数に名称行数を合わせる（バッジ数を絶対優先）
+    const badgeCount = img.badges.length;
+
+    // 行数を badgeCount にあわせる
+    let newLines = [];
+
+    for (let i = 0; i < badgeCount; i++) {
+        newLines.push(lines[i] || "");   // 行不足なら空欄
+    }
+
+    img.names = newLines.join("\n");
+
+}
+function normalizeNameText(text) {
+    if (!text) return "";
+
+    // 行単位に分割
+    const rawLines = text.split(/\r?\n/);
+
+    const lines = [];
+
+    for (const raw of rawLines) {
+        let t = raw.trim();
+        if (!t) continue;
+
+        // 「1」「1.」「１．」 など数字で始まらない行は
+        // 説明文とみなして全部捨てる
+        if (!/^\d+/.test(t)) {
+            continue;
+        }
+
+        // 正規化（全角→半角など）
+        let l = raw.normalize("NFKC");
+
+        // 行頭の空白を削除
+        l = l.replace(/^[\s\u3000\u00A0\uFEFF]+/, "");
+
+        // 先頭の番号表記を「1. 」形式にそろえる
+        // 例）「１）」「1）」「No.1  」→「1. 」
+        l = l.replace(
+            /^[^\d]*?(\d+)[\s\u3000\.。、．)）]*\s*/,
+            "$1. "
+        );
+
+        // Markdown の ** を削除
+        l = l.replace(/\*\*/g, "");
+
+        // （）内の説明文を削除
+        l = l.replace(/[（\(][^）\)]*[）\)]/g, "");
+
+        // 「- 説明文」以降を削除（名前の後ろの長い説明を捨てる）
+        // 例）「1. サイドボタン - 左側面にある…」→「1. サイドボタン」
+        l = l.replace(/\s*[-－–—]\s*.+$/, "");
+
+        // 余計な空白を圧縮
+        l = l.replace(/[\s\u3000]{2,}/g, " ");
+
+        l = l.trim();
+        if (!l) continue;
+
+        lines.push(l);
+    }
+
+    // 「1. 名称」だけの行を返す
+    return lines.join("\n");
+}
+
+
+function clearAllPartNames() {
+    PARTS_IMAGES.forEach(img => {
+        img.names = "";
+        img.badges = [];   // ★ ナンバリングも同時にクリア
+    });
+    renderImageEditors();
+    showToast("名称とナンバリングをすべてクリアしました");
+}
+
+function clearSinglePartNames(idx) {
+    const img = PARTS_IMAGES[idx];
+    if (!img) return;
+    img.names = "";
+    img.badges = [];
+    renderImageEditors();
+}
+
+
+// 画像1枚分だけ 名称＆ナンバリングをクリア
+function clearPartNames(idx) {
+    const img = PARTS_IMAGES[idx];
+    if (!img) return;
+
+    img.names = "";
+    img.badges = [];  // 番号もクリア
+
+    renderImageEditors();
+    showToast(`画像${idx + 1}の名称と番号をクリアしました`);
+}
+
+
+function renderImageEditors() {
+    const area = document.getElementById("editorArea");
+    area.innerHTML = "";
+    area.classList.remove("hidden");   // ★ 最初から表示させる
+
+    // 画像がまだないとき（ここを追加する）
+    if (!PARTS_IMAGES.length) {
+        const header = document.createElement("div");
+        header.className = "mb-1";
+        header.innerHTML = `
+            <div class="text-[11px] font-bold text-purple-800 flex justify-between items-center">
+                <span>各部の名称 ナンバリング／名称案</span>
+            </div>
+            <p class="text-[10px] text-purple-700 mt-1 leading-relaxed">
+                左の「① 各部名称・ナンバリング」に画像をアップロードすると、<br>
+                ここで番号付けと名称入力ができます。
+            </p>`;
+        area.appendChild(header);
+        return;
+    }
+
+    // ------ ここから先は元のコードそのまま ------
+    const header = document.createElement("div");
+    header.className = "mb-1";
+    header.innerHTML = `
+        <div class="text-[11px] font-bold text-purple-800 flex justify-between items-center">
+            <span>各部の名称 ナンバリング／名称案</span>
+            <div class="flex gap-1">
+                <button onclick="clearAllPartNames()"
+                    class="text-[10px] px-2 py-1 bg-gray-200 text-gray-800 rounded border border-gray-300">
+                    全ての画像のナンバリングと名称をクリア
+                </button>
+                <button onclick="generatePartsNamesAll()"
+                    class="text-[10px] px-2 py-1 bg-purple-600 text-white rounded">
+                    全画像 名称案を生成
+                </button>
+            </div>
+        </div>
+        <p class="text-[10px] text-purple-700 mt-1 leading-relaxed">
+            右クリック：番号追加／番号ドラッグ：位置調整／ダブルクリック：番号削除。<br>
+            必ず先に、画像上のすべての必要な部位へ手動でナンバリングを行ってから「名称案を生成」ボタンを押してください。
+            AIによる自動ナンバリングは行っていません。<br>
+            各部の名称だけを作成したい場合は、このエリアだけを単独で使用しても問題ありません。
+        </p>`;
+    area.appendChild(header);
+
+    // 以降（forEach で画像ごとのエディタを作る部分）は既存のまま
+
+    PARTS_IMAGES.forEach((img, idx) => {
+        renumberBadges(img);
+        syncBadgesAndNames(img);   // ★ ここで数をそろえる
+
+        const cont = document.createElement("div");
+        cont.className = "editor-container";
+        cont.innerHTML = `
+    <div class="editor-header">
+        <span>画像${idx + 1}</span>
+        <div class="flex items-center gap-2">
+            <button
+                type="button"
+                class="text-[10px] px-2 py-0.5 border border-purple-400 text-purple-700 bg-white rounded hover:bg-purple-50"
+                onclick="copyNumberedImage(${idx})">
+                ナンバリング済み画像をコピー
+            </button>
+            <button
+                type="button"
+                class="text-[10px] px-2 py-0.5 bg-gray-200 text-gray-800 rounded border border-gray-300"
+                onclick="clearPartNames(${idx})">
+                この画像のナンバリングと名称をクリア
+            </button>
+            <span class="text-red-500 cursor-pointer" onclick="removeFile('parts',${idx})">×</span>
+        </div>
+    </div>`;
+
+        const row = document.createElement("div");
+        row.className = "flex gap-2 items-start";
+
+        const wrap = document.createElement("div");
+        wrap.className = "editor-wrapper";
+        wrap.innerHTML = `<img src="${img.dataUrl}" class="editor-img">`;
+
+        img.badges.forEach((b, bi) => {
+            const bg = document.createElement("div");
+            bg.className = "badge";
+            bg.innerText = b.num;
+            bg.style.left = b.x + "%";
+            bg.style.top = b.y + "%";
+
+            bg.onmousedown = e => {
+                e.stopPropagation();
+                e.preventDefault();
+                const move = ev => {
+                    const r = wrap.getBoundingClientRect();
+                    b.x = Math.max(0, Math.min(100, (ev.clientX - r.left) / r.width * 100));
+                    b.y = Math.max(0, Math.min(100, (ev.clientY - r.top) / r.height * 100));
+                    bg.style.left = b.x + "%";
+                    bg.style.top = b.y + "%";
+                };
+                const up = () => {
+                    document.removeEventListener("mousemove", move);
+                    document.removeEventListener("mouseup", up);
+                };
+                document.addEventListener("mousemove", move);
+                document.addEventListener("mouseup", up);
+            };
+
+            bg.ondblclick = e => {
+                e.stopPropagation();
+                img.badges.splice(bi, 1);
+                renderImageEditors();
+            };
+
+            wrap.appendChild(bg);
+        });
+
+        wrap.oncontextmenu = e => {
+            e.preventDefault();
+            const r = wrap.getBoundingClientRect();
+            img.badges.push({
+                num: img.badges.length + 1,
+                x: (e.clientX - r.left) / r.width * 100,
+                y: (e.clientY - r.top) / r.height * 100
+            });
+            renumberBadges(img);
+            renderImageEditors();
+        };
+
+        const side = document.createElement("div");
+        side.className = "flex-1 flex flex-col gap-1";
+
+        // 先頭の改行・空白をさらに念入りに削る
+        const namesTextRaw = img.names || "";
+        const namesText = namesTextRaw
+            .replace(/^\s+/, "")            // 先頭の空白・改行を削除
+            .replace(/\r?\n\s+\r?\n/g, "\n") // 連続空行の圧縮
+            .trim();
+
+        // 上部（ラベル＋ボタン）は innerHTML で OK（ここは pre-wrap ではない）
+        side.innerHTML = `
+    <label class="text-[10px] font-bold text-gray-600">
+        名称案への要望
+        <input type="text"
+            class="w-full border rounded px-1 py-0.5 text-[10px] mt-0.5"
+            placeholder="例）マウスの部位名称として自然な表現にしてください"
+            value="${img.nameHint || ""}"
+            oninput="updateNameHint(${idx},this.value)">
+    </label>
+    <div class="flex justify-between items-center mt-1 mb-1">
+        <span class="text-[10px] font-bold text-gray-600">名称案</span>
+        <button class="text-[10px] px-2 py-0.5 bg-purple-500 text-white rounded"
+            onclick="regenPartNames(${idx})">
+            この画像の名称案を生成
+        </button>
+    </div>
+`;
+
+        // 名称案 textarea
+        const namesBox = document.createElement("textarea");
+        namesBox.className = "w-full border rounded p-1 text-[10px] leading-4 bg-white parts-names-box";
+        namesBox.rows = 6;
+        namesBox.value = namesText || "";
+        namesBox.placeholder = "（名称案なし）";
+
+        // 入力した内容を即時反映
+        namesBox.oninput = () => {
+            PARTS_IMAGES[idx].names = namesBox.value;
+        };
+
+        side.appendChild(namesBox);
+
+
+
+        row.appendChild(wrap);
+        row.appendChild(side);
+        cont.appendChild(row);
+        area.appendChild(cont);
+    });
+}
+
+function updateNameHint(idx, val) {
+    if (!PARTS_IMAGES[idx]) return;
+    PARTS_IMAGES[idx].nameHint = val;
+}
+
+async function copyNumberedImage(idx) {
+    const img = PARTS_IMAGES[idx];
+    if (!img) return;
+
+    if (!navigator.clipboard || !window.ClipboardItem) {
+        alert("このブラウザでは画像のクリップボードコピーに対応していません。\n必要に応じて Word 出力機能などをご利用ください。");
+        return;
+    }
+
+    const base = new Image();
+    base.onload = () => {
+        const canvas = document.getElementById("processCanvas");
+        const ctx = canvas.getContext("2d");
+
+        canvas.width = base.width;
+        canvas.height = base.height;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(base, 0, 0);
+
+        // ナンバリングを書き込み
+        if (img.badges && img.badges.length) {
+            const sX = base.width / 100;
+            const sY = base.height / 100;
+            const r = Math.max(20, base.width * 0.03);
+
+            ctx.font = `bold ${r}px Arial`;
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+
+            img.badges.forEach(b => {
+                ctx.beginPath();
+                ctx.arc(b.x * sX, b.y * sY, r, 0, 2 * Math.PI);
+                ctx.fillStyle = "red";
+                ctx.fill();
+                ctx.fillStyle = "white";
+                ctx.fillText(b.num, b.x * sX, b.y * sY);
+            });
+        }
+
+        canvas.toBlob(async blob => {
+            if (!blob) {
+                alert("画像の生成に失敗しました。");
+                return;
+            }
+            try {
+                await navigator.clipboard.write([
+                    new ClipboardItem({ "image/png": blob })
+                ]);
+                showToast(`画像${idx + 1}をクリップボードにコピーしました`);
+            } catch (e) {
+                console.error(e);
+                alert("クリップボードへのコピーに失敗しました。");
+            }
+        });
+    };
+    base.src = img.dataUrl;
+}
+
+
+/* coords テキスト化 */
+function coordsText(img) {
+    if (!img.badges || !img.badges.length) return "";
+    return img.badges.map(b =>
+        `${b.num}. x=${b.x.toFixed(1)}%, y=${b.y.toFixed(1)}%`
+    ).join("\n");
+}
+
+async function generatePartsNamesAll() {
+    if (!PARTS_IMAGES.length) {
+        alert("画像がありません");
+        return;
+    }
+
+    // ★ ナンバリングされていない画像がないかチェック
+    const noBadgeList = PARTS_IMAGES
+        .map((img, i) => (!img.badges || !img.badges.length) ? (i + 1) : null)
+        .filter(v => v !== null);
+
+    if (noBadgeList.length) {
+        alert(
+            "以下の画像にナンバリングがありません。\n" +
+            "先に右クリックで番号を付けてください。\n\n" +
+            "画像" + noBadgeList.join(", ")
+        );
+        return;
+    }
+
+    document.getElementById("loadingOverlay").style.display = "flex";
+
+    try {
+        for (let i = 0; i < PARTS_IMAGES.length; i++) {
+            await regenPartNames(i, true);
+        }
+        showToast("各部名称の名称案を生成しました");
+    } catch (e) {
+        console.error(e);
+        alert("名称案生成中にエラーが発生しました: " + e.message);
+    } finally {
+        document.getElementById("loadingOverlay").style.display = "none";
+    }
+}
+
+
+
+window.regenPartNames = async function (idx, silent) {
+    const img = PARTS_IMAGES[idx];
+    if (!img) return;
+
+    // ★ 追加：この画像にナンバリングが無ければ注意を出して終了
+    if (!img.badges || img.badges.length === 0) {
+        if (!silent) {
+            alert("この画像にナンバリングがありません。\n右クリックで番号を付けてから名称案を生成してください。");
+        }
+        return;
+    }
+
+    const coordLines = coordsText(img);
+    const hint = img.nameHint
+        ? `【名称表現に関する要望】\n${img.nameHint}\n`
+        : "";
+
+    const prompt = `
+あなたは家電・電子機器の日本語取扱説明書を専門に作成する
+テクニカルライター兼プロダクトデザイナーです。日本語だけで回答してください。
+
+【目的】
+添付画像に写っている製品について、
+赤い番号「1, 2, 3, ...」が指している各部の正式名称を高精度に特定し、
+取扱説明書の「各部の名称」にそのまま掲載できる形で出力してください。
+
+【番号と位置について】
+- 赤い丸番号は、名づけしたい部品の「真上」または「すぐ近く」に配置されています。
+- 少し位置がズレていても、番号周辺でもっとも自然に対応すると考えられる
+  ひとつの部品（ボタン／ホイール／レバー／スライダー／端子／LEDなど）を選んでください。
+- 1つの番号は必ず1つの部品だけを指し、番号の抜けや重複があってはいけません。
+- 画像全体の構造（左右・前後の対称性、一般的な製品の配置）も手がかりにして、
+  「この位置なら通常は〇〇ボタンであるはず」という発想で論理的に判断してください。
+
+【番号ごとの位置情報（補助）】
+${coordLines || "（座標情報なし）"}
+
+${hint || ""}
+
+【名称の付け方（精度向上のためのルール）】
+- 一般的な日本語マニュアルで使われる自然な名称にしてください。
+  例）左ボタン／右ボタン／スクロールホイール／DPI切替ボタン／サイドボタン／
+      電源スイッチ／LEDインジケータ／USB充電端子 など
+- 単に「ボタン」「キー」のような曖昧な名称は避け、
+  左右・位置・機能がわかる修飾語を付けて区別してください。
+- 「センサー」→「センサ」、「モニター」→「モニタ」のように、
+  日本語技術文書で一般的な表記に寄せてください。
+- 機能説明や文章は書かないでください。
+  「～を操作するボタン」「～に使う部分」などの説明文は禁止です。
+- 型番や英単語が印字されている箇所は、
+  必要に応じて「DPIボタン」「ON/OFFスイッチ」のように
+  印字内容を短く取り入れて構いません。
+- 不明な場合でも「上部右側のボタン」など、
+  実物を見たユーザーが混乱しないレベルの、妥当な名称を必ず付けてください。
+  「不明」「???」などは絶対に使わないでください。
+
+【出力形式（厳守）】
+- 出力は「番号. 名称」の形式だけにしてください。
+- 1行につき1つの番号のみを書いてください。
+- 番号は 1 から順番に、画像上の番号の個数と一致させてください。
+- 余計な前置き文、見出し、コメント、説明文は一切書かないでください。
+- 例：
+1. 左ボタン
+2. 右ボタン
+3. スクロールホイール
+4. DPI切替ボタン
+  `.trim();
+
+    if (!silent) {
+        document.getElementById("loadingOverlay").style.display = "flex";
+    }
+
+    try {
+        const raw = await callAI(prompt, img.dataUrl, "image");
+        img.names = normalizeNameText(raw);
+
+        // 番号は 1 から振り直し
+        img.badges = img.badges
+            .sort((a, b) => a.num - b.num)
+            .map((b, i) => ({ ...b, num: i + 1 }));
+
+        renderImageEditors();
+        if (!silent) showToast(`画像${idx + 1} の名称案を更新しました`);
+    } catch (e) {
+        console.error(e);
+        if (!silent) alert("名称案生成中にエラーが起きました: " + e.message);
+    } finally {
+        if (!silent) {
+            document.getElementById("loadingOverlay").style.display = "none";
+        }
+    }
+};
+
+
+
+// 既存ドラフトと意味が近い文をできるだけ除外
+function filterNewLinesByExisting(draft, blockText) {
+    if (!blockText) return "";
+    const normDraft = draft.replace(/[。、．，,・\s]/g, "");
+
+    const lines = blockText.split("\n")
+        .map(l => l.trim())
+        .filter(l => l && !l.startsWith("【"));
+
+    const kept = [];
+    for (const line of lines) {
+        const pure = line.replace(/^・/, "").trim();
+        const normLine = pure.replace(/[。、．，,・\s]/g, "");
+        if (normLine.length >= 8) {
+            const sub = normLine.slice(0, Math.floor(normLine.length * 0.7));
+            if (normDraft.includes(sub)) {
+                continue;   // 既存とかなり似ているので捨てる
+            }
+        }
+        kept.push(line);
+    }
+    return kept.join("\n");
+}
+
+// ラベルごとにブロックを抜き出す
+function extractBlock(raw, label, nextLabels) {
+    const pos = raw.indexOf(label);
+    if (pos === -1) return "";
+    const start = pos + label.length;
+    let end = raw.length;
+    nextLabels.forEach(l => {
+        const p = raw.indexOf(l, start);
+        if (p !== -1 && p < end) end = p;
+    });
+    return raw.slice(start, end).trim();
+}
+
+
+// 「■使用方法」ブロックの末尾に追記を差し込む
+function insertUsageAppend(draft, usageBlock) {
+    if (!usageBlock) return draft;
+
+    const marker = "■使用方法";
+    const idx = draft.indexOf(marker);
+    if (idx < 0) return draft + "\n\n" + usageBlock;
+
+    const after = idx + marker.length;
+    const nextHeadingIdx = draft.indexOf("■", after);
+    const insertPos = nextHeadingIdx === -1 ? draft.length : nextHeadingIdx;
+
+    const head = draft.slice(0, insertPos).replace(/\s*$/, "");
+    const tail = draft.slice(insertPos);
+
+    return head + "\n" + usageBlock + "\n" + tail;
+}
+
+// 「■仕様」セクションの中で、型番行の直後に仕様本文を差し込む
+function insertSpecCore(draft, specBlock) {
+    if (!specBlock) return draft;
+
+    const lines = draft.split("\n");
+
+    // まず「■仕様」の行を探す
+    const specIdx = lines.findIndex(l => l.startsWith("■仕様"));
+    if (specIdx === -1) {
+        // 仕様セクション自体がない場合は末尾に足すだけ
+        return draft + "\n" + specBlock;
+    }
+
+    // 「■仕様」以降で最初の「型番：」行を探す
+    let typeLineIdx = -1;
+    for (let i = specIdx + 1; i < lines.length; i++) {
+        const t = lines[i].trim();
+        if (t.startsWith("■")) break;              // 次のセクションに到達したら終了
+        if (t.startsWith("型番：")) {
+            typeLineIdx = i;
+            break;
+        }
+    }
+
+    // 型番行が見つからない場合は、「■仕様」の直後に入れる
+    const insertIdx = (typeLineIdx === -1) ? (specIdx + 1) : (typeLineIdx + 1);
+
+    const insertLines = specBlock
+        .split(/\r?\n/)
+        .map(l => l.replace(/^・\s*/, "").trim())    // 行頭の「・」は削除
+        .filter(l => l !== "");
+
+    lines.splice(insertIdx, 0, ...insertLines);
+
+    return lines.join("\n");
+}
+
+
+
+// 任意の見出し（例：■使用方法）のセクションを差し替える
+function replaceSection(draft, title, body) {
+    const idx = draft.indexOf(title);
+    if (idx < 0) return draft;
+    const next = draft.indexOf("■", idx + title.length);
+    const end = next === -1 ? draft.length : next;
+    const head = draft.slice(0, idx);
+    const tail = draft.slice(end);
+    const section = `${title}\n${body.trim()}\n\n`;
+    return head + section + tail;
+}
+
+// 見出しタイトルから、その中身だけを抜き出す
+function getSectionBody(draft, title) {
+    const idx = draft.indexOf(title);
+    if (idx < 0) return "";
+    const next = draft.indexOf("■", idx + title.length);
+    const end = next === -1 ? draft.length : next;
+    return draft.slice(idx + title.length, end).trim();
+}
+
+
+// 参考元マニュアル(REF_TEXT)から「■仕様」ブロックだけ抜き出して、
+// 商品名・型番だけ現在の値に差し替えた本文を返す。
+// 見つからなければ null を返す。
+function buildSpecFromReference(pName, mNum) {
+    if (!REF_TEXT) return null;
+
+    const lines = REF_TEXT.split(/\r?\n/);
+    const idx = lines.findIndex(l => l.trim().startsWith("■仕様"));
+    if (idx === -1) return null;
+
+    const body = [];
+    for (let i = idx + 1; i < lines.length; i++) {
+        const t = lines[i].trim();
+
+        // 次のセクション or 参考ファイル切り替えで終了
+        if (t.startsWith("■") || t.startsWith("【参考:")) break;
+
+        body.push(lines[i]);
+    }
+    if (!body.length) return null;
+
+    // 商品名・型番を差し替え
+    const nameLabel = `商品名：${pName || "（商品名）"}`;
+    const modelLabel = `型番：${mNum || "（型番）"}`;
+
+    let nameIdx = body.findIndex(l => l.trim().startsWith("商品名"));
+    let modelIdx = body.findIndex(l => l.trim().startsWith("型番"));
+
+    if (nameIdx === -1 && modelIdx === -1) {
+        // 参考元に商品名・型番が無い場合は先頭に追加
+        body.unshift(modelLabel);
+        body.unshift(nameLabel);
+    } else {
+        if (nameIdx !== -1) body[nameIdx] = nameLabel;
+        if (modelIdx !== -1) body[modelIdx] = modelLabel;
+    }
+
+    return body.join("\n");
+}
+
+
+// 参考元マニュアルから「■使用方法」セクションだけ抜き出す（あれば）
+function getRefUsageBlock() {
+    if (!REF_TEXT) return "";
+
+    const lines = REF_TEXT.split(/\r?\n/);
+    const idx = lines.findIndex(raw => raw.trim().startsWith("■使用方法"));
+    if (idx === -1) return "";
+
+    const body = [];
+    for (let i = idx + 1; i < lines.length; i++) {
+        const t = lines[i].trim();
+        // 次のセクション or 参考ファイル切り替えで終了
+        if (t.startsWith("■") || t.startsWith("【参考:")) break;
+        body.push(lines[i]);
+    }
+    return body.join("\n").trim();
+}
+
+
+// REF_TEXT から「■仕様」ブロックだけを抜き出す
+function getRefSpecBlock() {
+    if (!REF_TEXT) return "";
+
+    const src = REF_TEXT;
+
+    // 見出し候補（PDF/Word で微妙に違う可能性も考慮）
+    const heads = ["■仕様", "■ 仕様", "[仕様]", "【仕様】"];
+    let start = -1;
+    for (const h of heads) {
+        start = src.indexOf(h);
+        if (start !== -1) break;
+    }
+
+    // 見つからない場合は全体の先頭だけを参考にする
+    if (start === -1) {
+        return src.substring(0, 1500);
+    }
+
+    // 次の「■」見出しまでを仕様ブロックとみなす
+    let end = src.indexOf("■", start + 2);
+    if (end === -1) end = src.length;
+
+    // トークン数を抑えるために最大 2000 文字くらいでカット
+    return src.slice(start, Math.min(end, start + 2000));
+}
+
+// 参考元マニュアルから「■仕様」セクションだけをそのまま取り出す
+// ・■仕様 の行の次の行から、次の「■」見出しまでを仕様とみなす
+// ・商品名／製品名／型番の行は除外
+// ・最後に「参考元の仕様である」旨の注意書きを追加
+function buildVerbatimSpecFromReference() {
+    if (!REF_TEXT) return null;
+
+    const allLines = REF_TEXT.split(/\r?\n/);
+
+    // 「■仕様」「■ 仕様」「【仕様】」「［仕様］」のいずれかを探す
+    const specHeadIdx = allLines.findIndex(raw => {
+        const t = raw.trim();
+        if (!t) return false;
+        if (t.startsWith("■仕様")) return true;
+        if (t.startsWith("■ 仕様")) return true;
+        if (/^[【［]\s*仕様\s*[】］]/.test(t)) return true;
+        return false;
+    });
+
+    if (specHeadIdx === -1) {
+        // 参考元に「仕様」の見出しが見つからない場合は何もしない
+        return null;
+    }
+
+    // 見出しの次の行から、次の「■」または「【参考:」までを仕様本文とする
+    const bodyLines = [];
+    for (let i = specHeadIdx + 1; i < allLines.length; i++) {
+        const t = allLines[i].trim();
+
+        if (!t) {
+            bodyLines.push(allLines[i]);
+            continue;
+        }
+
+        // 次のセクション開始で終了
+        if (t.startsWith("■") || t.startsWith("【参考:")) {
+            break;
+        }
+
+        bodyLines.push(allLines[i]);
+    }
+
+    if (!bodyLines.length) return null;
+
+    // ▼ 商品名／製品名／型番の行は除外
+    let lines = bodyLines.filter(raw => {
+        const t = raw.trim();
+        if (!t) return false;
+        if (t.startsWith("商品名")) return false;
+        if (t.startsWith("製品名")) return false;
+        if (t.startsWith("型番")) return false;
+        return true;
+    });
+
+    // 先頭・末尾の空行を整理
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+
+    if (!lines.length) return null;
+
+    // 最後に注意書きを追加
+    lines.push(
+        "",
+        "※上記仕様値は参考元の取扱説明書に記載された情報であり、本製品の最終仕様とは異なる場合があります。必ず最新の仕様をご確認ください。"
+    );
+
+    return lines.join("\n");
+}
+
+
+
+
+/* ---- 原稿生成 ---- */
+async function runGenerationProcess() {
+    if (!RAW_DATA.length) { showToast("Excelを読み込んでください", true); return; }
+    if (!SELECTED_COMPANY) { showToast("名義を選択してください", true); return; }
+
+    // 各部名称のナンバリング確認
+    const hasParts = PARTS_IMAGES.length > 0;
+    const hasBadges = PARTS_IMAGES.some(img => img.badges && img.badges.length > 0);
+
+    if (hasParts && !hasBadges) {
+        const ok = confirm("「各部の名称」の画像にナンバリングがされていません。\nこのまま原稿を生成してよろしいですか？");
+        if (!ok) return;
+    }
+
+    document.getElementById("loadingOverlay").style.display = "flex";
+
+    try {
+        await new Promise(r => setTimeout(r, 50));
+        let draft = buildDraft();
+
+        // ★ 参考元の仕様をそのまま仕様セクションに挿入
+        const verbSpec = buildVerbatimSpecFromReference();
+        if (verbSpec) {
+            draft = insertSpecCore(draft, verbSpec);
+        }
+
+        // 各部名称（画像1〜）を「■各部の名称」に差し込む
+        if (PARTS_IMAGES.length) {
+            let pTxt = "";
+            PARTS_IMAGES.forEach((img, i) => {
+                if (img.names) {
+                    pTxt += `\n(画像${i + 1})\n${img.names}\n`;
+                }
+            });
+            if (pTxt) {
+                draft = draft.replace("■各部の名称",
+                    "■各部の名称\n" + pTxt.trim() + "\n");
+            }
+        }
+
+        // --- AI による「使用方法」「仕様」「安全上のご注意追記」の作成／差し替え ---
+        const memo = document.getElementById("productFeatures").value || "";
+
+        // 各部名称（画像側で入力した名称）をまとめる
+        const partsNamesText = PARTS_IMAGES.map((img, idx) => {
+            const names = (img.names || "").trim();
+            if (!names) return "";
+            return `【画像${idx + 1} 各部の名称】\n${names}`;
+        }).filter(Boolean).join("\n\n");
+
+        if (memo || REF_TEXT || USAGE_IMAGES.length || partsNamesText) {
+            const usageDraft = getSectionBody(draft, "■使用方法");
+            const refUsage = getRefUsageBlock();   // ★追加
+
+            const prompt =
+                `あなたは日本語マニュアルの専門ライターです。日本語だけで回答してください。
+
+目的：
+1. 参考元マニュアルをできるだけ尊重しつつ、
+   ・「■使用方法」を【】付きの項目見出しごとに整理した全文に書き直す
+2. 追加で必要そうな安全上の注意があれば、「安全上のご注意（追記案）」として提案する。
+
+【補足メモ・指示】
+${memo || "（特になし）"}
+
+【参考資料（抜粋）】
+${(REF_TEXT || "（なし）").substring(0, 3000)}
+
+【各部の名称（画像から入力済みのもの）】
+${partsNamesText || "（未入力）"}
+
+【既存ドラフトの『使用方法』本文】
+${usageDraft || "（まだ本文なし）"}
+
+【参考元の『使用方法』本文（あれば）】
+${refUsage || "（該当箇所なし）"}
+
+条件：
+- 使用方法の項目名は「【電池を取り付ける】」のように【】で囲み、
+  できるだけ参考元マニュアルの見出し名に揃えてください。
+- 使用方法で出てくる部品名は、必ず「各部の名称」で使われている名称に揃えてください。
+- 仕様に関する出力は一切行わないでください。
+- **参考元の『使用方法』が存在する場合は、行数や文字数のボリュームが大きく変わらないようにしてください（±30％程度の範囲に収めるイメージ）。**
+
+出力形式（厳守）：
+下記の2ブロックだけをこの順番で出力してください。
+
+【使用方法全文】
+（ここに「■使用方法」の見出しは含めず、直下に入る本文だけを書く。
+　【】付きの項目見出しと、その下の箇条書きで構成すること）
+
+【安全上のご注意追記】
+（必要だと思う追記だけ「・」付き箇条書きで書く。不要なら空欄のままでよい）
+`;
+            const imgContext = USAGE_IMAGES[0]?.dataUrl || null;
+
+            // 画像がある時だけ "image"、無い時は "check"
+            const aiText = await callAI(prompt, imgContext, imgContext ? "image" : "check");
+
+            const raw = aiText.trim();
+
+            const usageLabelAll = "【使用方法全文】";
+            const safetyLabel = "【安全上のご注意追記】";
+
+            const usageBody = extractBlock(raw, usageLabelAll, [safetyLabel]);
+            let safetyBody = extractBlock(raw, safetyLabel, [usageLabelAll]);
+
+            // 安全追記だけは既存ドラフトとほぼ同じ文を弾く
+            safetyBody = filterNewLinesByExisting(draft, safetyBody);
+
+            // 使用方法セクションをまるごと差し替え
+            if (usageBody) {
+                draft = replaceSection(draft, "■使用方法", usageBody);
+            }
+
+            // 安全上のご注意の追記案を末尾に追加
+            if (safetyBody) {
+                draft += `
+
+■安全上のご注意（追記案）
+${safetyBody}
+`;
+            }
+        }
+        document.getElementById("previewArea").value = draft;
+        showToast("原稿を生成しました");
+    } catch (e) {
+        console.error(e);
+        showToast(e.message, true);
+    } finally {
+        document.getElementById("loadingOverlay").style.display = "none";
+    }
+}
+
+function buildDraft() {
+    const pName = document.getElementById("productName").value;
+    const mNum = document.getElementById("modelNumber").value;
+    const warranty = document.getElementById("warrantyPeriod").value;
+
+    // --- 定型文（テンプレ）グループ ----
+    const introTpl = getTemplateTexts("Intro");        // 冒頭あいさつ
+    const commonNoteTpl = getTemplateTexts("CommonNote");   // 共通注意書き
+    const maintDefaultTpl = getTemplateTexts("DefaultMaint"); // デフォルトお手入れ
+    const support3RTpl = getTemplateTexts("Support_3R");
+    const support3RSTpl = getTemplateTexts("Support_3RS");
+    const supportOtherTpl = getTemplateTexts("Support_OTHER");
+    const supportCommonTpl = getTemplateTexts("SupportCommon"); // ★保証期間の直下
+    const partsRulesTpl = getTemplateTexts("PartsRules");
+    const editionTpl = getTemplateTexts("Edition");
+
+    const checked = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
+        .map(c => c.value);
+    const hasLi = checked.some(s => s.includes("リチウム"));
+
+    const rows = RAW_DATA
+        .filter(r => {
+            if (r.label.includes("共通") || r.label.includes("一般")) return true;
+            if (r.category.includes("廃棄") && !hasLi && !checked.includes(r.label)) return false;
+            return checked.includes(r.label);
+        })
+        .sort((a, b) => {
+            const aT = a.label.includes("共通冒頭");
+            const bT = b.label.includes("共通冒頭");
+            if (aT && !bT) return -1;
+            if (!aT && bT) return 1;
+            const aB = a.label.includes("共通末尾");
+            const bB = b.label.includes("共通末尾");
+            if (aB && !bB) return 1;
+            if (!aB && bB) return -1;
+            return a.id - b.id;
+        });
+
+    const s = {
+        Intro: [], Danger: [], Warning: [], Caution: [],
+        UsageC: [], Giteki: [], Radio: [],
+        Parts: [], Usage: [], Maint: [], Disp: [], Spec: [], Other: []
+    };
+    const seen = new Set();
+
+    rows.forEach(r => {
+        let t = r.content;
+        TERMINOLOGY.forEach(x => t = t.replace(x.p, x.r));
+        if (seen.has(t)) return;
+        seen.add(t);
+
+        const c = r.category || "";
+        if (c.includes("技適")) s.Giteki.push(t);
+        else if (c.includes("電波")) s.Radio.push(t);
+        else if (c.includes("危険")) s.Danger.push(t);
+        else if (c.includes("警告")) s.Warning.push(t);
+        else if (c.includes("注意") && !c.includes("使用")) s.Caution.push(t);
+
+        // ★ここを先に判定（「ご使用済み…」で「使用」に誤爆しないようにする）
+        else if (c.includes("廃棄")) s.Disp.push(t);
+
+        else if (c.includes("使用")) s.UsageC.push(t);
+        else if (c.includes("各部")) s.Parts.push(t);
+        else if (c.includes("使用方法")) s.Usage.push(t);
+        else if (c.includes("お手入れ")) s.Maint.push(t);
+        else if (c.includes("仕様")) s.Spec.push(t);
+        else if (r.label.includes("共通冒頭")) s.Intro.push(t);
+        else s.Other.push(t);
+
+    });
+
+    const L = [
+        "使用画像リンク",
+        `商品名：${pName}`,
+        `型番：${mNum}`,
+        "製品写真",
+        // ★ 冒頭・共通注意はテンプレのみ（フォールバックなし）
+        ...introTpl,
+        ...commonNoteTpl,
+        ...s.Intro,
+        ""
+    ];
+
+    // ■安全上のご注意
+    L.push("■安全上のご注意");
+    if (s.Danger.length) L.push("<危険>", ...s.Danger.map(t => "・" + t));
+    if (s.Warning.length) L.push("<警告>", ...s.Warning.map(t => "・" + t));
+    if (s.Caution.length) L.push("<注意>", ...s.Caution.map(t => "・" + t));
+    L.push("");
+
+    // ■使用上のご注意
+    if (s.UsageC.length) {
+        L.push("■使用上のご注意", ...s.UsageC.map(t => "・" + t), "");
+    }
+    if (s.Giteki.length) {
+        L.push("■技適マーク", ...s.Giteki, "");
+    }
+    if (s.Radio.length) {
+        L.push("■電波に関する注意事項", ...s.Radio, "");
+    }
+
+    // ■各部の名称（ルールは PartsRules テンプレからのみ）
+    L.push("■各部の名称");
+    if (partsRulesTpl.length) {
+        L.push(...partsRulesTpl);
+    }
+    L.push(...s.Parts.map(t => "・" + t), "");
+
+    // ■使用方法（ここは従来通り Excel 由来）
+    L.push("■使用方法", ...s.Usage.map(t => "・" + t), "");
+
+    // ■お手入れ方法
+    L.push("■お手入れ方法");
+    if (s.Maint.length) {
+        L.push(...s.Maint);
+    } else if (maintDefaultTpl.length) {
+        // デフォルトお手入れはテンプレがあれば利用
+        L.push(...maintDefaultTpl);
+    }
+    L.push("");
+
+    // ■廃棄
+    if (s.Disp.length) {
+        L.push("■ご使用済みの製品の廃棄に関して", ...s.Disp, "");
+    }
+
+    // ■仕様（中身は別ロジックで後から挿入）
+    L.push(
+        "■仕様",
+        "※付属品は末尾にします※",
+        `商品名：${pName}`,
+        `型番：${mNum}`,
+        ""
+    );
+
+    if (s.Other.length) {
+        L.push("■その他", ...s.Other.map(t => "・" + t), "");
+    }
+
+    // ■サポート・企業情報
+    L.push(
+        "■サポート・企業情報",
+        `保証期間　${warranty}`
+    );
+
+    // ★ SupportCommon：保証期間の直下
+    if (supportCommonTpl.length) {
+        L.push(...supportCommonTpl);
+    }
+
+    if (SELECTED_COMPANY === "OTHER") {
+        // OTHER 名義：Support_OTHER テンプレのみ
+        if (supportOtherTpl.length) {
+            L.push(...supportOtherTpl);
+        }
+    } else {
+        // 3R / 3RS 名義
+        if (SELECTED_COMPANY === "3RS") {
+            if (support3RSTpl.length) {
+                L.push(...support3RSTpl);
+            }
+        } else { // "3R"
+            if (support3RTpl.length) {
+                L.push(...support3RTpl);
+            }
+        }
+    }
+
+    // 版数（Edition もテンプレのみ）
+    if (editionTpl.length) {
+        L.push(...editionTpl);
+    }
+
+    return L.join("\n");
+}
+
+function filterAiCheckOutput(text) {
+    const lines = String(text || "").split(/\r?\n/);
+
+    const filtered = lines.filter(line => {
+        const s = line.trim();
+        if (!s) return true;
+
+        // ① 見出しに関する指摘っぽいものを除外
+        if (/(見出し|タイトル|項目名|章立て|構成|危険見出し|警告見出し)/.test(s)) return false;
+
+        // ② 単語だけ（画像1 等）への指摘を除外
+        if (/^[（(]?\s*画像\s*\d+\s*[)）]?$/.test(s)) return false;
+
+        // ③ ■仕様への指摘を除外
+        if (/(■\s*仕様|仕様セクション|仕様欄|仕様の記載)/.test(s)) return false;
+
+        return true;
+    });
+    const out = filtered.join("\n").trim();
+    return out; // 何も無ければ空文字を返す
+
+}
+
+
+
+async function callAI(prompt, img, mode = "check") {
+    const payload = {
+        prompt,
+        mode, // "check" | "image"
+        image: (typeof img === "string" && img.length > 0) ? img : null
+    };
+
+    const res = await fetch("/api/manual-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+        const txt = await res.text();
+        console.error("[callAI] manual-ai error:", txt);
+        throw new Error("manual-ai API error: " + txt);
+    }
+
+    const data = await res.json();
+    if (!data || typeof data.text !== "string") {
+        console.error("[callAI] unexpected response:", data);
+        throw new Error("manual-ai API response format error");
+    }
+
+    return data.text;
+}
+
+/* ---- Word出力 ---- */
+window.exportToWord = async function () {
+    try {
+        const text = document.getElementById("previewArea").value;
+        if (!text) {
+            alert("プレビューが空です");
+            return;
+        }
+
+        const lines = text.split("\n");
+        // 参考元仕様ブロックから「引用仕様行セット」を作成
+        const verbSpec = buildVerbatimSpecFromReference();
+        const quotedSpecSet = new Set(
+            verbSpec
+                ? verbSpec.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+                : []
+        );
+        // 画像 → docx.ImageRun
+        const processImg = async (arr, burnBadges) => {
+            return Promise.all(arr.map(async img => {
+                const c = document.createElement("canvas");
+                const ctx = c.getContext("2d");
+                const i = new Image();
+                await new Promise(r => { i.onload = r; i.src = img.dataUrl || img.data; });
+
+                c.width = i.width;
+                c.height = i.height;
+                ctx.drawImage(i, 0, 0);
+
+                // 必要ならナンバリングを書き込む
+                if (burnBadges && img.badges) {
+                    const sX = i.width / 100;
+                    const sY = i.height / 100;
+                    const r = Math.max(20, i.width * 0.03);
+                    ctx.font = `bold ${r}px Arial`;
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    img.badges.forEach(b => {
+                        ctx.beginPath();
+                        ctx.arc(b.x * sX, b.y * sY, r, 0, 2 * Math.PI);
+                        ctx.fillStyle = "red";
+                        ctx.fill();
+                        ctx.fillStyle = "white";
+                        ctx.fillText(b.num, b.x * sX, b.y * sY);
+                    });
+                }
+
+                const blob = await new Promise(r => c.toBlob(r));
+                const ab = await blob.arrayBuffer();
+                return new docx.ImageRun({
+                    data: ab,
+                    transformation: {
+                        width: 300,
+                        height: (300 * i.height) / i.width
+                    }
+                });
+            }));
+        };
+
+        const partBlobs = await processImg(PARTS_IMAGES, true);
+        const usageBlobs = await processImg(USAGE_IMAGES, false);
+
+
+        const children = [];
+
+        // ■仕様 内の状態管理用フラグ
+        let inSpecSection = false;   // 「■仕様」セクションの中かどうか
+        // 引用仕様行かどうかは quotedSpecSet で判定するので inQuotedSpec は廃止
+
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+
+
+
+            // ■見出し行の処理
+            if (trimmed.startsWith("■")) {
+
+                // 「■仕様」開始／終了を判定
+                if (trimmed === "■仕様") {
+                    inSpecSection = true;
+                } else {
+                    // 別の見出しに来たら仕様セクションは抜ける
+                    inSpecSection = false;
+                }
+
+                // 「■各部の名称」だけは後で画像を挿入するので別処理
+                if (trimmed.includes("■各部の名称")) {
+                    // 見出し
+                    children.push(
+                        new docx.Paragraph({
+                            children: [
+                                new docx.TextRun({
+                                    text: trimmed,
+                                    font: "Meiryo UI",
+                                    bold: true,
+                                    size: 24
+                                })
+                            ],
+                            spacing: { before: 200, after: 100 }
+                        })
+                    );
+
+                    // 画像1, 画像2...
+                    if (partBlobs.length) {
+                        partBlobs.forEach((b, index) => {
+                            // ラベル
+                            children.push(
+                                new docx.Paragraph({
+                                    children: [
+                                        new docx.TextRun({
+                                            text: `画像${index + 1}`,
+                                            font: "Meiryo UI",
+                                            bold: true,
+                                            size: 21
+                                        })
+                                    ],
+                                    spacing: { after: 50 }
+                                })
+                            );
+                            // 画像本体
+                            children.push(
+                                new docx.Paragraph({
+                                    children: [b],
+                                    spacing: { after: 200 }
+                                })
+                            );
+                        });
+                    }
+                    continue; // この行は処理済み
+                }
+
+                // 通常の見出し
+                children.push(
+                    new docx.Paragraph({
+                        children: [
+                            new docx.TextRun({
+                                text: trimmed,
+                                font: "Meiryo UI",
+                                bold: true,
+                                size: 24
+                            })
+                        ],
+                        spacing: { before: 200, after: 100 }
+                    })
+                );
+                continue;
+            }
+
+            // ここから先は見出し以外
+
+            // 空行
+            if (!trimmed) {
+                children.push(new docx.Paragraph({ text: "" }));
+                continue;
+            }
+
+
+
+            // テキストランの基本プロパティ
+            const makeRunProps = () => {
+                const base = {
+                    text: trimmed,
+                    font: "Meiryo UI",
+                    size: 21
+                };
+
+                // ▼ この行が「引用仕様」かどうかを判定
+                // ・今「■仕様」セクションの中にいる（inSpecSection === true）
+                // ・かつ quotedSpecSet に含まれている行（参考仕様そのもの）
+                const isQuotedSpecLine =
+                    inSpecSection && quotedSpecSet.has(trimmed);
+
+                if (isQuotedSpecLine) {
+                    base.color = "FF0000";        // 赤字
+                    if (trimmed === SPEC_WARNING_LINE) {
+                        base.bold = true;         // この行だけ太字
+                    }
+                }
+
+                return base;
+            };
+
+            // 箇条書き
+            if (trimmed.startsWith("・")) {
+                children.push(
+                    new docx.Paragraph({
+                        children: [
+                            new docx.TextRun(makeRunProps())
+                        ],
+                        spacing: { after: 50 }
+                    })
+                );
+                continue;
+            }
+
+            // 「<危険>」など
+            if (trimmed.startsWith("<") && trimmed.endsWith(">")) {
+                children.push(
+                    new docx.Paragraph({
+                        children: [
+                            new docx.TextRun({
+                                text: trimmed,
+                                font: "Meiryo UI",
+                                bold: true,
+                                size: 22
+                            })
+                        ],
+                        spacing: { before: 100, after: 50 }
+                    })
+                );
+                continue;
+            }
+
+            // 通常文
+            children.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun(makeRunProps())
+                    ],
+                    spacing: { after: 50 }
+                })
+            );
+        }
+
+        // 参考画像は最後にまとめる
+        if (usageBlobs.length) {
+            children.push(
+                new docx.Paragraph({
+                    children: [
+                        new docx.TextRun({
+                            text: "【参考画像】",
+                            font: "Meiryo UI",
+                            bold: true
+                        })
+                    ],
+                    pageBreakBefore: true
+                })
+            );
+
+            usageBlobs.forEach((b, index) => {
+                children.push(
+                    new docx.Paragraph({
+                        children: [
+                            new docx.TextRun({
+                                text: `参考画像${index + 1}`,
+                                font: "Meiryo UI",
+                                bold: true,
+                                size: 21
+                            })
+                        ],
+                        spacing: { after: 50 }
+                    })
+                );
+                children.push(
+                    new docx.Paragraph({
+                        children: [b],
+                        spacing: { after: 200 }
+                    })
+                );
+            });
+        }
+
+        const doc = new docx.Document({ sections: [{ children }] });
+        const blob = await docx.Packer.toBlob(doc);
+
+        const pName = document.getElementById("productName").value.trim();
+        const mNum = document.getElementById("modelNumber").value.trim();
+
+        let fileName = "manual.docx";
+        if (mNum && pName) {
+            fileName = `${mNum} ${pName}.docx`;
+        } else if (mNum || pName) {
+            fileName = `${mNum || pName}.docx`;
+        }
+
+        saveAs(blob, fileName);
+        showToast("Wordファイルを保存しました");
+    } catch (e) {
+        console.error(e);
+        showToast("Word出力中にエラーが発生しました: " + e.message, true);
+    }
+};
+
+/* ---- その他 UI ---- */
+function toggleGroup(el) {
+    const body = el.parentElement.nextElementSibling;
+    const checks = body.querySelectorAll("input[type='checkbox']");
+    checks.forEach(c => c.checked = false);   // 解除のみ
+    updateGenrePinned();
+}
+
+function clearChecks(id) {
+    document.getElementById(id).querySelectorAll("input[type='checkbox']")
+        .forEach(c => c.checked = false);
+    updateGenrePinned();
+}
+function filterFunc(v) {
+    document.querySelectorAll("#funcArea .checkbox-card").forEach(c => {
+        c.style.display = c.innerText.includes(v) ? "flex" : "none";
+    });
+}
+
+if (typeof module !== 'undefined') { module.exports = { filterAiCheckOutput, normalizeWordTextForAiCheck, isStructuralParagraph }; }

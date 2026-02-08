@@ -28,6 +28,15 @@ module.exports = async function handler(req, res) {
       typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const { prompt, image, mode } = body;
 
+    // バリデーション: 文字数制限 (10万文字)
+    if (prompt && prompt.length > 100000) {
+      return res.status(400).json({ error: "PromptTooLong", detail: "Prompt exceeds 100,000 characters." });
+    }
+    // バリデーション: 画像サイズ制限 (Base64で約5MB = 7MB string)
+    if (typeof image === "string" && image.length > 7 * 1024 * 1024) {
+      return res.status(400).json({ error: "ImageTooLarge", detail: "Image size exceeds limit." });
+    }
+
     // =========================================================
     // media-manual：画像/動画フレーム → 取説「動作説明のみ」
     // =========================================================

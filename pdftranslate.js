@@ -55,20 +55,16 @@ function updateStatus(title = "処理中", step = "...", msg = "処理してい�
 }
 
 function showError(msg) {
-    const errorBox = $("errorBox");
-    if (errorBox) {
-        errorBox.textContent = msg;
-        errorBox.classList.remove("hidden");
+    if (window.showToast) {
+        window.showToast(msg, true);
+    } else {
+        console.error(msg);
+        alert(msg);
     }
-    console.error(msg);
 }
 
 function clearError() {
-    const errorBox = $("errorBox");
-    if (errorBox) {
-        errorBox.classList.add("hidden");
-        errorBox.textContent = "";
-    }
+    // Toast automatically clears
 }
 
 // モード切替

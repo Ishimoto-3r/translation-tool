@@ -408,6 +408,64 @@ const STYLE = `
     }
 `;
 
+const TOAST_STYLE = `
+    /* Toast */
+    #toast {
+        visibility: hidden;
+        min-width: 250px;
+        margin-left: -125px;
+        background-color: #333;
+        color: #fff;
+        text-align: center;
+        border-radius: 8px;
+        padding: 16px;
+        position: fixed;
+        z-index: 3000;
+        left: 50%;
+        bottom: 30px;
+        font-size: 14px;
+        opacity: 0;
+        transition: opacity 0.5s, bottom 0.5s;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+
+    #toast.show {
+        visibility: visible;
+        opacity: 1;
+        bottom: 50px;
+    }
+`;
+
+// Global Toast Function
+window.showToast = function (msg, isError) {
+    let t = document.getElementById("toast");
+    if (!t) {
+        t = document.createElement("div");
+        t.id = "toast";
+        document.body.appendChild(t);
+    }
+
+    t.innerText = msg;
+    if (isError) {
+        t.style.backgroundColor = "#ef4444"; // red
+        t.style.color = "#ffffff";
+    } else {
+        t.style.backgroundColor = "#111827"; // dark
+        t.style.color = "#f9fafb";
+    }
+
+    t.classList.add("show");
+
+    // Clear existing timer if any
+    if (t.dataset.timer) clearTimeout(parseInt(t.dataset.timer));
+
+    const timer = setTimeout(() => {
+        t.classList.remove("show");
+    }, 3000);
+
+    t.dataset.timer = timer;
+};
+
 function createIconGrid() {
     return `
         <div class="icon-grid">
@@ -429,7 +487,7 @@ window.addEventListener("load", () => {
 
     // スタイル挿入
     const styleEl = document.createElement("style");
-    styleEl.textContent = STYLE;
+    styleEl.textContent = STYLE + (typeof TOAST_STYLE !== 'undefined' ? TOAST_STYLE : '');
     document.head.appendChild(styleEl);
 
     // 既存のnav削除

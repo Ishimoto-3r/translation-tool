@@ -60,6 +60,17 @@ async function handler(req, res) {
             return res.status(400).json({ error: "Invalid request: pages array required" });
         }
 
+        // バリデーション: ページ数制限
+        if (pages.length > 30) {
+            return res.status(400).json({ error: "TooManyPages", detail: "Max 30 pages allowed per request." });
+        }
+
+        // バリデーション: 合計サイズ制限 (約15MB)
+        const totalSize = pages.reduce((acc, p) => acc + (typeof p === 'string' ? p.length : 0), 0);
+        if (totalSize > 20 * 1024 * 1024) { // 20MB characters ~ 15MB binary
+            return res.status(400).json({ error: "PayloadTooLarge", detail: "Total payload size exceeds limit." });
+        }
+
         deps.logger.info("pdftranslate", `Processing ${pages.length} page(s), Direction: ${direction}`);
 
         // 翻訳方向設定
