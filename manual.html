@@ -224,19 +224,22 @@
             overflow-y: auto;
             padding: 8px;
             background: #f3f4f6;
-            display: flex;
-            flex-direction: row;
-            /* 横並びを明示 */
-            flex-wrap: wrap;
+
+            /* CSS Grid に変更して3列強制 */
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
             gap: 10px;
-            /* 隙間を少し広げる */
-            align-content: flex-start;
+            align-content: start;
+
             min-height: 200px;
             border-radius: 8px;
             border: 1px solid #e5e7eb;
         }
 
         .genre-selected-pinned {
+            /* Grid内で全幅を使う */
+            grid-column: 1 / -1;
+
             position: sticky;
             top: 0;
             z-index: 5;
@@ -297,8 +300,8 @@
         }
 
         .genre-group {
-            width: calc(33.333% - 10px);
-            /* 3列固定（gap考慮） */
+            /* width指定削除 → Gridに任せる */
+            width: auto;
             max-width: 100%;
             background: #fff;
             border: 1px solid #d1d5db;
@@ -312,15 +315,15 @@
         }
 
         @media (max-width: 1200px) {
-            .genre-group {
-                width: calc(50% - 10px);
+            .genre-wrap-area {
+                grid-template-columns: repeat(2, 1fr);
                 /* 2列 */
             }
         }
 
         @media (max-width: 768px) {
-            .genre-group {
-                width: 100%;
+            .genre-wrap-area {
+                grid-template-columns: 1fr;
                 /* 1列 */
             }
         }
