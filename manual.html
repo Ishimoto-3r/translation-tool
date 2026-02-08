@@ -835,6 +835,28 @@
             transform: translateY(-2px);
             box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
         }
+
+        /* === 2カラム強制復元用CSS (ユーザー指定) === */
+        .manual-app-container {
+            display: flex !important;
+            align-items: flex-start !important;
+            gap: 16px !important;
+        }
+
+        .manual-sidebar {
+            width: 320px !important;
+            flex: 0 0 320px !important;
+            max-width: 320px !important;
+        }
+
+        .manual-main {
+            flex: 1 1 auto !important;
+            min-width: 0 !important;
+            width: auto !important;
+            /* 右カラムのスクロールと高さ制限 */
+            max-height: calc(100vh - 120px) !important;
+            overflow: auto !important;
+        }
     </style>
 </head>
 
