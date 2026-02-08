@@ -4,398 +4,408 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>原稿作成（AIチェック）ツール</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/docx@7.1.0/build/index.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js"></script>
+    <title>マニュアル作成 | AxelAI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PDF.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.10.377/pdf.worker.min.js";
     </script>
-    <script src="https://unpkg.com/html-docx-js/dist/html-docx.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <!-- Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.4.2/mammoth.browser.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/docx@7.1.0/build/index.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <!-- HTML-DOCX (for HTML export fallback) -->
+    <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.min.js"></script>
 
     <style>
+        :root {
+            --primary-color: #3b82f6;
+            --primary-hover: #2563eb;
+            --secondary-color: #10b981;
+            --danger-color: #ef4444;
+            --text-main: #1f2937;
+            --text-muted: #6b7280;
+            --bg-body: #f3f4f6;
+            --bg-card: #ffffff;
+            --border-color: #e5e7eb;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --radius-md: 0.5rem;
+            --radius-lg: 0.75rem;
+            --radius-full: 9999px;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: "Meiryo UI", "Helvetica Neue", Arial, sans-serif;
+            font-family: var(--font-sans);
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            margin: 0;
+            padding: 0;
+            line-height: 1.5;
+            overflow: hidden;
+            /* Prevent full page scroll */
         }
 
-        .grid-layout {
-            display: grid;
-            grid-template-columns: 320px 1fr 380px;
-            gap: 12px;
-        }
-
-        .col-panel {
-            padding: 16px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .section-label {
-            font-size: 0.75rem;
-            font-weight: bold;
-            border-left: 4px solid;
-            padding-left: 6px;
-            margin-bottom: 6px;
-            display: block;
-        }
-
-        .border-green-500 {
-            border-color: #22c55e;
-            color: #15803d;
-        }
-
-        .border-blue-500 {
-            border-color: #3b82f6;
-            color: #1d4ed8;
-        }
-
-        .border-purple-500 {
-            border-color: #a855f7;
-            color: #7e22ce;
-        }
-
-        .drop-zone {
-            border: 2px dashed #cbd5e1;
-            border-radius: 6px;
-            padding: 12px;
-            text-align: center;
-            transition: all 0.2s;
-            cursor: pointer;
-            background: #f8fafc;
-            position: relative;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            min-height: 80px;
-        }
-
-        .drop-zone:hover {
-            border-color: #9ca3af;
-            background: #f1f5f9;
-        }
-
-        .drop-zone.dragover {
-            border-color: #3b82f6;
-            background: #eff6ff;
-            transform: scale(1.02);
-        }
-
-        .file-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            cursor: pointer;
-            z-index: 10;
-        }
-
-        .genre-wrap-area {
-            flex: 1;
-            overflow-y: auto;
-            padding: 8px;
-            background: #f3f4f6;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            align-content: flex-start;
-            min-height: 200px;
-        }
-
-        /* 選択済みラベル（上部固定） */
-        .genre-selected-pinned {
+        /* Navigation Mock */
+        .mock-nav {
+            background-color: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
             position: sticky;
             top: 0;
-            z-index: 5;
-            width: 100%;
-            background: #ffffff;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            padding: 6px 8px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            align-items: center;
-            box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
-        }
-
-        .genre-selected-pinned .pinned-title {
-            font-size: .65rem;
-            font-weight: 800;
-            color: #374151;
-            margin-right: 6px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .genre-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px 8px;
-            border-radius: 999px;
-            background: #eef2ff;
-            color: #1e3a8a;
-            font-size: .65rem;
-            font-weight: 700;
-            border: 1px solid #c7d2fe;
-            max-width: 100%;
-        }
-
-        .genre-chip button {
-            width: 16px;
-            height: 16px;
-            border-radius: 999px;
-            background: rgba(30, 58, 138, .12);
-            color: #1e3a8a;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 900;
-            line-height: 1;
-        }
-
-        .genre-chip button:hover {
-            background: rgba(30, 58, 138, .20);
-        }
-
-        .genre-group {
-            width: calc(25% - 6px);
-            min-width: 160px;
-            background: #fff;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            display: flex;
-            flex-direction: column;
-            flex-shrink: 0;
-        }
-
-        @media (max-width:1400px) {
-            .genre-group {
-                width: calc(33.33% - 6px);
-            }
-        }
-
-        @media (max-width:1100px) {
-            .genre-group {
-                width: calc(50% - 4px);
-            }
-        }
-
-        .genre-group-header {
-            padding: 6px 8px;
-            font-size: .7rem;
-            font-weight: bold;
-            background: #f9fafb;
-            border-bottom: 1px solid #e5e7eb;
-            color: #374151;
+            z-index: 1000;
+            padding: 0.5rem 1rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-top: 3px solid transparent;
+            box-shadow: var(--shadow-sm);
+            height: 60px;
         }
 
-        .genre-group-content {
-            padding: 4px;
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .mock-nav-brand {
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            gap: 0.5rem;
+        }
+
+        .mock-nav-logo {
+            height: 32px;
+            width: auto;
+        }
+
+        .mock-nav-links {
+            display: flex;
+            gap: 0.5rem;
+            margin-left: 1rem;
+        }
+
+        .mock-nav-link {
+            text-decoration: none;
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.9rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: var(--radius-md);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .mock-nav-link:hover {
+            color: var(--primary-color);
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+
+        .mock-nav-link.active {
+            color: var(--primary-color);
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+
+        /* Launcher Button */
+        .launcher-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background-color: white;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .launcher-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        /* Manual App Container */
+        .manual-app-container {
+            display: flex;
+            height: calc(100vh - 60px);
+            /* Subtract nav height */
+            overflow: hidden;
+            background-color: #f1f5f9;
+        }
+
+        /* Sidebar */
+        .manual-sidebar {
+            width: 380px;
+            flex-shrink: 0;
+            background-color: #f8fafc;
+            border-right: 1px solid #e2e8f0;
+            overflow-y: auto;
+            padding: 1.25rem;
             display: flex;
             flex-direction: column;
-            gap: 2px;
+            gap: 1.25rem;
+            z-index: 10;
         }
 
-        .checkbox-card {
-            background: #fff;
-            border: 1px solid #f3f4f6;
-            border-radius: 3px;
-            padding: 3px 6px;
+        .manual-group {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1.25rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+        }
+
+        .manual-group-title {
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: #334155;
+            margin-bottom: 1rem;
             display: flex;
-            align-items: flex-start;
-            font-size: .75rem;
-            cursor: pointer;
-            transition: .1s;
+            align-items: center;
+            gap: 0.6rem;
+            padding-bottom: 0.6rem;
+            border-bottom: 2px solid #f1f5f9;
         }
 
-        .checkbox-card:hover {
-            border-color: #2563eb;
-            background: #eff6ff;
+        .manual-input-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #64748b;
+            margin-bottom: 0.4rem;
+            display: block;
         }
 
-        .checkbox-card input {
-            margin-right: 6px;
-            margin-top: 3px;
-            transform: scale(.9);
-            flex-shrink: 0;
-            position: relative;
-            z-index: 5;
+        .form-control {
+            width: 100%;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.9rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background-color: #f8fafc;
+            transition: all 0.2s;
+            color: #334155;
+        }
+
+        .form-control:focus {
+            background-color: #ffffff;
+            border-color: #3b82f6;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+        }
+
+        .manual-input-group {
+            margin-bottom: 1rem;
+        }
+
+        .manual-input-group:last-child {
+            margin-bottom: 0;
+        }
+
+        .manual-input-row {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        /* Company Selection Card (Renamed from radio-card to match manual.html logic) */
+        .company-selection {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
         }
 
         .company-card {
-            background: #fff;
-            border: 1px solid #d1d5db;
-            border-radius: 6px;
-            padding: 8px;
             display: flex;
             align-items: center;
-            justify-content: center;
+            padding: 0.8rem 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background-color: #ffffff;
             cursor: pointer;
-            font-size: .8rem;
-            font-weight: bold;
-            color: #374151;
-            transition: .2s;
-            user-select: none;
+            transition: all 0.2s;
+            position: relative;
+            color: #475569;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .company-card:hover {
+            border-color: #cbd5e1;
+            background-color: #f8fafc;
         }
 
         .company-card.selected {
-            border-color: #2563eb;
-            background: #eff6ff;
-            color: #1d4ed8;
-            box-shadow: 0 0 0 1px #2563eb;
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+            color: #1e3a8a;
+            font-weight: 700;
+            box-shadow: 0 0 0 1px #3b82f6;
         }
 
-        .company-card i {
-            margin-right: 6px;
+        /* Resizer */
+        #resizer {
+            width: 5px;
+            background-color: transparent;
+            cursor: col-resize;
+            height: 100%;
+            flex-shrink: 0;
+            z-index: 20;
         }
 
-        .editor-container {
-            margin-bottom: 8px;
-            border: 1px solid #e5e7eb;
-            padding: 6px;
-            background: #fff;
-            border-radius: 4px;
+        #resizer:hover,
+        #resizer.resizing {
+            background-color: #3b82f6;
         }
 
-        .editor-header {
-            font-size: .7rem;
-            font-weight: bold;
-            color: #6b7280;
-            margin-bottom: 4px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .editor-wrapper {
-            position: relative;
-            display: inline-block;
-            max-width: 420px;
-            max-height: 320px;
-            overflow: hidden;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            background: #f9fafb;
-        }
-
-        .editor-img {
-            display: block;
-            max-width: 100%;
-            max-height: 320px;
-            height: auto;
-            user-select: none;
-        }
-
-        .badge {
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            background: rgba(255, 0, 0, .85);
-            color: #fff;
-            border-radius: 50%;
-            font-size: 12px;
-            font-weight: bold;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: grab;
-            transform: translate(-50%, -50%);
-            z-index: 10;
-            border: 1px solid #fff;
-        }
-
-        .image-drop-zone {
-            border: 2px dashed #a78bfa;
-            background: #faf5ff;
-            transition: .2s;
-            text-align: center;
-            padding: 12px;
-            /* 8 → 12 */
-            border-radius: 6px;
-            cursor: pointer;
-            position: relative;
-            min-height: 120px;
-            /* 60 → 120 でだいぶ大きく */
+        /* Main Area */
+        .manual-main {
+            flex: 1;
             display: flex;
             flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            /* 横方向も中央寄せ */
-            margin-bottom: 10px;
-            /* 少し余白を増やす */
+            padding: 1.5rem 2rem;
+            overflow-y: auto;
+            background-color: #f1f5f9;
         }
 
-        /* === マニュアルAIチェック用ドロップゾーン === */
+        /* Main Tabs */
+        .main-tabs {
+            display: flex;
+            border-bottom: 2px solid #e5e7eb;
+            margin-bottom: 1.5rem;
+            gap: 1.5rem;
+        }
+
+        .main-tab-btn {
+            padding: 0.75rem 0.5rem;
+            font-weight: 700;
+            font-size: 0.95rem;
+            color: #6b7280;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+        }
+
+        .main-tab-btn:hover {
+            color: #374151;
+        }
+
+        .main-tab-btn.active {
+            color: #2563eb;
+            border-bottom-color: #2563eb;
+        }
+
+        /* Mode Switcher */
+        .mode-switch {
+            display: flex;
+            background: #f3f4f6;
+            padding: 4px;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+
+        .mode-btn {
+            flex: 1;
+            padding: 8px 12px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            text-align: center;
+            border-radius: 6px;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .mode-btn.active {
+            background: white;
+            color: var(--primary-color);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        /* Drop Zones */
+        .image-drop-zone {
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            background-color: #f8fafc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            padding: 1rem;
+            text-align: center;
+            color: #64748b;
+            min-height: 100px;
+            transition: all 0.2s;
+        }
+
+        .image-drop-zone:hover {
+            border-color: #94a3b8;
+            background-color: #f1f5f9;
+        }
+
+        .image-drop-zone.purple {
+            background-color: #faf5ff;
+            border-color: #e9d5ff;
+            color: #9333ea;
+        }
+
+        .image-drop-zone.purple:hover {
+            background-color: #f3e8ff;
+            border-color: #d8b4fe;
+        }
+
+        .image-drop-zone.blue {
+            background-color: #eff6ff;
+            border-color: #bfdbfe;
+            color: #2563eb;
+        }
+
+        .image-drop-zone.blue:hover {
+            background-color: #dbeafe;
+            border-color: #93c5fd;
+        }
+
+        /* AI Check Drop */
         .ai-check-drop {
             border: 2px dashed #f97316;
-            /* オレンジ系 */
             background: #fff7ed;
-            border-radius: 6px;
-            padding: 10px;
-            position: relative;
-            cursor: pointer;
-            min-height: 80px;
+            border-radius: 12px;
+            padding: 2rem;
             display: flex;
             flex-direction: column;
+            align-items: center;
             justify-content: center;
+            cursor: pointer;
+            min-height: 200px;
+            transition: all 0.2s;
+            margin-bottom: 1rem;
         }
 
-        .ai-check-drop.dragover {
-            border-color: #ea580c;
+        .ai-check-drop:hover {
             background: #ffedd5;
-        }
-
-        /* ファイル選択後の見た目を少し強調 */
-        .ai-check-drop.has-file {
-            border-style: solid;
             border-color: #ea580c;
-            background: #ffedd5;
         }
 
-
-
-
-
-        .image-drop-zone.dragover {
-            background: #f3e8ff;
-            border-color: #7c3aed;
-        }
-
-        .preview-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
-            gap: 4px;
-            margin-top: 4px;
-        }
-
-        .preview-thumb {
-            width: 100%;
-            height: 50px;
-            object-fit: cover;
-            border-radius: 4px;
-            border: 1px solid #ddd;
-        }
-
+        /* Loading / Toast */
         #loadingOverlay {
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(255, 255, 255, .9);
+            background: rgba(255, 255, 255, 0.9);
             z-index: 9998;
             display: none;
             justify-content: center;
@@ -422,68 +432,19 @@
             }
         }
 
-        .parts-names-box {
-            font-size: .7rem;
-            line-height: 1.4;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            padding: 4px 6px;
-            background: #f9fafb;
-            white-space: pre-wrap;
-            /* 内部スクロールをやめる */
-            max-height: none;
-            overflow-y: visible;
-        }
-
-        /* --- フォント全体を少し大きくする --- */
-        body {
-            font-family: "Meiryo UI", "Helvetica Neue", Arial, sans-serif;
-            font-size: 14px;
-            /* ベースフォントアップ */
-        }
-
-        /* Tailwind の text-[10px], text-[11px] を上書きして少し大きくする */
-        .text-\[10px\] {
-            font-size: 0.8rem !important;
-            /* だいたい 12.8px 相当 */
-        }
-
-        .text-\[11px\] {
-            font-size: 0.85rem !important;
-        }
-
-        /* ラベルなども少し大きく */
-        .section-label {
-            font-size: 0.8rem;
-        }
-
-        .genre-group-header {
-            font-size: 0.8rem;
-        }
-
-        .checkbox-card {
-            font-size: 0.8rem;
-        }
-
-        .company-card {
-            font-size: 0.85rem;
-        }
-
-
-
         #toast {
             position: fixed;
-            bottom: 16px;
-            right: 16px;
-            background: #111827;
-            color: #f9fafb;
-            font-size: .75rem;
-            padding: 6px 10px;
-            border-radius: 6px;
-            box-shadow: 0 10px 15px rgba(0, 0, 0, .25);
+            bottom: 20px;
+            right: 20px;
+            background: #1e293b;
+            color: #fff;
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            box-shadow: 0 10px 15px rgba(0, 0, 0, 0.2);
             opacity: 0;
             pointer-events: none;
-            transition: opacity .25s ease;
+            transition: opacity 0.3s;
             z-index: 9999;
         }
 
@@ -491,379 +452,386 @@
             opacity: 1;
         }
 
-
-
-
-
-
-
-
-
-        /* リンク列 */
-        .nav-links {
-            display: flex;
-            align-items: center;
-            gap: 8px;
+        /* Helpers */
+        .hidden {
+            display: none !important;
         }
 
-
-        /* ===== 見出しを「UIのタイトル」に格上げ ===== */
-        .ui-section-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-weight: 800;
-            color: #111827;
-            font-size: 14px;
-            margin: 0 0 10px;
-        }
-
-        .ui-section-title .ui-ico {
-            width: 26px;
-            height: 26px;
-            border-radius: 8px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            background: #eef2ff;
-            color: #1d4ed8;
-            font-size: 14px;
-            box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
-        }
-
-        .ui-section-sub {
-            font-size: 11px;
-            color: #6b7280;
-            margin: -6px 0 10px 34px;
-        }
-
-        /* 左カラムの「1. 製品情報」「2. AI解析・資料」を見出し化 */
-        .section-label {
-            font-size: 13px;
-            font-weight: 800;
-            padding-left: 10px;
-            margin-bottom: 10px;
-            border-left-width: 6px;
-            letter-spacing: .02em;
-        }
-
-        /* 中央カラムのブロックタイトル（名義選択 / 安全・注意ジャンル）を強調 */
-        .panel-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            font-weight: 800;
-            color: #111827;
-        }
-
-        .panel-title .pill {
-            font-size: 11px;
-            font-weight: 800;
-            padding: 2px 8px;
-            border-radius: 999px;
-            background: #f3f4f6;
-            color: #374151;
-        }
-
-
-        /* ===== 共通ヘッダー（inspection.html と同じ見た目） ===== */
-        .tool-nav {
-            position: sticky;
+        .file-overlay {
+            position: absolute;
+            width: 100%;
+            height: 100%;
             top: 0;
-            z-index: 100;
-            background: #374151;
-            padding: 10px 16px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, .12);
-            display: flex;
-            justify-content: center;
-            gap: 14px;
-            align-items: center;
-            flex-wrap: wrap
+            left: 0;
+            opacity: 0;
+            cursor: pointer;
         }
 
-        .nav-groupbox {
+        /* Preview Grid */
+        .preview-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .preview-thumb {
+            width: 100%;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 4px;
+            border: 1px solid #cbd5e1;
+        }
+
+        /* Parts Name Editor Box */
+        .editor-container {
+            margin-bottom: 8px;
+            border: 1px solid #e5e7eb;
+            padding: 8px;
+            background: #fff;
+            border-radius: 6px;
+        }
+
+        .editor-header {
+            font-size: 0.75rem;
+            font-weight: bold;
+            color: #64748b;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .editor-wrapper {
+            position: relative;
+            max-width: 100%;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            background: #f8fafc;
+        }
+
+        .editor-img {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+
+        .badge {
+            position: absolute;
+            width: 20px;
+            height: 20px;
+            background: red;
+            color: white;
+            border-radius: 50%;
+            font-size: 10px;
+            font-weight: bold;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Genre/Checklist Container */
+        #genreArea {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 1.5rem;
+            height: 100%;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 10px;
-            border: 1px solid rgba(255, 255, 255, .14);
-            border-radius: 10px;
-            background: rgba(255, 255, 255, .04)
+            gap: 1rem;
+            overflow-y: auto;
         }
 
-        .nav-heading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
+        /* Generate Button */
+        .btn-generate {
             width: 100%;
-            font-size: 12px;
+            padding: 1rem;
+            font-size: 1.1rem;
             font-weight: 700;
-            letter-spacing: .08em;
-            color: rgba(243, 244, 246, .85)
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 1.5rem;
         }
 
-        .nav-links {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-wrap: wrap
-        }
-
-        .tool-nav a {
-            color: #f3f4f6;
-            text-decoration: none;
-            font-weight: 600;
-            font-size: 14px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, .06)
-        }
-
-        .tool-nav a:hover {
-            background: rgba(255, 255, 255, .12)
-        }
-
-        .tool-nav a.active {
-            background: #172554;
-            color: #fff
+        .btn-generate:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
         }
     </style>
-
-
-
-
-
 </head>
 
-<body class="bg-gray-100 text-gray-800">
-    <script src="/navigation.js" defer></script>
+<body>
 
+    <nav class="mock-nav">
+        <div class="nav-left">
+            <a href="mock_index.html" class="mock-nav-brand">
+                <img src="images/logo.png" alt="AxelAI" class="mock-nav-logo">
+            </a>
+            <div class="mock-nav-links">
+                <a href="mock_index.html" class="mock-nav-link"><i class="fas fa-globe"></i> 翻訳ツール</a>
+                <a href="manual.html" class="mock-nav-link active"><i class="fas fa-pen"></i> 原稿作成</a>
+                <a href="mock_inspection.html" class="mock-nav-link"><i class="fas fa-list-alt"></i> 検品リスト</a>
+                <a href="mock_pdftranslate.html" class="mock-nav-link"><i class="fas fa-book-open"></i> PDF翻訳</a>
+            </div>
+        </div>
+        <button class="launcher-btn" title="アプリ一覧">
+            <i class="fas fa-th"></i>
+        </button>
+    </nav>
 
+    <div class="manual-app-container">
+
+        <!-- Sidebar -->
+        <aside class="manual-sidebar">
+            <!-- Mode Switcher -->
+            <div class="mode-switch">
+                <div class="mode-btn active" onclick="switchMode('gen')" id="btn-gen">
+                    <i class="fas fa-pen-fancy"></i> 生成
+                </div>
+                <div class="mode-btn" onclick="switchMode('check')" id="btn-check">
+                    <i class="fas fa-search"></i> 校正
+                </div>
+            </div>
+
+            <!-- Gen Content (Visible by default) -->
+            <div id="sidebar-gen-content" class="flex flex-col gap-5">
+
+                <!-- Product Info -->
+                <div class="manual-group">
+                    <div class="manual-group-title"><i class="fas fa-cube text-blue-600"></i> 基本情報</div>
+                    <div class="manual-input-group">
+                        <label class="manual-input-label">商品名</label>
+                        <input type="text" id="productName" class="form-control" placeholder="例) ワイヤレスイヤホン">
+                    </div>
+                    <div class="manual-input-row">
+                        <div class="manual-input-group" style="flex:1;">
+                            <label class="manual-input-label">型番</label>
+                            <input type="text" id="modelNumber" class="form-control" placeholder="3R-000">
+                        </div>
+                        <div class="manual-input-group" style="flex:1;">
+                            <label class="manual-input-label">保証期間</label>
+                            <select id="warrantyPeriod" class="form-control">
+                                <!-- JS will populate this usually, but minimal default here -->
+                                <option value="6ヶ月">6ヶ月</option>
+                                <option value="1年">1年</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Company Selection -->
+                <div class="manual-group">
+                    <div class="manual-group-title"><i class="fas fa-building text-gray-600"></i> 名義選択</div>
+                    <div class="company-selection">
+                        <div class="company-card" onclick="selectCompany('3R', this)">
+                            <i class="far fa-circle mr-2"></i> スリーアール
+                        </div>
+                        <div class="company-card" onclick="selectCompany('3RS', this)">
+                            <i class="far fa-circle mr-2"></i> ソリューション
+                        </div>
+                        <div class="company-card" onclick="selectCompany('OTHER', this)">
+                            <i class="far fa-circle mr-2"></i> その他
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Images & Docs -->
+                <div class="manual-group">
+                    <div class="manual-group-title"><i class="fas fa-images text-purple-600"></i> 資料・画像解析</div>
+
+                    <div class="manual-input-group">
+                        <label class="manual-input-label">① 部品画像（ナンバリング用）</label>
+                        <div id="partsImgDrop" class="image-drop-zone purple" style="position: relative;">
+                            <i class="fas fa-cloud-upload-alt fa-2x mb-2"></i>
+                            <span class="text-xs font-bold">画像をドロップ</span>
+                            <input type="file" id="partsImgInput" accept="image/*" multiple class="file-overlay">
+                        </div>
+                        <div id="partsPreview" class="preview-grid"></div>
+                        <!-- エディタエリア (初期非表示) -->
+                        <div id="editorArea" class="mt-2 hidden"></div>
+                    </div>
+
+                    <div class="manual-input-group">
+                        <label class="manual-input-label">② 参考資料 (PDF/Word)</label>
+                        <div id="refDrop" class="image-drop-zone blue" style="position: relative;">
+                            <i class="fas fa-file-import fa-2x mb-2"></i>
+                            <span class="text-xs font-bold">資料をドロップ</span>
+                            <input type="file" id="refInput" accept=".pdf,.docx,.txt,image/*" multiple
+                                class="file-overlay">
+                        </div>
+                        <div id="refFileList" class="mt-2 text-xs text-gray-600"></div>
+                    </div>
+
+                    <div class="manual-input-group">
+                        <label class="manual-input-label">③ 補足・利用方針</label>
+                        <textarea id="productFeatures" class="form-control" rows="3"
+                            placeholder="参考資料の扱い方や注意事項などのメモ"></textarea>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Check Content (Hidden) -->
+            <div id="sidebar-check-content" class="hidden">
+                <!-- Empty as requested -->
+            </div>
+
+        </aside>
+
+        <!-- Resizer -->
+        <div id="resizer"></div>
+
+        <!-- Main Content -->
+        <main class="manual-main">
+
+            <!-- Generation View -->
+            <div id="genView" class="view-section">
+
+                <!-- Internal Tabs -->
+                <div class="main-tabs">
+                    <div class="main-tab-btn active" onclick="switchMainTab('checklist')" id="tab-checklist">
+                        <i class="fas fa-shield-alt"></i> 安全チェック (DB)
+                    </div>
+                    <div class="main-tab-btn" onclick="switchMainTab('preview')" id="tab-preview">
+                        <i class="fas fa-file-alt"></i> 原稿プレビュー
+                    </div>
+                </div>
+
+                <!-- Checklist Area (Using ID genreArea for compatibility) -->
+                <div id="genreAreaContainer" class="h-full">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="text-sm font-bold text-gray-700">データベース参照</div>
+                        <button onclick="clearChecks('genreArea')"
+                            class="text-xs text-red-500 hover:underline">全解除</button>
+                    </div>
+                    <div id="genreArea" class="checklist-panel full-height">
+                        <div
+                            class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
+                            <i class="fas fa-spinner fa-spin text-xl text-blue-500"></i>
+                            <div>SharePoint からManual-databaseを読み込んでいます...</div>
+                        </div>
+                    </div>
+
+                    <!-- Generate Button (Fixed at bottom of this view) -->
+                    <button id="genBtn" onclick="runGenerationProcess()" class="btn-generate">
+                        <i class="fas fa-pen-fancy mr-2"></i> 原稿を生成する
+                    </button>
+                </div>
+
+                <!-- Preview Area (Hidden by default) -->
+                <div id="previewAreaContainer" class="hidden h-full flex flex-col">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="font-bold text-gray-700">生成結果プレビュー</h3>
+                        <div class="flex gap-2">
+                            <button onclick="document.getElementById('previewArea').value=''"
+                                class="text-xs bg-gray-200 px-3 py-1.5 rounded hover:bg-gray-300">クリア</button>
+                            <button onclick="exportToWord()"
+                                class="text-xs bg-blue-600 text-white px-3 py-1.5 rounded font-bold hover:bg-blue-700">
+                                <i class="fas fa-file-word mr-1"></i> Word保存
+                            </button>
+                        </div>
+                    </div>
+                    <textarea id="previewArea"
+                        class="w-full flex-1 border rounded-lg p-4 font-mono text-sm leading-relaxed resize-none bg-white shadow-inner"></textarea>
+                </div>
+
+            </div>
+
+            <!-- Check View (Hidden by default) -->
+            <div id="checkView" class="view-section hidden h-full">
+                <div class="ai-check-view flex flex-col items-center justify-center h-full">
+                    <h2 class="text-2xl font-bold text-gray-700 mb-2">既存マニュアルのAI校正</h2>
+                    <p class="text-gray-500 mb-8">日本語表現や表記ゆれをAIが自動チェックします</p>
+
+                    <div id="aiCheckDrop" class="ai-check-drop-large relative" style="max-width: 600px; height: 320px;">
+                        <i class="fas fa-file-word fa-4x text-orange-400 mb-4"></i>
+                        <h3 class="text-xl font-bold text-gray-700">マニュアル(.docx)をドロップ</h3>
+                        <p class="text-gray-500 mt-2">またはクリックしてファイルを選択</p>
+                        <input type="file" id="aiCheckFile" accept=".docx" class="file-overlay">
+                    </div>
+
+                    <div id="aiCheckStatus" class="text-sm font-bold text-gray-600 mb-4 h-6"></div>
+
+                    <button id="aiCheckBtn" onclick="runAiCheck()"
+                        class="px-8 py-3 bg-orange-500 text-white font-bold rounded-lg shadow hover:bg-orange-600 transition transform hover:scale-105">
+                        <i class="fas fa-check-circle mr-2"></i> チェック開始
+                    </button>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Hidden / Overlays -->
     <div id="loadingOverlay">
         <div class="spinner"></div>
         <div id="loadingText" class="mt-4 text-blue-600 font-bold text-lg">処理中...</div>
     </div>
-
-
-
-    <h1 class="text-xl font-extrabold text-gray-900 flex items-center gap-2 tracking-tight">
-        <span
-            class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-green-600 text-white shadow-sm">🛠️</span>
-        <span>原稿作成（AIチェック）ツール</span>
-        <span class="text-xs font-semibold text-gray-500 ml-1">ChatGPT API</span>
-    </h1>
-
-
-    <div class="flex-1 container mx-auto max-w-full px-4 py-3 grid-layout">
-        <!-- 左カラム -->
-        <div class="col-panel bg-white rounded-lg shadow-sm">
-
-
-
-            <div class="mb-6">
-                <h3 class="section-label border-blue-500 text-blue-700">📦 1. 製品情報</h3>
-                <div class="space-y-2">
-
-                    <label class="text-[10px] font-bold text-gray-600 block">
-                        商品名
-                        <input type="text" id="productName" class="w-full border rounded px-2 py-1.5 text-xs mt-0.5"
-                            placeholder="商品名">
-                    </label>
-
-                    <label class="text-[10px] font-bold text-gray-600 block">
-                        型番
-                        <input type="text" id="modelNumber" class="w-full border rounded px-2 py-1.5 text-xs mt-0.5"
-                            placeholder="型番">
-                    </label>
-
-                    <label class="text-[10px] font-bold text-gray-600 block">
-                        保証期間
-                        <select id="warrantyPeriod"
-                            class="w-full border rounded px-2 py-1.5 text-xs bg-gray-50 mt-0.5"></select>
-                    </label>
-                </div>
-            </div>
-
-
-            <div class="mb-4">
-                <h3 class="section-label border-purple-500 text-purple-700">🧠 2. AI解析・資料</h3>
-
-
-                <!-- ① 各部名称・ナンバリング（そのまま） -->
-                <div class="mb-2">
-                    <div class="image-drop-zone border-purple-300 bg-purple-50" id="partsImgDrop">
-                        <h4 class="text-[10px] font-bold text-purple-700">① 各部名称・ナンバリング</h4>
-                        <input type="file" id="partsImgInput" accept="image/*" multiple class="file-overlay">
-                    </div>
-                    <div id="partsPreview" class="preview-grid"></div>
-                </div>
-
-                <!-- ② 参考資料：画像 + PDF/Word/TXT をまとめて扱う -->
-                <div class="mb-2">
-                    <div class="image-drop-zone border-blue-300 bg-blue-50" id="refDrop">
-                        <h4 class="text-[10px] font-bold text-blue-700">
-                            ② 参考資料（画像 / PDF / Word / テキスト）
-                        </h4>
-                        <input type="file" id="refInput" accept=".pdf,.docx,.txt,image/*" multiple class="file-overlay">
-                    </div>
-                    <div id="refFileList" class="mt-1 text-[10px] space-y-1"></div>
-                </div>
-
-                <!-- 参考資料の利用方針などのメモ -->
-                <label class="text-xs font-bold block mt-2 mb-1 text-gray-500">
-                    補足メモ / 参考資料の利用方針
-                </label>
-                <textarea id="productFeatures" rows="5" class="w-full border rounded px-2 py-1.5 text-xs"
-                    style="min-height: 110px;" placeholder="例）自社旧モデルマニュアル：構成と表現はほぼ踏襲し、仕様数値だけ今回の製品に合わせてください。
-例）他社マニュアル：安全上の注意だけ参考にし、表現は変えてください。"></textarea>
-            </div>
-
-        </div>
-
-        <!-- 中央カラム -->
-        <div class="col-panel bg-gray-50">
-            <div class="mb-4 bg-white p-3 rounded shadow-sm">
-                <div class="flex justify-between mb-2">
-                    <div class="panel-title">
-                        <span class="pill">必須</span>
-                        <span>名義選択</span>
-                        <span class="text-xs text-gray-500">🏷️</span>
-                    </div>
-
-                </div>
-                <div class="flex gap-2">
-                    <div class="company-card flex-1" onclick="selectCompany('3R', this)">
-                        <i class="far fa-circle"></i> スリーアール
-                    </div>
-                    <div class="company-card flex-1" onclick="selectCompany('3RS', this)">
-                        <i class="far fa-circle"></i> ソリューション
-                    </div>
-                    <div class="company-card flex-1" onclick="selectCompany('OTHER', this)">
-                        <i class="far fa-circle"></i> その他
-                    </div>
-                </div>
-
-            </div>
-
-            <div class="flex-1 overflow-hidden flex flex-col">
-                <div class="flex justify-between items-center mb-2 px-1">
-                    <div class="panel-title">
-                        <span>安全・注意ジャンル</span>
-                        <span class="text-xs text-gray-500">⚠️</span>
-                        <a href="https://3rhd.sharepoint.com/:x:/r/sites/doc_share/DocLib2/%E5%95%86%E5%93%81%E9%96%8B%E7%99%BA%E3%83%81%E3%83%BC%E3%83%A0/ai-manual-database/database.xlsx?d=w8deb5def816b4890aa586b309de54dc5&csf=1&web=1&e=QXQeD6"
-                            target="_blank" rel="noopener"
-                            class="ml-2 text-xs font-bold text-blue-600 underline hover:text-blue-800 flex items-center gap-1">
-                            <i class="fas fa-database"></i>
-                            database
-                        </a>
-                    </div>
-
-                    <button onclick="clearChecks('genreArea')"
-                        class="text-[10px] text-red-500 hover:underline">全解除</button>
-                </div>
-                <div id="genreArea" class="genre-wrap-area border rounded flex-1 mb-3">
-                    <div
-                        class="w-full text-center text-sm text-gray-500 py-10 flex flex-col items-center justify-center gap-2">
-                        <i class="fas fa-spinner fa-spin text-xl text-blue-500"></i>
-                        <div>SharePoint からManual-databaseを読み込んでいます...</div>
-                    </div>
-                </div>
-
-
-
-            </div>
-
-            <!-- 各部名称エディタ -->
-            <div id="editorArea" class="bg-purple-50 p-2 rounded shadow-sm hidden mb-2 border border-purple-200">
-            </div>
-
-
-            <button onclick="runGenerationProcess()" id="genBtn"
-                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded shadow text-sm flex-none flex justify-center items-center gap-2">
-                <i class="fas fa-pen-fancy"></i> 原稿を生成する
-            </button>
-        </div>
-
-        <!-- 右カラム：上 = プレビュー / 下 = AIチェック -->
-        <div class="col-panel bg-white rounded-lg shadow-sm flex flex-col">
-            <!-- プレビューエリア（高さを少し縮める） -->
-            <div class="flex flex-col mb-3 flex-[0_0_55%] min-h-[260px]">
-                <div class="flex justify-between items-center mb-2">
-                    <h3 class="font-bold text-sm text-gray-700">プレビュー</h3>
-                    <div class="flex gap-2">
-                        <button onclick="document.getElementById('previewArea').value=''"
-                            class="text-xs bg-gray-200 px-2 py-1 rounded hover:bg-gray-300">クリア</button>
-                        <button onclick="exportToWord()"
-                            class="text-xs bg-blue-600 text-white px-3 py-1 rounded font-bold hover:bg-blue-700">
-                            <i class="fas fa-file-word"></i> Word保存
-                        </button>
-                    </div>
-                </div>
-                <textarea id="previewArea"
-                    class="flex-1 w-full border rounded p-3 font-mono text-xs resize-none bg-gray-50 leading-relaxed"></textarea>
-            </div>
-
-            <!-- ▼▼ 新機能：マニュアル原稿AIチェック ▼▼ -->
-            <div class="mt-1 flex-1">
-                <div class="border border-amber-400 rounded-lg bg-amber-50 p-3 h-full flex flex-col">
-                    <div class="flex items-center justify-between mb-2">
-                        <div class="flex items-center gap-2">
-                            <span
-                                class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-amber-400 text-white text-xs font-bold">AI</span>
-                            <div>
-                                <div class="text-sm font-bold text-amber-800">マニュアル原稿AIチェック</div>
-                                <div class="text-[10px] text-amber-800">
-                                    作成済みマニュアルの日本語表現・表記ゆれをAIがダブルチェックします。
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- ドロップゾーン -->
-                    <div id="aiCheckDrop" class="ai-check-drop mb-2">
-                        <div class="text-[10px] font-bold text-amber-800 mb-1">
-                            マニュアル原稿ファイルをドラッグ＆ドロップ（.docx）
-                        </div>
-                        <div class="text-[10px] text-amber-700">
-                            作成したマニュアル原稿をここにドロップしてください（.docx）。<br>
-                            ドロップした原稿の日本語表現・表記ゆれをAIがチェックします。
-                        </div>
-                        <input type="file" id="aiCheckFile" accept=".docx" class="file-overlay">
-                    </div>
-
-
-                    <!-- ステータス表示 -->
-                    <div id="aiCheckStatus" class="text-[10px] text-amber-800 mb-2 h-10 overflow-hidden">
-                        ファイル未選択
-                    </div>
-
-                    <!-- ボタン群 -->
-                    <div class="mt-auto flex flex-col gap-1">
-                        <button id="aiCheckBtn" onclick="runAiCheck()"
-                            class="w-full text-xs font-bold py-2 rounded bg-amber-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-amber-700">
-                            <i class="fas fa-magnifying-glass-check mr-1"></i> AIチェックを実行
-                        </button>
-
-                        <div class="text-[10px] text-amber-900">
-                            ・チェックコメントは問題の行の「次の行」に赤字で挿入します。<br>
-                            ・総合的なコメントは末尾に「総評」として追記します。
-                        </div>
-
-
-                    </div>
-                </div>
-            </div>
-            <!-- ▲▲ 新機能ここまで ▲▲ -->
-        </div>
-
-    </div>
-
+    <div id="toast"></div>
     <canvas id="processCanvas" style="display:none;"></canvas>
 
+    <!-- Core Logic -->
     <script src="manual-core.js"></script>
+
+    <!-- UI Logic for New Design -->
+    <script>
+        // Main Tab Switching
+        function switchMainTab(tabName) {
+            // Update buttons
+            document.querySelectorAll('.main-tab-btn').forEach(btn => {
+                const isActive = btn.id === 'tab-' + tabName;
+                btn.classList.toggle('active', isActive);
+            });
+
+            // Update content visibility
+            const checklistContainer = document.getElementById('genreAreaContainer');
+            const previewContainer = document.getElementById('previewAreaContainer');
+
+            if (tabName === 'checklist') {
+                checklistContainer.classList.remove('hidden');
+                previewContainer.classList.add('hidden');
+            } else {
+                checklistContainer.classList.add('hidden');
+                previewContainer.classList.remove('hidden');
+            }
+        }
+
+        // Resizer Logic
+        const resizer = document.getElementById('resizer');
+        const sidebar = document.querySelector('.manual-sidebar');
+        let isResizing = false;
+
+        resizer.addEventListener('mousedown', (e) => {
+            isResizing = true;
+            resizer.classList.add('resizing');
+            document.body.style.cursor = 'col-resize';
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isResizing) return;
+            const newWidth = e.clientX;
+            if (newWidth > 200 && newWidth < 600) {
+                sidebar.style.width = newWidth + 'px';
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            isResizing = false;
+            resizer.classList.remove('resizing');
+            document.body.style.cursor = 'default';
+        });
+
+        // Initial Setup
+        document.addEventListener('DOMContentLoaded', () => {
+            switchMainTab('checklist');
+        });
+    </script>
 </body>
 
 </html>
