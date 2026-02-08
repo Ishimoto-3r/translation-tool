@@ -61,16 +61,8 @@ window.onload = () => {
         }
     }, 8000);
 
-    const sel = document.getElementById("warrantyPeriod");
-    ["未定(要確認)", "7日間", ...[...Array(11)].map((_, i) => `${i + 1}カ月間`), "1年間"]
-        .flat()
-        .forEach(t => {
-            const opt = document.createElement("option");
-            opt.value = t.includes("未定") ? "（保証期間）" : `ご購入から${t}`;
-            opt.innerText = t;
-            if (t === "1年間") opt.selected = true;
-            sel.appendChild(opt);
-        });
+    // 保証期間のオプション生成コードはHTML側に移行したため削除
+
 
     // Excel ドロップは廃止したのでここは何も呼ばない
     // setupOverlayDrop("excelDrop", "excelInput", loadExcel);
