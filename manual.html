@@ -54,7 +54,8 @@
         }
 
         /* Navigation Mock */
-        .mock-nav {
+        /* Navigation Manual */
+        .manual-nav {
             background-color: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(12px);
             border-bottom: 1px solid var(--border-color);
@@ -69,31 +70,28 @@
             height: 60px;
         }
 
-        .nav-left {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .mock-nav-brand {
+        .manual-nav-brand {
             display: flex;
             align-items: center;
             text-decoration: none;
             gap: 0.5rem;
+            color: var(--text-main);
+            font-weight: 700;
+            font-size: 1.2rem;
         }
 
-        .mock-nav-logo {
+        .manual-nav-logo {
             height: 32px;
             width: auto;
         }
 
-        .mock-nav-links {
+        .manual-nav-links {
             display: flex;
             gap: 0.5rem;
             margin-left: 1rem;
         }
 
-        .mock-nav-link {
+        .manual-nav-link {
             text-decoration: none;
             color: var(--text-muted);
             font-weight: 600;
@@ -103,15 +101,15 @@
             transition: all 0.2s;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.4rem;
         }
 
-        .mock-nav-link:hover {
+        .manual-nav-link:hover {
             color: var(--primary-color);
             background-color: rgba(59, 130, 246, 0.05);
         }
 
-        .mock-nav-link.active {
+        .manual-nav-link.active {
             color: var(--primary-color);
             background-color: rgba(59, 130, 246, 0.1);
         }
@@ -778,28 +776,26 @@
                             <label class="manual-input-label">型番</label>
                             <input type="text" id="modelNumber" class="form-control" placeholder="3R-000">
                         </div>
-                    </div>
-
-                    <!-- 保証期間（最下部に移動・全幅） -->
-                    <div class="manual-input-group">
-                        <label class="manual-input-label">保証期間</label>
-                        <select id="warrantyPeriod" class="form-control">
-                            <option value="未定(要確認)">未定(要確認)</option>
-                            <option value="7日間">7日間</option>
-                            <option value="1カ月間">1カ月間</option>
-                            <option value="2カ月間">2カ月間</option>
-                            <option value="3カ月間">3カ月間</option>
-                            <option value="4カ月間">4カ月間</option>
-                            <option value="5カ月間">5カ月間</option>
-                            <option value="6カ月間">6カ月間</option>
-                            <option value="7カ月間">7カ月間</option>
-                            <option value="8カ月間">8カ月間</option>
-                            <option value="9カ月間">9カ月間</option>
-                            <option value="10カ月間">10カ月間</option>
-                            <option value="11カ月間">11カ月間</option>
-                            <option value="1年間">1年間</option>
-                            <option value="2年間">2年間</option>
-                        </select>
+                        <div class="manual-input-group" style="flex:1;">
+                            <label class="manual-input-label">保証期間</label>
+                            <select id="warrantyPeriod" class="form-control">
+                                <option value="未定(要確認)">未定(要確認)</option>
+                                <option value="7日間">7日間</option>
+                                <option value="1カ月間">1カ月間</option>
+                                <option value="2カ月間">2カ月間</option>
+                                <option value="3カ月間">3カ月間</option>
+                                <option value="4カ月間">4カ月間</option>
+                                <option value="5カ月間">5カ月間</option>
+                                <option value="6カ月間">6カ月間</option>
+                                <option value="7カ月間">7カ月間</option>
+                                <option value="8カ月間">8カ月間</option>
+                                <option value="9カ月間">9カ月間</option>
+                                <option value="10カ月間">10カ月間</option>
+                                <option value="11カ月間">11カ月間</option>
+                                <option value="1年間">1年間</option>
+                                <option value="2年間">2年間</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
