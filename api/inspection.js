@@ -835,7 +835,7 @@ async function generateExcel({
 
 
 async function handleMeta(req, res) {
-  if (req.method !== "GET") return res.status(405).json({ error: "MethodNotAllowed" });
+  if (req.method !== "GET" && req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
   const items = await getSelectionItemsFromTemplate();
   return res.status(200).json({ selectionItems: items });
 }
