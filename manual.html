@@ -297,9 +297,8 @@
         }
 
         .genre-group {
-            /* width: calc(33.33% - 6px); 削除 */
-            flex: 1 1 240px;
-            /* 最低240px確保し、余白があれば伸びる */
+            width: calc(33.333% - 10px);
+            /* 3列固定（gap考慮） */
             max-width: 100%;
             background: #fff;
             border: 1px solid #d1d5db;
@@ -314,7 +313,15 @@
 
         @media (max-width: 1200px) {
             .genre-group {
-                width: calc(50% - 6px);
+                width: calc(50% - 10px);
+                /* 2列 */
+            }
+        }
+
+        @media (max-width: 768px) {
+            .genre-group {
+                width: 100%;
+                /* 1列 */
             }
         }
 
