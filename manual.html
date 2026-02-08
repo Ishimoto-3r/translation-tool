@@ -55,10 +55,76 @@
         }
 
 
+        /* Navigation Mock (Inline) */
+        .mock-nav {
+            background-color: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            padding: 0.25rem 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow-sm);
+            height: 60px;
+        }
+
+        .nav-left {
+            display: flex;
+            align-items: center;
+            gap: 0;
+        }
+
+        .mock-nav-brand {
+            display: block;
+            text-decoration: none;
+            height: 40px;
+            width: 250px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .mock-nav-logo {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            object-position: left center;
+            transform: scale(2.5);
+            transform-origin: left center;
+            margin: 0;
+        }
+
+        .mock-nav-links {
+            display: flex;
+            gap: 1rem;
+            margin-left: 0;
+        }
+
+        .mock-nav-link {
+            text-decoration: none;
+            color: var(--text-muted);
+            font-weight: 500;
+            font-size: 0.9rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: var(--radius-md);
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .mock-nav-link:hover,
+        .mock-nav-link.active {
+            color: var(--primary-color);
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+
         /* Launcher Button */
         .launcher-btn {
-            width: 36px;
-            height: 36px;
+            width: 40px;
+            height: 40px;
             border-radius: 8px;
             border: 1px solid var(--border-color);
             background-color: white;
@@ -96,6 +162,8 @@
             flex-direction: column;
             gap: 1.25rem;
             z-index: 10;
+            padding-bottom: 300px;
+            /* ドロップダウン展開用スペース確保 */
         }
 
         .manual-group {
@@ -664,7 +732,6 @@
             box-shadow: 0 10px 15px -3px rgba(37, 99, 235, 0.3);
         }
     </style>
-    <link rel="stylesheet" href="mock_style.css">
 </head>
 
 <body>
