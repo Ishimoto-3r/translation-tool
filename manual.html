@@ -603,6 +603,129 @@
             opacity: 1;
         }
 
+        /* Restored Form Styles */
+        .manual-group {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 1.25rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+            transition: all 0.2s ease;
+            margin-bottom: 1.5rem;
+        }
+
+        .manual-group:hover {
+            box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.05);
+            border-color: #cbd5e1;
+        }
+
+        .manual-group-title {
+            font-size: 0.9rem;
+            font-weight: 800;
+            color: #334155;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            letter-spacing: 0.02em;
+            padding-bottom: 0.6rem;
+            border-bottom: 2px solid #f1f5f9;
+        }
+
+        .manual-input-group {
+            margin-bottom: 1rem;
+        }
+
+        .manual-input-row {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .manual-input-label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #64748b;
+            margin-bottom: 0.4rem;
+            display: block;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.9rem;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background-color: #f8fafc;
+            transition: all 0.2s;
+            color: #334155;
+        }
+
+        .form-control:focus {
+            background-color: #ffffff;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+            outline: none;
+        }
+
+        /* Company Selection */
+        .company-selection {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .company-radio-card {
+            display: flex;
+            align-items: center;
+            padding: 0.8rem 1rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background-color: #ffffff;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            color: #475569;
+        }
+
+        .company-radio-card:hover {
+            border-color: #cbd5e1;
+            background-color: #f8fafc;
+        }
+
+        .company-radio-card.selected {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+            color: #1e3a8a;
+            font-weight: 700;
+            box-shadow: 0 0 0 1px #3b82f6;
+        }
+
+        .radio-indicator {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #cbd5e1;
+            border-radius: 50%;
+            margin-right: 0.75rem;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .company-radio-card.selected .radio-indicator {
+            border-color: #3b82f6;
+            background-color: #3b82f6;
+        }
+
+        .company-radio-card.selected .radio-indicator::after {
+            content: '';
+            width: 8px;
+            height: 8px;
+            background-color: white;
+            border-radius: 50%;
+            display: block;
+        }
+
         /* Helpers */
         .hidden {
             display: none !important;
@@ -739,31 +862,137 @@
 
     <div class="single-column-container">
 
-        <!-- Main Content -->
-
-        <!-- Check View (Hidden by default) -->
-        <div id="checkView" class="view-section hidden h-full">
-            <div class="ai-check-view flex flex-col items-center justify-center h-full">
-                <h2 class="text-2xl font-bold text-gray-700 mb-2">既存マニュアルのAI校正</h2>
-                <p class="text-gray-500 mb-8">日本語表現や表記ゆれをAIが自動チェックします</p>
-
-                <div id="aiCheckDrop" class="ai-check-drop-large relative" style="max-width: 600px; height: 320px;">
-                    <i class="fas fa-file-word fa-4x text-orange-400 mb-4"></i>
-                    <h3 class="text-xl font-bold text-gray-700">マニュアル(.docx)をドロップ</h3>
-                    <p class="text-gray-500 mt-2">またはクリックしてファイルを選択</p>
-                    <input type="file" id="aiCheckFile" accept=".docx" class="file-overlay">
+        <!-- 1. Basic Info -->
+        <div class="manual-group">
+            <div class="manual-group-title"><i class="fas fa-cube text-blue-600"></i> 基本情報</div>
+            <div class="manual-input-group">
+                <label class="manual-input-label">商品名</label>
+                <input type="text" id="productName" class="form-control" placeholder="例) ワイヤレスイヤホン">
+            </div>
+            <div class="manual-input-row">
+                <div class="manual-input-group" style="flex:1;">
+                    <label class="manual-input-label">型番</label>
+                    <input type="text" id="modelNumber" class="form-control" placeholder="3R-000">
                 </div>
-
-                <div id="aiCheckStatus" class="text-sm font-bold text-gray-600 mb-4 h-6"></div>
-
-                <button id="aiCheckBtn" onclick="runAiCheck()"
-                    class="px-8 py-3 bg-orange-500 text-white font-bold rounded-lg shadow hover:bg-orange-600 transition transform hover:scale-105">
-                    <i class="fas fa-check-circle mr-2"></i> チェック開始
-                </button>
+                <div class="manual-input-group" style="flex:1;">
+                    <label class="manual-input-label">保証期間</label>
+                    <select id="warrantyPeriod" class="form-control">
+                        <option value="1年間">1年間</option>
+                        <option value="6ヶ月">6ヶ月</option>
+                        <option value="3ヶ月">3ヶ月</option>
+                        <option value="なし">なし</option>
+                    </select>
+                </div>
             </div>
         </div>
 
-        </main>
+        <!-- 2. Company Selection -->
+        <div class="manual-group">
+            <div class="manual-group-title"><i class="fas fa-building text-gray-600"></i> 名義選択</div>
+            <div class="company-selection">
+                <div class="company-radio-card" onclick="selectCompany('3R', this)">
+                    <div class="radio-indicator"></div>
+                    <span>スリーアール</span>
+                </div>
+                <div class="company-radio-card" onclick="selectCompany('3RS', this)">
+                    <div class="radio-indicator"></div>
+                    <span>ソリューション</span>
+                </div>
+                <div class="company-radio-card" onclick="selectCompany('OTHER', this)">
+                    <div class="radio-indicator"></div>
+                    <span>その他</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. Genre / Safety Checklist -->
+        <div class="manual-group">
+            <div class="manual-group-title"><i class="fas fa-shield-alt text-green-600"></i> ジャンル・安全項目</div>
+            <div id="genreArea"
+                style="max-height: 300px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem;">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <!-- 4. Images & Refs -->
+        <div class="manual-group">
+            <div class="manual-group-title"><i class="fas fa-images text-purple-600"></i> 画像・資料</div>
+
+            <div class="manual-input-group">
+                <label class="manual-input-label">① 部品画像（各部の名称・ナンバリング）</label>
+                <div id="partsImgDrop" class="image-drop-zone purple">
+                    <i class="fas fa-camera fa-2x mb-2"></i>
+                    <span class="text-xs font-bold">画像をドロップ (複数可)</span>
+                    <input type="file" id="partsImgInput" accept="image/*" multiple class="file-overlay">
+                </div>
+                <div id="partsImgList" class="preview-grid"></div>
+                <!-- Editor Area for Parts -->
+                <div id="editorArea" class="mt-4"></div>
+            </div>
+
+            <div class="manual-input-group">
+                <label class="manual-input-label">② 使用方法の画像（任意）</label>
+                <div id="usageImgDrop" class="image-drop-zone blue">
+                    <i class="fas fa-images fa-2x mb-2"></i>
+                    <span class="text-xs font-bold">画像をドロップ (複数可)</span>
+                    <input type="file" id="usageImgInput" accept="image/*" multiple class="file-overlay">
+                </div>
+                <div id="usageImgList" class="preview-grid"></div>
+            </div>
+
+            <div class="manual-input-group">
+                <label class="manual-input-label">③ 参考資料 (PDF/Word/Text)</label>
+                <div id="refDrop" class="image-drop-zone" style="border-color:#cbd5e1;">
+                    <i class="fas fa-file-alt fa-2x mb-2"></i>
+                    <span class="text-xs font-bold">仕様書などをドロップ</span>
+                    <input type="file" id="refInput" accept=".pdf,.docx,.txt" class="file-overlay">
+                </div>
+                <div id="refFileList" class="mt-2 text-sm text-gray-600"></div>
+            </div>
+        </div>
+
+        <!-- 5. Memo -->
+        <div class="manual-group">
+            <div class="manual-group-title"><i class="fas fa-pen text-gray-600"></i> 補足メモ・方針</div>
+            <textarea id="productFeatures" class="form-control" rows="4"
+                placeholder="AIへの指示（例：『ですます調』で統一して、明るいトーンで）"></textarea>
+        </div>
+
+        <!-- Actions -->
+        <div class="manual-group" style="background: transparent; border: none; padding: 0;">
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <button id="genBtn" class="btn-generate" onclick="generateManual()" style="flex: 2;">
+                    <i class="fas fa-pen-fancy"></i> 原稿生成 (プレビュー)
+                </button>
+                <button id="checkBtn" class="btn-generate" onclick="checkManual()"
+                    style="flex: 1; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);">
+                    <i class="fas fa-search"></i> テキスト校正
+                </button>
+            </div>
+            <p class="text-xs text-center text-gray-400 mt-2">※生成・校正結果は新しいタブで開きます</p>
+        </div>
+
+        <!-- 6. Docx AI Check -->
+        <div class="manual-group mt-8 border-t-2 border-gray-100 pt-8">
+            <div class="manual-group-title"><i class="fas fa-file-word text-orange-500"></i> Wordファイル校正 (既存ファイル)</div>
+            <p class="text-sm text-gray-500 mb-4">手持ちのWordファイル(.docx)をアップロードしてAIチェックを実施します。</p>
+
+            <div id="aiCheckDrop" class="ai-check-drop relative">
+                <i class="fas fa-file-word fa-3x text-orange-400 mb-2"></i>
+                <h3 class="font-bold text-gray-700">.docx ファイルをドロップ</h3>
+                <div id="aiCheckStatus" class="text-sm text-gray-500 mt-2"></div>
+                <input type="file" id="aiCheckFile" accept=".docx" class="file-overlay">
+            </div>
+
+            <button id="aiCheckBtn" onclick="runAiCheck()" class="btn-generate"
+                style="background: #f97316; margin-top: 1rem; display: none;">
+                <i class="fas fa-check-circle"></i> チェックダウンロード
+            </button>
+        </div>
+
+    </div>
+
+    </main>
     </div>
 
     <!-- Hidden / Overlays -->
@@ -779,88 +1008,10 @@
 
     <!-- UI Logic for New Design -->
     <script>
-        // Main Tab Switching
-        function switchMainTab(tabName) {
-            // Update buttons
-            document.querySelectorAll('.main-tab-btn').forEach(btn => {
-                const isActive = btn.id === 'tab-' + tabName;
-                btn.classList.toggle('active', isActive);
-            });
-
-            // Update content visibility
-            const checklistContainer = document.getElementById('genreAreaContainer');
-            const previewContainer = document.getElementById('previewAreaContainer');
-
-            if (tabName === 'checklist') {
-                checklistContainer.classList.remove('hidden');
-                previewContainer.classList.add('hidden');
-            } else {
-                checklistContainer.classList.add('hidden');
-                previewContainer.classList.remove('hidden');
-            }
-        }
-
-        // Resizer Logic
-        const resizer = document.getElementById('resizer');
-        const sidebar = document.querySelector('.manual-sidebar');
-        let isResizing = false;
-
-        resizer.addEventListener('mousedown', (e) => {
-            isResizing = true;
-            resizer.classList.add('resizing');
-            document.body.style.cursor = 'col-resize';
-        });
-
-        document.addEventListener('mousemove', (e) => {
-            if (!isResizing) return;
-            const newWidth = e.clientX;
-            if (newWidth > 200 && newWidth < 600) {
-                sidebar.style.width = newWidth + 'px';
-            }
-        });
-
-        document.addEventListener('mouseup', () => {
-            isResizing = false;
-            resizer.classList.remove('resizing');
-            document.body.style.cursor = 'default';
-        });
-
         // Initial Setup
         document.addEventListener('DOMContentLoaded', () => {
-            switchMainTab('checklist');
+            // No specific initialization needed for single column layout
         });
-
-        // Mode Switching
-        function switchMode(mode) {
-            // 1. Update Buttons
-            document.querySelectorAll('.mode-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.id === 'btn-' + mode);
-            });
-
-            // 2. Toggle Sidebar Content
-            const genContent = document.getElementById('sidebar-gen-content');
-            const checkContent = document.getElementById('sidebar-check-content');
-
-            if (mode === 'gen') {
-                genContent.classList.remove('hidden');
-                checkContent.classList.add('hidden');
-            } else {
-                genContent.classList.add('hidden');
-                checkContent.classList.remove('hidden');
-            }
-
-            // 3. Toggle Main View (Gen vs Check)
-            const genView = document.getElementById('genView');
-            const checkView = document.getElementById('checkView');
-
-            if (mode === 'gen') {
-                genView.classList.remove('hidden');
-                checkView.classList.add('hidden');
-            } else {
-                genView.classList.add('hidden');
-                checkView.classList.remove('hidden');
-            }
-        }
     </script>
 </body>
 

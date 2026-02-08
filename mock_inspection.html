@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>検品リスト作成 (Mock)</title>
+    <link rel="stylesheet" href="mock_style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+
+    <nav class="mock-nav">
+        <div class="nav-left">
+            <a href="mock_index.html" class="mock-nav-brand">
+                <img src="images/logo.png" alt="AxelAI" class="mock-nav-logo">
+            </a>
+            <div class="mock-nav-links">
+                <a href="mock_index.html" class="mock-nav-link"><i class="fas fa-globe"></i> 翻訳ツール</a>
+                <a href="mock_manual.html" class="mock-nav-link"><i class="fas fa-pen"></i> 原稿作成</a>
+                <a href="mock_inspection.html" class="mock-nav-link active"><i class="fas fa-list-alt"></i> 検品リスト</a>
+                <a href="mock_pdftranslate.html" class="mock-nav-link"><i class="fas fa-book-open"></i> PDF翻訳</a>
+            </div>
+        </div>
+        <button class="launcher-btn" title="アプリ一覧">
+            <i class="fas fa-th"></i>
+        </button>
+    </nav>
+
+    <div class="container">
+        <header class="page-header">
+            <h1 class="page-title">検品リスト作成</h1>
+            <p class="page-subtitle">PDFからの情報抽出、メタデータ検査、Excelリスト化</p>
+        </header>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><i class="fas fa-file-import"></i> ファイル入力</h2>
+            </div>
+
+            <div class="placeholder-box mb-4"
+                style="height: 150px; background-color: #f0f9ff; border-style: solid; border-color: #3b82f6;">
+                <div class="text-center">
+                    <i class="fas fa-cloud-upload-alt fa-3x text-primary mb-2"></i>
+                    <p class="mb-0">PDFファイルをここにドロップ<br><span class="text-sm text-muted">またはクリックして選択</span></p>
+                </div>
+            </div>
+
+            <div class="grid-3">
+                <button class="btn btn-secondary w-full">
+                    <i class="fas fa-info-circle"></i> メタデータ抽出
+                </button>
+                <button class="btn btn-primary w-full">
+                    <i class="fas fa-list-alt"></i> Excelリスト生成
+                </button>
+                <button class="btn btn-secondary w-full">
+                    <i class="fas fa-code"></i> HTML構造解析
+                </button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2 class="card-title"><i class="fas fa-poll-h"></i> 処理結果</h2>
+                <div class="gap-2 flex-center">
+                    <button class="btn btn-secondary btn-sm"><i class="fas fa-download"></i> CSV保存</button>
+                    <button class="btn btn-secondary btn-sm"
+                        style="color: var(--danger-color); border-color: var(--danger-color);">クリア</button>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <div
+                    style="background: #1f2937; color: #10b981; padding: 1rem; border-radius: 8px; font-family: monospace; min-height: 200px; overflow-y: auto;">
+                    > Processing file: example_manual.pdf
+                    > Pages: 12
+                    > Metadata extracted successfully.
+                    > Title: User Guide v1.0
+                    > Author: Development Team
+                    > detecting tables... done.
+                    > generating preview...
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+
+</html>

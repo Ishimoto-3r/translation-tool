@@ -2675,7 +2675,6 @@ ${refUsage || "（該当箇所なし）"}
                 draft = replaceSection(draft, "■使用方法", usageBody);
             }
 
-            // 安全上のご注意の追記案を末尾に追加
             if (safetyBody) {
                 draft += `
 
@@ -2684,8 +2683,12 @@ ${safetyBody}
 `;
             }
         }
-        document.getElementById("previewArea").value = draft;
-        showToast("原稿を生成しました");
+
+        // ★ 変更：localStorageに保存して別タブで開く
+        localStorage.setItem('manual_preview_data', draft);
+        window.open('manual_preview.html', '_blank');
+
+        showToast("原稿を生成しました（別タブで開きます）");
     } catch (e) {
         console.error(e);
         showToast(e.message, true);
@@ -3224,6 +3227,81 @@ function filterFunc(v) {
     document.querySelectorAll("#funcArea .checkbox-card").forEach(c => {
         c.style.display = c.innerText.includes(v) ? "flex" : "none";
     });
+}
+
+
+// --- 新しいタブベースのUIロジック ---
+
+window.generateManual = runGenerationProcess;
+window.checkManual = checkManual;
+
+async function checkManual() {
+    const text = localStorage.getItem('manual_preview_data');
+    if (!text || !text.trim()) {
+        alert("チェック対象の原稿がありません。先に「原稿生成」を行うか、プレビュー画面でテキストを入力してください。");
+        return;
+    }
+
+    showToast("AIチェックを開始します...", false);
+
+    try {
+        const lines = text.split(/\r?\n/);
+
+        // 既存のAIチェックロジックを再利用するために AICHECK_PARAGRAPHS を構築
+        AICHECK_PARAGRAPHS = lines.map((line, idx) => ({
+            pid: "P" + String(idx).padStart(3, "0"),
+            text: line,
+            section: "normal",
+            pIndex: idx
+        }));
+
+        // プロンプト作成（既存関数を再利用）
+        const prompt = buildAiCheckPromptForDocx();
+
+        // AI呼び出し
+        const aiText = await callAI(prompt, null, "check");
+
+        // フィルタリング（既存関数）
+        const filteredAiText = filterAiCheckOutput(aiText);
+
+        // 解析（既存関数）
+        const { commentsByPid, totalComment } = parseAiCheckResponse(filteredAiText);
+
+        // UI表示用に変換
+        const uiResults = [];
+
+        if (totalComment) {
+            uiResults.push({
+                word: "総評",
+                reason: totalComment,
+                context: "（全体）"
+            });
+        }
+
+        Object.keys(commentsByPid).sort().forEach(pid => {
+            const idx = parseInt(pid.replace("P", ""), 10);
+            const lineText = lines[idx] || "";
+            const comment = commentsByPid[pid];
+
+            uiResults.push({
+                word: `行${idx + 1}`,
+                reason: comment,
+                context: lineText.length > 80 ? lineText.substring(0, 80) + "..." : lineText
+            });
+        });
+
+        if (uiResults.length === 0) {
+            showToast("指摘事項は見つかりませんでした");
+        }
+
+        // localStorageに保存して別タブを開く
+        localStorage.setItem('manual_check_data', JSON.stringify(uiResults));
+        window.open('manual_check.html', '_blank');
+
+    } catch (e) {
+        console.error(e);
+        alert("AIチェック中にエラーが発生しました: " + e.message);
+    }
 }
 
 if (typeof module !== 'undefined') { module.exports = { filterAiCheckOutput, normalizeWordTextForAiCheck, isStructuralParagraph }; }

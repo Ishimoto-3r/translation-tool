@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>原稿プレビュー | AxelAI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --text-main: #1f2937;
+            --bg-body: #f3f4f6;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        textarea {
+            width: 100%;
+            height: 600px;
+            padding: 1rem;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 1rem;
+            line-height: 1.8;
+            resize: vertical;
+            font-family: monospace;
+        }
+
+        .actions {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        button {
+            padding: 0.6rem 1.2rem;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s;
+        }
+
+        .btn-copy {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-copy:hover {
+            opacity: 0.9;
+        }
+
+        .btn-close {
+            background-color: #9ca3af;
+            color: white;
+        }
+
+        .btn-close:hover {
+            opacity: 0.9;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="actions">
+            <button class="btn-copy" onclick="copyText()"><i class="fas fa-copy"></i> 全てコピー</button>
+            <button class="btn-close" onclick="window.close()"><i class="fas fa-times"></i> 閉じる</button>
+        </div>
+
+        <textarea id="previewText"></textarea>
+    </div>
+
+    <script>
+        window.onload = function () {
+            const data = localStorage.getItem('manual_preview_data');
+            if (data) {
+                document.getElementById('previewText').value = data;
+            } else {
+                document.getElementById('previewText').value = "データがありません。";
+            }
+
+            document.getElementById('previewText').addEventListener('input', function () {
+                localStorage.setItem('manual_preview_data', this.value);
+            });
+        };
+
+        function copyText() {
+            const textarea = document.getElementById('previewText');
+            textarea.select();
+            document.execCommand('copy');
+            alert('コピーしました');
+        }
+    </script>
+
+</body>
+
+</html>

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI安全チェック結果 | AxelAI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --danger-color: #ef4444;
+            --warning-color: #f59e0b;
+            --success-color: #10b981;
+            --text-main: #1f2937;
+            --bg-body: #f3f4f6;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background-color: var(--bg-body);
+            color: var(--text-main);
+            margin: 0;
+            padding: 2rem;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-main);
+        }
+
+        .alert-box {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .alert-danger {
+            background-color: #fef2f2;
+            border: 1px solid #fee2e2;
+            color: #991b1b;
+        }
+
+        .alert-success {
+            background-color: #ecfdf5;
+            border: 1px solid #d1fae5;
+            color: #065f46;
+        }
+
+        .check-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .check-item {
+            padding: 1rem;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            gap: 1rem;
+            align-items: flex-start;
+        }
+
+        .check-item:last-child {
+            border-bottom: none;
+        }
+
+        .check-icon {
+            font-size: 1.2rem;
+            margin-top: 2px;
+        }
+
+        .text-danger {
+            color: var(--danger-color);
+        }
+
+        .text-success {
+            color: var(--success-color);
+        }
+
+        .actions {
+            margin-bottom: 1rem;
+            text-align: right;
+        }
+
+        button {
+            padding: 0.6rem 1.2rem;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            background-color: #9ca3af;
+            color: white;
+            transition: all 0.2s;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="container">
+        <div class="actions">
+            <button onclick="window.close()"><i class="fas fa-times"></i> 閉じる</button>
+        </div>
+
+        <h1><i class="fas fa-shield-alt"></i> 安全チェック結果</h1>
+
+        <div id="summaryArea"></div>
+        <ul id="resultList" class="check-list"></ul>
+
+    </div>
+
+    <script>
+        window.onload = function () {
+            const data = localStorage.getItem('manual_check_data');
+            const summaryArea = document.getElementById('summaryArea');
+            const resultList = document.getElementById('resultList');
+
+            if (!data) {
+                summaryArea.innerHTML = '<div class="alert-box alert-danger">データが見つかりません。</div>';
+                return;
+            }
+
+            try {
+                const results = JSON.parse(data);
+
+                if (results.length === 0) {
+                    summaryArea.innerHTML = `
+                    <div class="alert-box alert-success">
+                        <i class="fas fa-check-circle fa-2x"></i>
+                        <div>
+                            <strong>問題なし</strong><br>
+                            検出された注意ワードはありませんでした。
+                        </div>
+                    </div>`;
+                } else {
+                    summaryArea.innerHTML = `
+                    <div class="alert-box alert-danger">
+                        <i class="fas fa-exclamation-triangle fa-2x"></i>
+                        <div>
+                            <strong>${results.length}件の問題が検出されました</strong><br>
+                            以下の箇所を確認してください。
+                        </div>
+                    </div>`;
+
+                    results.forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = 'check-item';
+                        li.innerHTML = `
+                        <div class="check-icon text-danger"><i class="fas fa-times-circle"></i></div>
+                        <div>
+                            <div style="font-weight:bold; margin-bottom:4px;">${item.word}</div>
+                            <div style="font-size:0.9rem; color:#6b7280;">${item.reason || '使用が推奨されない単語です'}</div>
+                            <div style="margin-top:4px; font-family:monospace; background:#f9fafb; padding:4px;">...${item.context}...</div>
+                        </div>
+                    `;
+                        resultList.appendChild(li);
+                    });
+                }
+
+            } catch (e) {
+                summaryArea.textContent = "データ形式エラー";
+                console.error(e);
+            }
+        };
+    </script>
+
+</body>
+
+</html>

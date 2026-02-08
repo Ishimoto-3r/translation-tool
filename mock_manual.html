@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>マニュアル作成 (Mock)</title>
+    <link rel="stylesheet" href="mock_style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+
+    <nav class="mock-nav">
+        <div class="nav-left">
+            <a href="mock_index.html" class="mock-nav-brand">
+                <img src="images/logo.png" alt="AxelAI" class="mock-nav-logo">
+            </a>
+            <div class="mock-nav-links">
+                <a href="mock_index.html" class="mock-nav-link"><i class="fas fa-globe"></i> 翻訳ツール</a>
+                <a href="mock_manual.html" class="mock-nav-link active"><i class="fas fa-pen"></i> 原稿作成</a>
+                <a href="mock_inspection.html" class="mock-nav-link"><i class="fas fa-list-alt"></i> 検品リスト</a>
+                <a href="mock_pdftranslate.html" class="mock-nav-link"><i class="fas fa-book-open"></i> PDF翻訳</a>
+            </div>
+        </div>
+        <button class="launcher-btn" title="アプリ一覧">
+            <i class="fas fa-th"></i>
+        </button>
+    </nav>
+
+    <div class="manual-app-container">
+        <!-- Sidebar: Settings & Inputs -->
+        <aside class="manual-sidebar">
+            <!-- Mode Switcher -->
+            <div class="mode-switch">
+                <div class="mode-btn active" onclick="switchMode('gen')" id="btn-gen">
+                    <i class="fas fa-pen-fancy"></i> 生成
+                </div>
+                <div class="mode-btn" onclick="switchMode('check')" id="btn-check">
+                    <i class="fas fa-search"></i> 校正
+                </div>
+            </div>
+            <!-- Content for Generation Mode -->
+            <div id="sidebar-gen-content">
+                <div class="manual-group">
+                    <div class="manual-group-title"><i class="fas fa-cube text-blue-600"></i> 基本情報</div>
+                    <div class="manual-input-group">
+                        <label class="manual-input-label">商品名</label>
+                        <input type="text" class="form-control" placeholder="例) ワイヤレスイヤホン">
+                    </div>
+                    <div class="manual-input-row">
+                        <div class="manual-input-group" style="flex:1;">
+                            <label class="manual-input-label">型番</label>
+                            <input type="text" class="form-control" placeholder="3R-000">
+                        </div>
+                        <div class="manual-input-group" style="flex:1;">
+                            <label class="manual-input-label">保証期間</label>
+                            <select class="form-control">
+                                <option>1年間</option>
+                                <option>6ヶ月</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="manual-group">
+                    <div class="manual-group-title"><i class="fas fa-building text-gray-600"></i> 名義選択</div>
+                    <div class="company-selection">
+                        <div class="company-radio-card selected" onclick="selectCompany('3R', this)">
+                            <div class="radio-indicator"></div>
+                            <span>スリーアール</span>
+                        </div>
+                        <div class="company-radio-card" onclick="selectCompany('3RS', this)">
+                            <div class="radio-indicator"></div>
+                            <span>ソリューション</span>
+                        </div>
+                        <div class="company-radio-card" onclick="selectCompany('OTHER', this)">
+                            <div class="radio-indicator"></div>
+                            <span>その他</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="manual-group">
+                    <div class="manual-group-title"><i class="fas fa-images text-purple-600"></i> 資料・画像解析</div>
+                    <div class="manual-input-group">
+                        <label class="manual-input-label">① 部品画像（ナンバリング用）</label>
+                        <div class="image-drop-zone purple">
+                            <i class="fas fa-cloud-upload-alt fa-2x mb-2"></i>
+                            <span class="text-xs font-bold">画像をドロップ</span>
+                            <span class="text-[10px] opacity-75">またはクリックして選択</span>
+                        </div>
+                    </div>
+                    <div class="manual-input-group">
+                        <label class="manual-input-label">② 参考資料 (PDF/Word)</label>
+                        <div class="image-drop-zone blue">
+                            <i class="fas fa-file-import fa-2x mb-2"></i>
+                            <span class="text-xs font-bold">資料を解析</span>
+                            <span class="text-[10px] opacity-75">ドラッグ＆ドロップ</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="manual-group">
+                    <div class="manual-group-title"><i class="fas fa-pen text-gray-600"></i> 補足メモ・方針</div>
+                    <div class="manual-input-group">
+                        <textarea class="form-control" rows="4" placeholder="例）自社旧モデルのマニュアル構成を踏襲しつつ、仕様数値だけ変更してください。"
+                            style="font-size: 0.8rem;"></textarea>
+                    </div>
+
+                    <div class="generate-fab-container">
+                        <button class="btn btn-primary btn-generate-large" onclick="generateManual()">
+                            <i class="fas fa-magic"></i> 原稿を生成する
+                        </button>
+                        <p class="text-xs text-center text-gray-400 mt-2">※生成完了後、プレビュータブに切り替わります</p>
+                    </div>
+                </div>
+
+
+                <!-- Content for Check Mode -->
+                <div id="sidebar-check-content" class="hidden">
+                    <div class="manual-group">
+                        <div class="manual-group-title"><i class="fas fa-check-double text-orange-500"></i> チェック設定</div>
+                        <div class="manual-input-group">
+                            <!-- Content for Check Mode: Empty as per original -->
+                            <div id="sidebar-check-content" class="hidden"></div>
+        </aside>
+
+        <!-- Resizer -->
+        <div id="resizer"></div>
+
+        <!-- Main Stage -->
+        <main class="manual-main">
+            <!-- View: Generation -->
+            <div id="genView" class="view-section">
+
+                <!-- Main Tabs -->
+                <div class="main-tabs">
+                    <div class="main-tab-btn active" onclick="switchMainTab('checklist')" id="tab-checklist">
+                        <i class="fas fa-shield-alt"></i> 安全チェック (DB)
+                    </div>
+                    <div class="main-tab-btn" onclick="switchMainTab('preview')" id="tab-preview">
+                        <i class="fas fa-file-alt"></i> 原稿プレビュー
+                    </div>
+                </div>
+
+                <!-- Tab Content: Checklist -->
+                <div id="content-checklist" class="tab-content" style="height: calc(100% - 60px);">
+                    <div class="checklist-panel full-height">
+                        <div class="checklist-header">
+                            <div class="checklist-title" style="font-size: 0.9rem; color: #6b7280;">
+                                SharePointデータベース連携中 <i class="fas fa-check-circle text-green-500 ml-2"></i>
+                            </div>
+                            <div class="flex gap-2">
+                                <button class="text-xs text-gray-500 hover:text-red-500">全解除</button>
+                                <a href="#" class="text-xs text-blue-600 hover:underline"><i
+                                        class="fas fa-external-link-alt"></i> ソース編集</a>
+                            </div>
+                        </div>
+                        <div class="checklist-grid-full">
+                            <label class="checklist-item-large">
+                                <input type="checkbox">
+                                <div>
+                                    <div class="font-bold text-sm text-gray-800">電源プラグ</div>
+                                    <div class="text-xs text-gray-500 mt-1">根元まで確実に差し込むこと。ホコリが付着していないか確認。</div>
+                                </div>
+                            </label>
+                            <label class="checklist-item-large">
+                                <input type="checkbox">
+                                <div>
+                                    <div class="font-bold text-sm text-gray-800">濡れ手禁止</div>
+                                    <div class="text-xs text-gray-500 mt-1">濡れた手で電源プラグを抜き差ししない。感電の原因になります。</div>
+                                </div>
+                            </label>
+                            <label class="checklist-item-large">
+                                <input type="checkbox">
+                                <div>
+                                    <div class="font-bold text-sm text-gray-800">分解禁止</div>
+                                    <div class="text-xs text-gray-500 mt-1">絶対に分解・修理・改造を行わないでください。発火や異常動作の原因。</div>
+                                </div>
+                            </label>
+                            <label class="checklist-item-large">
+                                <input type="checkbox">
+                                <div>
+                                    <div class="font-bold text-sm text-gray-800">水濡れ厳禁</div>
+                                    <div class="text-xs text-gray-500 mt-1">本体に水をかけたり、水に浸けたりしないでください。</div>
+                                </div>
+                            </label>
+                            <label class="checklist-item-large">
+                                <input type="checkbox">
+                                <div>
+                                    <div class="font-bold text-sm text-gray-800">子供の安全</div>
+                                    <div class="text-xs text-gray-500 mt-1">乳幼児の手の届く場所で使用・保管しないでください。</div>
+                                </div>
+                            </label>
+                            <label class="checklist-item-large">
+                                <input type="checkbox">
+                                <div>
+                                    <div class="font-bold text-sm text-gray-800">直射日光</div>
+                                    <div class="text-xs text-gray-500 mt-1">直射日光の当たる場所や高温多湿の場所に放置しないでください。</div>
+                                </div>
+                            </label>
+                            <label class="checklist-item-large">
+                                <input type="checkbox">
+                                <div>
+                                    <div class="font-bold text-sm text-gray-800">異常発生時</div>
+                                    <div class="text-xs text-gray-500 mt-1">煙が出たり変な臭いがした場合は、直ちに使用を中止し電源プラグを抜く。</div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Preview -->
+                <div id="content-preview" class="tab-content hidden">
+                    <div class="manual-main-header">
+                        <div>
+                            <h2 class="text-xl font-bold text-gray-800">原稿プレビュー</h2>
+                        </div>
+                        <div class="flex gap-2">
+                            <button class="btn btn-secondary btn-sm"><i class="fas fa-redo"></i> リセット</button>
+                            <button class="btn btn-primary btn-sm"><i class="fas fa-file-word"></i> Word保存</button>
+                        </div>
+                    </div>
+
+                    <div class="preview-paper">
+                        <div style="font-family: 'Times New Roman', serif; line-height: 1.6;">
+                            <h1
+                                style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px;">
+                                取扱説明書</h1>
+                            <h2 style="font-size: 1.2rem; margin-top: 2rem;">1. はじめに</h2>
+                            <p>この度は、本製品をお買い上げいただき誠にありがとうございます。</p>
+                            <p>ご使用の前に、この取扱説明書をよくお読みの上、正しく安全にお使いください。</p>
+
+                            <h2 style="font-size: 1.2rem; margin-top: 2rem;">2. 安全上のご注意</h2>
+                            <p>ここに示した注意事項は、製品を安全に正しくお使いいただき、あなたや他の人々への危害や損害を未然に防止するためのものです。</p>
+
+                            <h2 style="font-size: 1.2rem; margin-top: 2rem;">3. 各部の名称</h2>
+                            <div
+                                style="background: #f9fafb; border: 1px dashed #ccc; height: 150px; display: flex; align-items: center; justify-content: center; color: #999; margin: 1rem 0;">
+                                [ここに画像が挿入されます]
+                            </div>
+                            <ol>
+                                <li>電源ボタン</li>
+                                <li>充電ランプ</li>
+                                <li>USBポート</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- View: AI Check -->
+            <div id="checkView" class="view-section hidden">
+                <div class="ai-check-view" style="display: flex; flex-direction: column; height: 100%;">
+                    <h2 class="text-2xl font-bold text-gray-700 mb-6">既存マニュアルのAI校正</h2>
+
+                    <div
+                        class="flex-1 flex flex-col items-center justify-center p-8 bg-gray-50 border-2 border-dashed border-gray-300 rounded-lg">
+                        <div class="text-center">
+                            <i class="fas fa-file-pdf fa-4x text-orange-400 mb-4"></i>
+                            <h3 class="text-xl font-bold text-gray-700">ここにファイルをドロップ</h3>
+                            <p class="text-gray-500 mt-2">対応形式: PDF, Word (docx)</p>
+                            <button class="btn btn-primary mt-6">ファイルを選択</button>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 text-center">
+                        <p class="text-sm text-gray-500">※サイドバーでチェック項目を選択後、ファイルをアップロードしてください</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        function switchMode(mode) {
+            // Buttons
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-' + mode).classList.add('active');
+
+            // Sidebar Content
+            document.getElementById('sidebar-gen-content').classList.toggle('hidden', mode !== 'gen');
+            document.getElementById('sidebar-check-content').classList.toggle('hidden', mode !== 'check');
+
+            // Main Views
+            document.getElementById('genView').classList.toggle('hidden', mode !== 'gen');
+            document.getElementById('checkView').classList.toggle('hidden', mode !== 'check');
+        }
+
+        function switchMainTab(tabId) {
+            // Tabs
+            document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('tab-' + tabId).classList.add('active');
+
+            // Content
+            document.getElementById('content-checklist').classList.toggle('hidden', tabId !== 'checklist');
+            document.getElementById('content-preview').classList.toggle('hidden', tabId !== 'preview');
+        }
+
+        function selectCompany(name, el) {
+            document.querySelectorAll('.company-radio-card').forEach(c => c.classList.remove('selected'));
+            el.classList.add('selected');
+            // Logic
+            console.log("Selected Company:", name);
+        }
+
+        function generateManual() {
+            // 処理中トーストなどを出すべき箇所
+            // ここではモックとしてタブを切り替える
+            switchMainTab('preview');
+        }
+
+        // Resizer Logic
+        document.addEventListener('DOMContentLoaded', () => {
+            const resizer = document.getElementById('resizer');
+            const sidebar = document.querySelector('.manual-sidebar');
+            let isResizing = false;
+
+            if (resizer && sidebar) {
+                resizer.addEventListener('mousedown', (e) => {
+                    isResizing = true;
+                    resizer.classList.add('resizing');
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!isResizing) return;
+
+                    let newWidth = e.clientX;
+                    if (newWidth < 250) newWidth = 250;
+                    if (newWidth > 600) newWidth = 600;
+
+                    sidebar.style.width = newWidth + 'px';
+                });
+
+                document.addEventListener('mouseup', () => {
+                    if (isResizing) {
+                        isResizing = false;
+                        resizer.classList.remove('resizing');
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                    }
+                });
+            }
+        });
+    </script>
+
+</body>
+
+</html>
