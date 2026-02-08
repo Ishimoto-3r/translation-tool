@@ -401,7 +401,7 @@ async function getSelectionItemsFromTemplate() {
 const { INSPECTION_PROMPTS } = require("./utils/prompts");
 
 async function aiExtractFromSourceText({ sourceText, fileName, modelHint, productHint }) {
-  const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
+  const MODEL = process.env.MODEL_MANUAL_CHECK || process.env.OPENAI_MODEL || "gpt-4o";
   const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
   const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
 
@@ -485,7 +485,7 @@ async function extractPdfTextFromBuffer(pdfBuffer) {
 
 // ===== AI extract from PDF file =====
 async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHint }) {
-  const MODEL = process.env.MODEL_MANUAL_CHECK || "gpt-5.2";
+  const MODEL = process.env.MODEL_MANUAL_CHECK || process.env.OPENAI_MODEL || "gpt-4o";
   const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
   const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
 
