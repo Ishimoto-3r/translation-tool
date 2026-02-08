@@ -3242,9 +3242,17 @@ window.generateManual = runGenerationProcess;
 window.checkManual = checkManual;
 
 async function checkManual() {
+    // ★ ポップアップブロック回避のため、処理開始直後にウィンドウを開く
+    const checkWin = window.open('manual_check.html', '_blank');
+    if (!checkWin) {
+        alert("ポップアップがブロックされました。ブラウザの設定許可してください。");
+        return;
+    }
+
     const text = localStorage.getItem('manual_preview_data');
     if (!text || !text.trim()) {
         alert("チェック対象の原稿がありません。先に「原稿生成」を行うか、プレビュー画面でテキストを入力してください。");
+        checkWin.close(); // データがないなら閉じる
         return;
     }
 
@@ -3300,13 +3308,17 @@ async function checkManual() {
             showToast("指摘事項は見つかりませんでした");
         }
 
-        // localStorageに保存して別タブを開く
+        // localStorageに保存して別タブを開く (既に開いているタブをリロード)
         localStorage.setItem('manual_check_data', JSON.stringify(uiResults));
-        window.open('manual_check.html', '_blank');
+
+        if (checkWin) {
+            checkWin.location.reload();
+        }
 
     } catch (e) {
         console.error(e);
         alert("AIチェック中にエラーが発生しました: " + e.message);
+        if (checkWin) checkWin.close();
     }
 }
 
