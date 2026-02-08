@@ -50,8 +50,8 @@
             margin: 0;
             padding: 0;
             line-height: 1.5;
-            overflow: hidden;
-            /* Prevent full page scroll */
+            overflow: auto;
+            /* Natural scroll */
         }
 
 
@@ -144,9 +144,9 @@
         /* Manual App Container */
         .manual-app-container {
             display: flex;
-            height: calc(100vh - 60px);
-            /* Subtract nav height */
-            overflow: hidden;
+            min-height: calc(100vh - 60px);
+            height: auto;
+            overflow: visible;
             background-color: #f1f5f9;
         }
 
@@ -156,14 +156,12 @@
             flex-shrink: 0;
             background-color: #f8fafc;
             border-right: 1px solid #e2e8f0;
-            overflow-y: auto;
             padding: 1.25rem;
             display: flex;
             flex-direction: column;
             gap: 1.25rem;
             z-index: 10;
-            padding-bottom: 300px;
-            /* ドロップダウン展開用スペース確保 */
+            padding-bottom: 100px;
         }
 
         .manual-group {
@@ -741,7 +739,6 @@
         <div class="nav-left">
             <a href="index.html" class="mock-nav-brand">
                 <img src="images/logo.png" alt="AxelAI" class="mock-nav-logo">
-                <span>AI翻訳ツール</span>
             </a>
             <div class="mock-nav-links">
                 <a href="index.html" class="mock-nav-link"><i class="fas fa-globe"></i> 翻訳ツール</a>
