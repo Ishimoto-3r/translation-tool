@@ -466,7 +466,7 @@ async function aiExtractFromSourceText({ sourceText, fileName, modelHint, produc
 
 async function extractPdfTextFromBuffer(pdfBuffer) {
   const loadingTask = pdfjsLib.getDocument({
-    data: pdfBuffer,
+    data: new Uint8Array(pdfBuffer),
     disableWorker: true,
     useSystemFonts: true,
   });
