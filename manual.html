@@ -775,14 +775,15 @@
                             <label class="manual-input-label">型番</label>
                             <input type="text" id="modelNumber" class="form-control" placeholder="3R-000">
                         </div>
-                        <div class="manual-input-group" style="flex:1;">
-                            <label class="manual-input-label">保証期間</label>
-                            <select id="warrantyPeriod" class="form-control">
-                                <!-- JS will populate this usually, but minimal default here -->
-                                <option value="6ヶ月">6ヶ月</option>
-                                <option value="1年">1年</option>
-                            </select>
-                        </div>
+                    </div>
+
+                    <!-- 保証期間（最下部に移動・全幅） -->
+                    <div class="manual-input-group">
+                        <label class="manual-input-label">保証期間</label>
+                        <select id="warrantyPeriod" class="form-control">
+                            <option value="6ヶ月">6ヶ月</option>
+                            <option value="1年">1年</option>
+                        </select>
                     </div>
                 </div>
 
@@ -807,7 +808,8 @@
                     <div class="manual-group-title"><i class="fas fa-images text-purple-600"></i> 資料・画像解析</div>
 
                     <div class="manual-input-group">
-                        <label class="manual-input-label">① 部品画像（ナンバリング用）</label>
+                        <label class="manual-input-label">① 各部名称・ナンバリング</label>
+                        <p class="text-xs text-gray-500 mb-2">画像をアップロードすると、ここで番号付けと名称入力ができます。</p>
                         <div id="partsImgDrop" class="image-drop-zone purple" style="position: relative;">
                             <i class="fas fa-cloud-upload-alt fa-2x mb-2"></i>
                             <span class="text-xs font-bold">画像をドロップ</span>
@@ -1000,9 +1002,40 @@
         });
 
         // Initial Setup
-        document.addEventListener('DOMContentLoaded', () => {
-            switchMainTab('checklist');
+        switchMainTab('checklist');
         });
+
+        // Mode Switching
+        function switchMode(mode) {
+            // 1. Update Buttons
+            document.querySelectorAll('.mode-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.id === 'btn-' + mode);
+            });
+
+            // 2. Toggle Sidebar Content
+            const genContent = document.getElementById('sidebar-gen-content');
+            const checkContent = document.getElementById('sidebar-check-content');
+
+            if (mode === 'gen') {
+                genContent.classList.remove('hidden');
+                checkContent.classList.add('hidden');
+            } else {
+                genContent.classList.add('hidden');
+                checkContent.classList.remove('hidden');
+            }
+
+            // 3. Toggle Main View (Gen vs Check)
+            const genView = document.getElementById('genView');
+            const checkView = document.getElementById('checkView');
+
+            if (mode === 'gen') {
+                genView.classList.remove('hidden');
+                checkView.classList.add('hidden');
+            } else {
+                genView.classList.add('hidden');
+                checkView.classList.remove('hidden');
+            }
+        }
     </script>
 </body>
 
