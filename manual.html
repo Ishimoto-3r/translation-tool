@@ -285,9 +285,9 @@
             padding: 8px;
             background: #f3f4f6;
 
-            /* CSS Grid に変更して4列強制 (!important で優先度確保) */
-            display: grid !important;
-            grid-template-columns: repeat(4, 1fr) !important;
+            /* Revert to default flex behavior or original grid if applicable */
+            display: flex;
+            flex-wrap: wrap;
             gap: 10px;
             align-content: start;
 
@@ -297,9 +297,6 @@
         }
 
         .genre-selected-pinned {
-            /* Grid内で全幅を使う */
-            grid-column: 1 / -1;
-
             position: sticky;
             top: 0;
             z-index: 5;
@@ -315,6 +312,8 @@
             box-shadow: 0 1px 2px rgba(0, 0, 0, .06);
             margin-bottom: 8px;
         }
+
+        /* ... existing styles ... */
 
         .genre-selected-pinned .pinned-title {
             font-size: .75rem;
@@ -664,70 +663,6 @@
 
         #toast.show {
             opacity: 1;
-        }
-
-        /* Restored Form Styles */
-        .manual-group {
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            padding: 1.25rem;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-            transition: all 0.2s ease;
-            margin-bottom: 1.5rem;
-        }
-
-        .manual-group:hover {
-            box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.05);
-            border-color: #cbd5e1;
-        }
-
-        .manual-group-title {
-            font-size: 0.9rem;
-            font-weight: 800;
-            color: #334155;
-            margin-bottom: 1rem;
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            letter-spacing: 0.02em;
-            padding-bottom: 0.6rem;
-            border-bottom: 2px solid #f1f5f9;
-        }
-
-        .manual-input-group {
-            margin-bottom: 1rem;
-        }
-
-        .manual-input-row {
-            display: flex;
-            gap: 1rem;
-        }
-
-        .manual-input-label {
-            font-size: 0.75rem;
-            font-weight: 700;
-            color: #64748b;
-            margin-bottom: 0.4rem;
-            display: block;
-        }
-
-        .form-control {
-            width: 100%;
-            padding: 0.6rem 0.8rem;
-            font-size: 0.9rem;
-            border: 1px solid #cbd5e1;
-            border-radius: 8px;
-            background-color: #f8fafc;
-            transition: all 0.2s;
-            color: #334155;
-        }
-
-        .form-control:focus {
-            background-color: #ffffff;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
-            outline: none;
         }
 
         /* Company Selection */

@@ -2574,6 +2574,13 @@ async function runGenerationProcess() {
         if (!ok) return;
     }
 
+    // ★ ポップアップブロック回避のため、処理開始直後にウィンドウを開く
+    const previewWin = window.open('manual_preview.html', '_blank');
+    if (!previewWin) {
+        alert("ポップアップがブロックされました。ブラウザの設定許可してください。");
+        return;
+    }
+
     document.getElementById("loadingOverlay").style.display = "flex";
 
     try {
@@ -2684,16 +2691,21 @@ ${safetyBody}
             }
         }
 
-        // ★ 変更：localStorageに保存して別タブで開く
+        // localStorage保存
         localStorage.setItem('manual_preview_data', draft);
-        window.open('manual_preview.html', '_blank');
+        // 保存後にウィンドウをリロード（または既に開いているページに通知）
+        // manual_preview.html は onload で localStorage を読むので、リロードすれば反映される
+        if (previewWin) {
+            previewWin.location.reload();
+        }
 
         showToast("原稿を生成しました（別タブで開きます）");
     } catch (e) {
         console.error(e);
         showToast(e.message, true);
+        if (previewWin) previewWin.close();
     } finally {
-        document.getElementById("loadingOverlay").style.display = "none";
+        document.getElementById("loadingOverlay").style.display = "flex";
     }
 }
 
@@ -2713,8 +2725,11 @@ function buildDraft() {
     const partsRulesTpl = getTemplateTexts("PartsRules");
     const editionTpl = getTemplateTexts("Edition");
 
-    const checked = Array.from(document.querySelectorAll('input[type="checkbox"]:checked'))
+    // ↓ 修正: チェックボックス取得ロジック（.checkedプロパティで判定）
+    const checked = Array.from(document.querySelectorAll('input[type="checkbox"]'))
+        .filter(c => c.checked)
         .map(c => c.value);
+
     const hasLi = checked.some(s => s.includes("リチウム"));
 
     const rows = RAW_DATA
@@ -2848,26 +2863,17 @@ function buildDraft() {
     }
 
     if (SELECTED_COMPANY === "OTHER") {
-        // OTHER 名義：Support_OTHER テンプレのみ
-        if (supportOtherTpl.length) {
-            L.push(...supportOtherTpl);
-        }
+        L.push(...supportOtherTpl);
+    } else if (SELECTED_COMPANY === "3RS") {
+        L.push(...support3RSTpl);
     } else {
-        // 3R / 3RS 名義
-        if (SELECTED_COMPANY === "3RS") {
-            if (support3RSTpl.length) {
-                L.push(...support3RSTpl);
-            }
-        } else { // "3R"
-            if (support3RTpl.length) {
-                L.push(...support3RTpl);
-            }
-        }
+        // Default 3R
+        L.push(...support3RTpl);
     }
 
-    // 版数（Edition もテンプレのみ）
+    // テンプレ末尾（版数など）
     if (editionTpl.length) {
-        L.push(...editionTpl);
+        L.push("", ...editionTpl);
     }
 
     return L.join("\n");
