@@ -371,7 +371,7 @@ async function extractPdfData(arrayBuffer, { forceVision = false } = {}) {
   const isSparse = cleanText.length < 100;
   const isGarbage = quality.jpRatio < 0.05 || quality.tofuRatio > 0.1 || quality.uniqueRatio < 0.15;
 
-  if (forceVision || isSparse || isGarbage) {
+  if (isSparse || isGarbage) {
     // Render pages to images for Vision API
     // Intelligent selection:
     // - If <= 20 pages, render all pages.
