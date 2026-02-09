@@ -543,7 +543,7 @@ async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHin
 
   const extractedText = await extractPdfTextFromBuffer(pdfBuffer);
   // 文字数制限
-  const truncatedText = extractedText.slice(0, 30000);
+  const truncatedText = extractedText.slice(0, 60000);
 
   const completion = await deps.openaiClient.chatCompletion({
     model: MODEL,
@@ -622,14 +622,19 @@ async function aiExtractFromImages({ images, fileName, modelHint, productHint })
 【目的】
 検品リストに入れる「仕様」「動作」「付属品」、および「型番」「製品名」を抽出します。
 
+【検索対象のキーワード例】
+- 付属品: 「付属品」「同梱品」「セット内容」「パッケージ内容」「内容物」「Included」
+- 仕様: 「仕様」「主な仕様」「製品仕様」「スペック」「定格」「Specifications」
+- 動作: 「各部の名称」「操作方法」「使い方」「メニュー」「設定」
+
 【重要ルール】
 - 画像全体からテキストを読み取ってください。
-- 「動作」には、安全注意/禁止/中止/警告/注意（安全・取扱注意、禁止事項）は入れない。
-- 「動作」は、実際の操作/設定/表示/接続/保存など “できること” を箇条書きで。
-- 「動作」は、まとまりがある場合は title を1つ作り、その配下に items を並べる（例：メニュー設定系はまとめる）。
-- 「付属品」は、画像内に記載があれば拾う。表記揺れを整理する（例：USBケーブル/USBコード/ケーブル→USBケーブル）。
-- ただし「取扱説明書」は、記載が無くても必ず付属品候補に入れる（表記は「取扱説明書」に統一）。
-- 型番/製品名は、画像内の表記（例：3R-XXXX）やタイトルから推定。見つからない場合は空文字。
+- 「動作」には、安全注意/禁止/中止/警告/注意（安全・取扱注意、禁止事項）は絶対に入れないでください。
+- 「動作」は、実際の操作/設定/表示/接続/保存など “ユーザーができる具体的なアクション” を箇条書きにします。目次だけでなく本文から抽出してください。
+- 「付属品」は、画像内に記載があれば必ず全て拾ってください。表記揺れは一般的な名称に統一（例: USBコード→USBケーブル）。
+- ただし「取扱説明書」は、記載が無くても必ず付属品リストに含めてください。
+- 「仕様」は、表形式や箇条書きで書かれている技術仕様（サイズ、重量、電源、解像度など）をできるだけ多く抽出してください。
+- 型番/製品名は、画像内の表記（例：3R-XXXX）やタイトルから推定。
 
 【ヒント（既に入力されている可能性あり）】
 - 型番ヒント: ${modelHint || ""}
@@ -639,9 +644,9 @@ async function aiExtractFromImages({ images, fileName, modelHint, productHint })
 {
   "model": "型番",
   "productName": "製品名",
-  "specs": ["仕様の箇条書き", "..."],
-  "ops": [{"title":"見出し","items":["動作1","動作2"]}],
-  "accs": ["付属品1","付属品2","取扱説明書"]
+  "specs": ["サイズ: WxHxD", "重量: xx g", "仕様項目: 値", ...],
+  "ops": [{"title":"大分類","items":["動作1","動作2","..."]}],
+  "accs": ["付属品1","付属品2","...","取扱説明書"]
 }
 
 【ファイル情報】

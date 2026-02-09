@@ -337,8 +337,9 @@ async function extractPdfData(arrayBuffer) {
   let fullText = "";
 
   // 1. Text Extraction
-  const maxPages = Math.min(pdf.numPages, 10); // Check first 10 pages for text
-  for (let i = 1; i <= maxPages; i++) {
+  // Read up to 50 pages to cover most manuals (Specs often at end)
+  const maxTextPages = Math.min(pdf.numPages, 50);
+  for (let i = 1; i <= maxTextPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
     const strings = content.items.map(item => item.str);
