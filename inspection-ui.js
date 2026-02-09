@@ -353,12 +353,22 @@ async function extractPdfData(arrayBuffer) {
 
   if (cleanText.length < 100) {
     // Render pages to images for Vision API
-    // Limit to first 3 pages (usually contains specs) + maybe last page?
-    // Let's just do first 4 pages to be safe.
-    const imagePages = Math.min(pdf.numPages, 4);
+    // Intelligent selection: First 5 pages (Intro/Contents/Accs) + Last 2 pages (Specs/Warranty)
+    const totalPages = pdf.numPages;
+    const pagesToRender = new Set();
 
-    for (let i = 1; i <= imagePages; i++) {
-      const page = await pdf.getPage(i);
+    // First 5 pages
+    for (let i = 1; i <= Math.min(totalPages, 5); i++) pagesToRender.add(i);
+
+    // Last 2 pages (if not already added)
+    if (totalPages > 5) {
+      pagesToRender.add(totalPages);
+      if (totalPages > 1) pagesToRender.add(totalPages - 1);
+    }
+
+    // Render selected pages
+    for (const pageNum of Array.from(pagesToRender).sort((a, b) => a - b)) {
+      const page = await pdf.getPage(pageNum);
       const viewport = page.getViewport({ scale: 1.5 }); // 1.5x scale for better readability
 
       const canvas = document.createElement("canvas");
