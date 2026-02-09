@@ -438,10 +438,13 @@ async function runExtract() {
     $("overlayBar").style.width = "40%";
     $("overlayStep").textContent = "データ抽出";
 
-    // 2. Client-Side Extraction
-    const { text, images } = await extractPdfData(pdfBuffer);
+    // Check Force Vision UI
+    const forceVision = $("forceVisionEnv")?.checked || false;
 
-    if (images.length > 0) {
+    // 2. Client-Side Extraction (Improved)
+    const { text, images, usedVision } = await extractPdfData(pdfBuffer, forceVision);
+
+    if (usedVision) {
       setBusy(true, "AI抽出中(画像)", "送信", "画像データからAI解析を行っています...", "画像マニュアルのため時間がかかります。");
     } else {
       setBusy(true, "AI抽出中(テキスト)", "送信", "テキストデータからAI解析を行っています...", "サーバーへ送信中。");
@@ -449,9 +452,10 @@ async function runExtract() {
     $("overlayBar").style.width = "60%";
 
     // 3. Send to API
+    // 3. Send to API
     const payload = {
-      text,
-      images,
+      text: usedVision ? "" : text,
+      images: usedVision ? images : [],
       fileName,
       modelHint,
       productHint
