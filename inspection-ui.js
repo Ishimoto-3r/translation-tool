@@ -326,6 +326,59 @@ async function loadMeta() {
 }
 
 
+// ===== Client-Side PDF Extraction =====
+async function extractPdfData(arrayBuffer) {
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer),
+    disableWorker: false // Worker is loaded in HTML
+  });
+
+  const pdf = await loadingTask.promise;
+  let fullText = "";
+
+  // 1. Text Extraction
+  const maxPages = Math.min(pdf.numPages, 10); // Check first 10 pages for text
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const strings = content.items.map(item => item.str);
+    fullText += strings.join(" ") + "\\n";
+  }
+
+  // 2. Vision Fallback (if text is sparse)
+  // Threshold: less than 100 characters of meaningful text
+  const cleanText = fullText.replace(/\s/g, "");
+  const images = [];
+
+  if (cleanText.length < 100) {
+    // Render pages to images for Vision API
+    // Limit to first 3 pages (usually contains specs) + maybe last page?
+    // Let's just do first 4 pages to be safe.
+    const imagePages = Math.min(pdf.numPages, 4);
+
+    for (let i = 1; i <= imagePages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 1.5 }); // 1.5x scale for better readability
+
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      await page.render({
+        canvasContext: context,
+        viewport: viewport
+      }).promise;
+
+      // Convert to JPEG base64 (smaller than PNG)
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      images.push(dataUrl);
+    }
+  }
+
+  return { text: fullText, images };
+}
+
 async function runExtract() {
   clearError();
 
@@ -348,87 +401,76 @@ async function runExtract() {
   }
 
   try {
-    setBusy(true, "AI抽出中", "準備", "マニュアルから仕様/動作/付属品/型番/製品名を抽出しています。", "解析はサーバー側で実施します。");
+    setBusy(true, "PDF解析中", "解析", "PDFからテキストと画像を解析しています...", "解析はブラウザで行っています。");
     $("overlayBar").style.width = "20%";
 
     const modelHint = $("modelInput").value.trim();
     const productHint = $("productInput").value.trim();
 
-    let payload = {
-      modelHint: modelHint || "",
-      productHint: productHint || ""
+    let pdfBuffer;
+    let fileName = "manual.pdf";
+
+    // 1. Get PDF Buffer
+    if (pdfFile) {
+      fileName = pdfFile.name;
+      pdfBuffer = await pdfFile.arrayBuffer();
+    } else {
+      // Fetch via proxy
+      fileName = (url.split("?")[0].split("#")[0].split("/").pop() || "from_url.pdf");
+      const res = await fetch(`/api/inspection?op=fetch&url=${encodeURIComponent(url)}`);
+      if (!res.ok) {
+        throw new Error(`PDFダウンロード失敗: ${res.status} ${res.statusText}`);
+      }
+      pdfBuffer = await res.arrayBuffer();
+    }
+
+    $("overlayBar").style.width = "40%";
+    $("overlayStep").textContent = "データ抽出";
+
+    // 2. Client-Side Extraction
+    const { text, images } = await extractPdfData(pdfBuffer);
+
+    if (images.length > 0) {
+      setBusy(true, "AI抽出中(画像)", "送信", "画像データからAI解析を行っています...", "画像マニュアルのため時間がかかります。");
+    } else {
+      setBusy(true, "AI抽出中(テキスト)", "送信", "テキストデータからAI解析を行っています...", "サーバーへ送信中。");
+    }
+    $("overlayBar").style.width = "60%";
+
+    // 3. Send to API
+    const payload = {
+      text,
+      images,
+      fileName,
+      modelHint,
+      productHint
     };
 
-    let r;
-    if (pdfFile) {
-      if (pdfFileSize > MAX_DD_BYTES) {
-        const msg = "このPDFは容量が大きいため、ドラッグ＆ドロップでは処理できません。下のURL欄にPDFのリンクを貼り付けてください。";
-        showError(msg);
-        showDndNotice(msg);
-        setBusy(false);
-        return;
-      }
-      $("overlayStep").textContent = "PDF送信";
-      $("overlayBar").style.width = "55%";
-      const params = new URLSearchParams({
-        op: "extract",
-        fileName: pdfFile.name || "upload.pdf",
-        modelHint: modelHint || "",
-        productHint: productHint || "",
-      });
-      const res = await fetch(`/api/inspection?${params.toString()}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/pdf" },
-        body: await pdfFile.arrayBuffer(),
-      });
-      if (!res.ok) {
-        const txt = await res.text().catch(() => "");
-        throw new Error(`HTTP ${res.status} ${txt}`);
-      }
-      r = await res.json();
+    const r = await api("extract", payload);
+
+    $("overlayBar").style.width = "90%";
+
+    // 4. Handle Response
+    if (r && r.ok) {
+      extracted = r;
+      // 画面反映
+      renderOpGroups("specList", [{ title: "", items: r.specs }]);
+      renderOpGroups("opList", r.ops);
+      renderCheckboxList("accList", r.accs);
+
+      $("modelInput").value = r.model || "";
+      $("productInput").value = r.productName || "";
+
+      setBusy(false);
+      if (r.notice) showError(r.notice);
     } else {
-      $("overlayStep").textContent = "URL準備";
-      payload.source = "url";
-      payload.pdfUrl = url;
-      payload.fileName = (url.split("?")[0].split("#")[0].split("/").pop() || "from_url.pdf");
-      $("overlayBar").style.width = "55%";
-      $("overlayStep").textContent = "AI抽出";
-      r = await api("extract", payload);
-    }
-    $("overlayBar").style.width = "85%";
-
-    if (r && r.ok && r.text === "" && r.notice) {
-      showError(r.notice);
-      return;
-    }
-    if (r && r.ok && r.text === "") {
-      showError("このPDFはテキスト抽出できません。");
-      return;
+      if (r && r.notice) showError(r.notice);
+      else throw new Error("API Error or Unknown format");
     }
 
-    extracted.model = normalizeText(r.model || "").trim();
-    extracted.productName = normalizeText(r.productName || "").trim();
-    extracted.specs = Array.isArray(r.specs) ? r.specs.map(normalizeText) : [];
-    extracted.ops = Array.isArray(r.ops) ? r.ops : [];
-    extracted.accs = Array.isArray(r.accs) ? r.accs.map(normalizeText) : [];
-
-    // フォーム自動反映（未入力時のみ）
-    if (!$("modelInput").value.trim() && extracted.model) $("modelInput").value = extracted.model;
-    if (!$("productInput").value.trim() && extracted.productName) $("productInput").value = extracted.productName;
-
-    // 仕様：初期未チェック
-    renderCheckboxList("specList", extracted.specs, { defaultChecked: false });
-
-    // 動作：初期未チェック（タイトル連動あり）
-    renderOpGroups("opList", extracted.ops);
-
-    // 付属品：初期全チェック（要件）
-    renderCheckboxList("accList", extracted.accs, { defaultChecked: true });
-
-    $("overlayBar").style.width = "100%";
   } catch (e) {
-    showError("AI抽出に失敗しました: " + e.message);
-  } finally {
+    console.error(e);
+    showError("抽出に失敗しました: " + e.message);
     setBusy(false);
   }
 }

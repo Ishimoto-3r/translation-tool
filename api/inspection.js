@@ -25,6 +25,7 @@ const handler = async (req, res) => {
     }
 
     if (op === "meta") return await handleMeta(req, res);
+    if (op === "fetch") return await handleFetch(req, res); // Proxy for client-side PDF processing
     if (op === "extract") return await handleExtract(req, res);
     if (op === "generate") return await handleGenerate(req, res);
 
@@ -603,9 +604,149 @@ ${user.trim()}
   accs = dedupeKeepOrder(accs);
 
   return { model, productName, specs, ops, accs };
+  return { model, productName, specs, ops, accs };
 }
 
-// ===== Excel generate =====
+// ===== AI extract from Images (Vision) =====
+async function aiExtractFromImages({ images, fileName, modelHint, productHint }) {
+  const MODEL = process.env.MODEL_MANUAL_CHECK || process.env.OPENAI_MODEL || "gpt-4o";
+  const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
+  const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
+
+  const sys = `
+あなたは取扱説明書（画像）の内容から、検品リスト作成に必要な情報を抽出します。
+必ずJSONのみを返してください（説明文は不要）。
+`.trim();
+
+  const userText = `
+【目的】
+検品リストに入れる「仕様」「動作」「付属品」、および「型番」「製品名」を抽出します。
+
+【重要ルール】
+- 画像全体からテキストを読み取ってください。
+- 「動作」には、安全注意/禁止/中止/警告/注意（安全・取扱注意、禁止事項）は入れない。
+- 「動作」は、実際の操作/設定/表示/接続/保存など “できること” を箇条書きで。
+- 「動作」は、まとまりがある場合は title を1つ作り、その配下に items を並べる（例：メニュー設定系はまとめる）。
+- 「付属品」は、画像内に記載があれば拾う。表記揺れを整理する（例：USBケーブル/USBコード/ケーブル→USBケーブル）。
+- ただし「取扱説明書」は、記載が無くても必ず付属品候補に入れる（表記は「取扱説明書」に統一）。
+- 型番/製品名は、画像内の表記（例：3R-XXXX）やタイトルから推定。見つからない場合は空文字。
+
+【ヒント（既に入力されている可能性あり）】
+- 型番ヒント: ${modelHint || ""}
+- 製品名ヒント: ${productHint || ""}
+
+【返却JSONスキーマ（厳守）】
+{
+  "model": "型番",
+  "productName": "製品名",
+  "specs": ["仕様の箇条書き", "..."],
+  "ops": [{"title":"見出し","items":["動作1","動作2"]}],
+  "accs": ["付属品1","付属品2","取扱説明書"]
+}
+
+【ファイル情報】
+ファイル名: ${fileName}
+`.trim();
+
+  // Construct message with images
+  const content = [{ type: "text", text: userText }];
+  for (const base64Image of images) {
+    // base64Image is expected to be "data:image/jpeg;base64,..." or just base64
+    // OpenAI API expects just the base64 part for image_url or passed as url if public
+    // Here we assume it's a data URL, we need to pass it as image_url with url field
+    content.push({
+      type: "image_url",
+      image_url: {
+        url: base64Image, // data:image/jpeg;base64,... is supported
+        detail: "high"
+      }
+    });
+  }
+
+  deps.logger.info("inspection", `Calling AI Extract (Vision) for ${fileName}, model=${MODEL}, images=${images.length}`);
+
+  const completion = await deps.openaiClient.chatCompletion({
+    model: MODEL,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: content },
+    ],
+    reasoning_effort: REASONING,
+    verbosity: VERBOSITY,
+  });
+
+  const text = completion.choices[0]?.message?.content ?? "{}";
+  let obj;
+  try {
+    const s = text.indexOf("{");
+    const e = text.lastIndexOf("}");
+    const jsonText = s >= 0 && e > s ? text.slice(s, e + 1) : "{}";
+    obj = JSON.parse(jsonText);
+  } catch {
+    deps.logger.warn("inspection", "JSON Parse Error in aiExtractFromImages", { raw: text.slice(0, 50) });
+    obj = {};
+  }
+
+  return normalizeExtractResult(obj);
+}
+
+function normalizeExtractResult(obj) {
+  const model = norm(obj.model);
+  const productName = norm(obj.productName);
+  const specs = dedupeKeepOrder(Array.isArray(obj.specs) ? obj.specs : []);
+  const opsIn = Array.isArray(obj.ops) ? obj.ops : [];
+  const ops = [];
+  for (const g0 of opsIn) {
+    const title = norm(g0?.title);
+    let items = Array.isArray(g0?.items) ? g0.items.map(norm) : [];
+    items = items.filter(x => x && !shouldSkipOpItem(x));
+    items = dedupeKeepOrder(items);
+    if (!title && items.length === 0) continue;
+    ops.push({ title, items });
+  }
+  let accs = Array.isArray(obj.accs) ? obj.accs.map(normalizeManualAccessory).map(norm) : [];
+  accs = accs.map(normalizeManualAccessory);
+  accs.push("取扱説明書");
+  accs = dedupeKeepOrder(accs);
+  accs = accs.map(a => {
+    if (a.includes("USB") && (a.includes("コード") || a.includes("ケーブル") || a === "ケーブル")) return "USBケーブル";
+    if (a === "ケーブル") return "USBケーブル";
+    return a;
+  });
+  accs = dedupeKeepOrder(accs);
+  return { model, productName, specs, ops, accs };
+}
+
+// ===== Proxy Handler =====
+async function handleFetch(req, res) {
+  const url = req.query.url;
+  if (!url) {
+    return res.status(400).json({ error: "Missing url parameter" });
+  }
+
+  try {
+    const fetchRes = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+      }
+    });
+
+    if (!fetchRes.ok) {
+      throw new Error(`Failed to fetch PDF: ${fetchRes.statusText}`);
+    }
+
+    const buffer = await fetchRes.arrayBuffer();
+    const contentType = fetchRes.headers.get("content-type") || "application/pdf";
+
+    res.setHeader("Content-Type", contentType);
+    res.send(Buffer.from(buffer));
+
+  } catch (e) {
+    deps.logger.error("inspection", "Proxy fetch failed", { url, error: e.message });
+    res.status(500).json({ error: "FetchError", detail: e.message });
+  }
+}
+
 function findMarkerRow(ws, marker) {
   // A列完全一致で探す
   for (let r = 1; r <= ws.rowCount; r++) {
@@ -834,9 +975,39 @@ async function handleMeta(req, res) {
 }
 
 async function handleExtract(req, res) {
+  // New payload format: { text: string, images: string[], fileName: string, modelHint: string, productHint: string }
+  // Old payload format (fallback): PDF binary body or { pdfUrl: string }
+
+  // Allow simple CORS if needed (though nextjs handles it usually)
   if (req.method !== "POST") return res.status(405).json({ error: "MethodNotAllowed" });
 
-  const { pdfUrl } = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+  let body = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
+
+  // Check if it's the new client-side extracted payload
+  if (body.text !== undefined || body.images !== undefined) {
+    const { text, images, fileName, modelHint, productHint } = body;
+
+    let result;
+    if (images && images.length > 0) {
+      // Vision API
+      result = await aiExtractFromImages({ images, fileName, modelHint, productHint });
+    } else if (text) {
+      // Text API
+      result = await aiExtractFromSourceText({ sourceText: text, fileName, modelHint, productHint });
+    } else {
+      return res.status(400).json({ error: "BadRequest", detail: "No text or images provided" });
+    }
+
+    // Add notice if text was empty but no images provided
+    if (!images && (!text || text.length < 100)) {
+      result.notice = "テキスト情報が少なすぎます。スキャンPDFの可能性があります。";
+    }
+
+    return res.json({ ok: true, ...result });
+  }
+
+  // Legacy Logic
+  const { pdfUrl } = body;
 
   try {
     const { buffer, sourceType, htmlText } = await getPdfBufferFromRequest(req, { pdfUrl });
@@ -845,6 +1016,8 @@ async function handleExtract(req, res) {
     const productHint = "";
 
     if (sourceType === "pdf") {
+      // Server-side PDF extraction (fallback)
+      // Note: aiExtractFromPdfFile uses pdf-parse now
       const data = await aiExtractFromPdfFile({ pdfBuffer: buffer, fileName, modelHint, productHint });
       return res.status(200).json(data);
     } else {
