@@ -53,7 +53,7 @@ function setBusy(on, title = "処理中", step = "", msg = "処理していま�
   // 入力をまとめて無効化（二重押し防止）
   const disableIds = [
     "pdfInput", "dropzone", "pdfUrlInput", "btnExtract", "btnGenerate",
-    "lblLiion", "lblLegal", "modelInput", "productInput"
+    "lblLiion", "lblLegal", "modelInput", "productInput", "forceVision"
   ];
   for (const id of disableIds) {
     const el = $(id);
@@ -81,6 +81,22 @@ function normalizeText(v) {
   if (typeof v === "string") return v;
   // [object Object] 対策：絶対にオブジェクトをそのまま表示しない
   try { return JSON.stringify(v); } catch { return String(v); }
+}
+
+function analyzeTextQuality(text) {
+  const raw = text || "";
+  const compact = raw.replace(/\s/g, "");
+  const total = compact.length || 1;
+  const jpMatches = compact.match(/[\u3040-\u30ff\u3400-\u9fff]/g) || [];
+  const tofuMatches = compact.match(/[□■�]/g) || [];
+  const uniqueRatio = new Set(compact).size / total;
+
+  return {
+    total,
+    jpRatio: jpMatches.length / total,
+    tofuRatio: tofuMatches.length / total,
+    uniqueRatio
+  };
 }
 
 function capList(list, max = MAX_AI_ITEMS) {
@@ -327,7 +343,7 @@ async function loadMeta() {
 
 
 // ===== Client-Side PDF Extraction =====
-async function extractPdfData(arrayBuffer) {
+async function extractPdfData(arrayBuffer, { forceVision = false } = {}) {
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(arrayBuffer),
     disableWorker: false // Worker is loaded in HTML
@@ -347,23 +363,30 @@ async function extractPdfData(arrayBuffer) {
   }
 
   // 2. Vision Fallback (if text is sparse)
-  // Threshold: less than 100 characters of meaningful text
+  // Threshold: less than 100 characters of meaningful text or garbage-like text
   const cleanText = fullText.replace(/\s/g, "");
+  const quality = analyzeTextQuality(fullText);
   const images = [];
 
-  if (cleanText.length < 100) {
+  const isSparse = cleanText.length < 100;
+  const isGarbage = quality.jpRatio < 0.05 || quality.tofuRatio > 0.1 || quality.uniqueRatio < 0.15;
+
+  if (forceVision || isSparse || isGarbage) {
     // Render pages to images for Vision API
-    // Intelligent selection: First 5 pages (Intro/Contents/Accs) + Last 2 pages (Specs/Warranty)
+    // Intelligent selection:
+    // - If <= 20 pages, render all pages.
+    // - Otherwise, First 5 pages (Intro/Contents/Accs) + Last 5 pages (Specs/Warranty)
     const totalPages = pdf.numPages;
     const pagesToRender = new Set();
 
-    // First 5 pages
-    for (let i = 1; i <= Math.min(totalPages, 5); i++) pagesToRender.add(i);
+    if (totalPages <= 20) {
+      for (let i = 1; i <= totalPages; i++) pagesToRender.add(i);
+    } else {
+      // First 5 pages
+      for (let i = 1; i <= Math.min(totalPages, 5); i++) pagesToRender.add(i);
 
-    // Last 2 pages (if not already added)
-    if (totalPages > 5) {
-      pagesToRender.add(totalPages);
-      if (totalPages > 1) pagesToRender.add(totalPages - 1);
+      // Last 5 pages (if not already added)
+      for (let i = Math.max(1, totalPages - 4); i <= totalPages; i++) pagesToRender.add(i);
     }
 
     // Render selected pages
@@ -417,6 +440,7 @@ async function runExtract() {
 
     const modelHint = $("modelInput").value.trim();
     const productHint = $("productInput").value.trim();
+    const forceVision = !!$("forceVision")?.checked;
 
     let pdfBuffer;
     let fileName = "manual.pdf";
@@ -438,11 +462,12 @@ async function runExtract() {
     $("overlayBar").style.width = "40%";
     $("overlayStep").textContent = "データ抽出";
 
-    // Check Force Vision UI
-    const forceVision = $("forceVisionEnv")?.checked || false;
+// 2. Client-Side Extraction
+const forceVision = $("forceVisionEnv")?.checked || false;
+const { text, images, usedVision } = await extractPdfData(pdfBuffer, { forceVision });
 
-    // 2. Client-Side Extraction (Improved)
-    const { text, images, usedVision } = await extractPdfData(pdfBuffer, forceVision);
+
+
 
     if (usedVision) {
       setBusy(true, "AI抽出中(画像)", "送信", "画像データからAI解析を行っています...", "画像マニュアルのため時間がかかります。");
