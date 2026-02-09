@@ -4,7 +4,7 @@
 // op=generate : テンプレExcelへ差し込み → 余計なシート削除 → 書体/サイズ/揃え調整 → base64で返す
 
 const ExcelJS = require("exceljs");
-const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+const pdfParse = require("pdf-parse");
 const logger = require("./utils/logger");
 const openaiClient = require("./utils/openai-client");
 
@@ -465,22 +465,15 @@ async function aiExtractFromSourceText({ sourceText, fileName, modelHint, produc
 }
 
 async function extractPdfTextFromBuffer(pdfBuffer) {
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(pdfBuffer),
-    disableWorker: true,
-    useSystemFonts: true,
-  });
-  const pdf = await loadingTask.promise;
-  const pages = [];
-  for (let pageNum = 1; pageNum <= pdf.numPages; pageNum += 1) {
-    const page = await pdf.getPage(pageNum);
-    const content = await page.getTextContent();
-    const textItems = content.items
-      .map((item) => (item && typeof item.str === "string" ? item.str : ""))
-      .filter(Boolean);
-    pages.push(textItems.join(" "));
+  // Use pdf-parse for more stable text extraction in serverless environment
+  // pdfjs-dist requires worker setup which often fails in Vercel
+  try {
+    const data = await pdfParse(pdfBuffer);
+    return data.text;
+  } catch (e) {
+    deps.logger.warn("inspection", "pdf-parse failed, returning empty text", { error: e.message });
+    return "";
   }
-  return pages.join("\n");
 }
 
 // ===== AI extract from PDF file =====
