@@ -53,7 +53,7 @@ function setBusy(on, title = "処理中", step = "", msg = "処理していま�
   // 入力をまとめて無効化（二重押し防止）
   const disableIds = [
     "pdfInput", "dropzone", "pdfUrlInput", "btnExtract", "btnGenerate",
-    "lblLiion", "lblLegal", "modelInput", "productInput"
+    "lblLiion", "lblLegal", "modelInput", "productInput", "forceVision"
   ];
   for (const id of disableIds) {
     const el = $(id);
@@ -343,7 +343,7 @@ async function loadMeta() {
 
 
 // ===== Client-Side PDF Extraction =====
-async function extractPdfData(arrayBuffer) {
+async function extractPdfData(arrayBuffer, { forceVision = false } = {}) {
   const loadingTask = pdfjsLib.getDocument({
     data: new Uint8Array(arrayBuffer),
     disableWorker: false // Worker is loaded in HTML
@@ -440,6 +440,7 @@ async function runExtract() {
 
     const modelHint = $("modelInput").value.trim();
     const productHint = $("productInput").value.trim();
+    const forceVision = !!$("forceVision")?.checked;
 
     let pdfBuffer;
     let fileName = "manual.pdf";
@@ -461,10 +462,14 @@ async function runExtract() {
     $("overlayBar").style.width = "40%";
     $("overlayStep").textContent = "データ抽出";
 
-    // 2. Client-Side Extraction
-    const { text, images } = await extractPdfData(pdfBuffer);
+// 2. Client-Side Extraction
+const forceVision = $("forceVisionEnv")?.checked || false;
+const { text, images, usedVision } = await extractPdfData(pdfBuffer, { forceVision });
 
-    if (images.length > 0) {
+
+
+
+    if (usedVision) {
       setBusy(true, "AI抽出中(画像)", "送信", "画像データからAI解析を行っています...", "画像マニュアルのため時間がかかります。");
     } else {
       setBusy(true, "AI抽出中(テキスト)", "送信", "テキストデータからAI解析を行っています...", "サーバーへ送信中。");
@@ -472,9 +477,10 @@ async function runExtract() {
     $("overlayBar").style.width = "60%";
 
     // 3. Send to API
+    // 3. Send to API
     const payload = {
-      text,
-      images,
+      text: usedVision ? "" : text,
+      images: usedVision ? images : [],
       fileName,
       modelHint,
       productHint
