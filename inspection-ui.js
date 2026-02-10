@@ -462,9 +462,9 @@ async function runExtract() {
     $("overlayBar").style.width = "40%";
     $("overlayStep").textContent = "データ抽出";
 
-// 2. Client-Side Extraction
-const forceVision = $("forceVisionEnv")?.checked || false;
-const { text, images, usedVision } = await extractPdfData(pdfBuffer, { forceVision });
+    // 2. Client-Side Extraction
+    const forceVision = $("forceVisionEnv")?.checked || false;
+    const { text, images, usedVision } = await extractPdfData(pdfBuffer, { forceVision });
 
 
 
@@ -496,7 +496,7 @@ const { text, images, usedVision } = await extractPdfData(pdfBuffer, { forceVisi
       // 画面反映
       renderOpGroups("specList", [{ title: "", items: r.specs }]);
       renderOpGroups("opList", r.ops);
-      renderCheckboxList("accList", r.accs, { defaultChecked: true });
+      renderCheckboxList("accList", r.accs);
 
       $("modelInput").value = r.model || "";
       $("productInput").value = r.productName || "";
