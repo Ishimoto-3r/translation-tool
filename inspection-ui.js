@@ -490,7 +490,7 @@ async function runExtract() {
       // 画面反映
       renderOpGroups("specList", [{ title: "", items: r.specs }]);
       renderOpGroups("opList", r.ops);
-      renderCheckboxList("accList", r.accs);
+      renderCheckboxList("accList", r.accs, { defaultChecked: true });
 
       $("modelInput").value = r.model || "";
       $("productInput").value = r.productName || "";
