@@ -23,6 +23,33 @@ const config = {
     }
 };
 
+let cachedFontBytes = null;
+
+async function getFontBytes() {
+    if (cachedFontBytes) return cachedFontBytes;
+
+    const fontPath = path.join(process.cwd(), "api", "fonts", "NotoSansSC-Regular.woff2");
+    // Try local
+    try {
+        if (fs.existsSync(fontPath)) {
+            deps.logger.debug("pdftranslate", "Loading font from local file", { fontPath });
+            cachedFontBytes = fs.readFileSync(fontPath);
+            return cachedFontBytes;
+        }
+    } catch (e) {
+        deps.logger.warn("pdftranslate", "Local font load failed", { error: e.message });
+    }
+
+    // Fallback: Fetch from CDN
+    deps.logger.info("pdftranslate", "Fetching font from CDN (Google Fonts)...");
+    const url = "https://github.com/google/fonts/raw/main/ofl/notosanssc/NotoSansSC-Regular.ttf";
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Font fetch failed: ${res.status} ${res.statusText}`);
+    const ab = await res.arrayBuffer();
+    cachedFontBytes = Buffer.from(ab);
+    return cachedFontBytes;
+}
+
 async function handler(req, res) {
     // CORS設定
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -93,15 +120,8 @@ async function handler(req, res) {
         }
         deps.logger.debug("pdftranslate", `Target: ${targetLang}`);
 
-        // フォント読み込み
-        const fontPath = path.join(process.cwd(), "api", "fonts", "NotoSansSC-Regular.woff2");
-        deps.logger.debug("pdftranslate", "Loading font from:", { fontPath });
-
-        if (!fs.existsSync(fontPath)) {
-            throw new Error(`Font file not found: ${fontPath}`);
-        }
-
-        const fontBytes = fs.readFileSync(fontPath);
+        // フォント読み込み（堅牢化：ローカル -> CDNフォールバック）
+        const fontBytes = await getFontBytes();
 
         // PDF作成
         const pdfDoc = await PDFDocument.create();

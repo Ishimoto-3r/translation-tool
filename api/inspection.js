@@ -14,6 +14,19 @@ const deps = {
   openaiClient
 };
 
+// ===== Config =====
+const DEFAULT_MODEL = "gpt-4o";
+const DEFAULT_REASONING = "medium";
+const DEFAULT_VERBOSITY = "low";
+
+function getModelConfig() {
+  return {
+    MODEL: process.env.MODEL_MANUAL_CHECK || process.env.OPENAI_MODEL || DEFAULT_MODEL,
+    REASONING: process.env.MANUAL_CHECK_REASONING || DEFAULT_REASONING,
+    VERBOSITY: process.env.MANUAL_CHECK_VERBOSITY || DEFAULT_VERBOSITY,
+  };
+}
+
 const handler = async (req, res) => {
   try {
     const op = (req.query?.op ?? "").toString();
@@ -402,9 +415,7 @@ async function getSelectionItemsFromTemplate() {
 const { INSPECTION_PROMPTS } = require("./utils/prompts");
 
 async function aiExtractFromSourceText({ sourceText, fileName, modelHint, productHint }) {
-  const MODEL = process.env.MODEL_MANUAL_CHECK || process.env.OPENAI_MODEL || "gpt-4o";
-  const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
-  const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
+  const { MODEL, REASONING, VERBOSITY } = getModelConfig();
 
   deps.logger.info("inspection", `Calling AI Extract (SourceText) for ${fileName}, model=${MODEL}`);
 
@@ -467,21 +478,22 @@ async function aiExtractFromSourceText({ sourceText, fileName, modelHint, produc
 
 async function extractPdfTextFromBuffer(pdfBuffer) {
   // Use pdf-parse for more stable text extraction in serverless environment
-  // pdfjs-dist requires worker setup which often fails in Vercel
+  // Throw error if failed (to avoid empty AI request)
   try {
     const data = await pdfParse(pdfBuffer);
+    if (!data || !data.text) {
+      throw new Error("PDF parsing returned no text");
+    }
     return data.text;
   } catch (e) {
-    deps.logger.warn("inspection", "pdf-parse failed, returning empty text", { error: e.message });
-    return "";
+    deps.logger.error("inspection", "pdf-parse failed", { error: e.message });
+    throw e;
   }
 }
 
 // ===== AI extract from PDF file =====
 async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHint }) {
-  const MODEL = process.env.MODEL_MANUAL_CHECK || process.env.OPENAI_MODEL || "gpt-4o";
-  const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
-  const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
+  const { MODEL, REASONING, VERBOSITY } = getModelConfig();
 
   const sys = `
 あなたは取扱説明書（日本語）の内容から、検品リスト作成に必要な情報を抽出します。
@@ -542,6 +554,11 @@ async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHin
   // 安全策：PDFからテキスト抽出して、それを送る。
 
   const extractedText = await extractPdfTextFromBuffer(pdfBuffer);
+
+  if (!extractedText || extractedText.trim().length < 50) {
+    throw new Error("PDFからテキストを抽出できませんでした（スキャンPDFの可能性があります）。");
+  }
+
   // 文字数制限
   const truncatedText = extractedText.slice(0, 60000);
 
@@ -609,9 +626,7 @@ ${user.trim()}
 
 // ===== AI extract from Images (Vision) =====
 async function aiExtractFromImages({ images, fileName, modelHint, productHint }) {
-  const MODEL = process.env.MODEL_MANUAL_CHECK || process.env.OPENAI_MODEL || "gpt-4o";
-  const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
-  const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
+  const { MODEL, REASONING, VERBOSITY } = getModelConfig();
 
   const sys = `
 あなたは取扱説明書（画像）の内容から、検品リスト作成に必要な情報を抽出します。
