@@ -50,15 +50,12 @@ async function getFontBytes() {
     return cachedFontBytes;
 }
 
-async function handler(req, res) {
-    // CORS設定
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
 
-    if (req.method === "OPTIONS") {
-        return res.status(200).end();
-    }
+async function handler(req, res) {
+    // CORS処理（共通ヘルパー利用）
+    if (handleCorsPreFlight(req, res)) return;
+    setCorsHeaders(res);
 
     if (req.method !== "POST") {
         return res.status(405).json({ error: "Method not allowed" });

@@ -1,9 +1,11 @@
-module.exports = async (req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+const logger = require("./utils/logger");
+const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
+module.exports = async (req, res) => {
+  // CORS処理（共通ヘルパー利用）
+  if (handleCorsPreFlight(req, res)) return;
+  setCorsHeaders(res);
+
   if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
 
   try {
@@ -33,21 +35,21 @@ module.exports = async (req, res) => {
     if (text) content.push({ type: 'input_text', text });
     for (const url of imgUrls) content.push({ type: 'input_image', image_url: url });
 
-const body = {
-  model: useModel,
-  input: [
-    {
-      role: 'system',
-      content: '出力はMarkdown記号（#、*、-、** など）を使わず、プレーンテキストのみで記述してください。'
-    },
-    {
-      role: 'user',
-      content
-    }
-  ],
-  text: { verbosity: useVerbosity },
-  stream: true,
-};
+    const body = {
+      model: useModel,
+      input: [
+        {
+          role: 'system',
+          content: '出力はMarkdown記号（#、*、-、** など）を使わず、プレーンテキストのみで記述してください。'
+        },
+        {
+          role: 'user',
+          content
+        }
+      ],
+      text: { verbosity: useVerbosity },
+      stream: true,
+    };
 
 
     if (useModel === 'gpt-5.2') {
