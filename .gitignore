@@ -42,3 +42,6 @@ final_*.pdf
 *.swp
 *.swo
 *~
+
+.vercel
+.env*.local

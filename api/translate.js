@@ -36,6 +36,7 @@ async function handler(req, res) {
       error: "UnknownOp",
       detail: `Unknown op: ${op}`,
     });
+
   } catch (e) {
     deps.logger.error("translate", "Unexpected error", { error: e.message });
     return res.status(500).json({

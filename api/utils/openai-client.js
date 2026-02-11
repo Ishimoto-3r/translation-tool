@@ -11,10 +11,11 @@ class OpenAIClient {
     constructor() {
         const apiKey = process.env.OPENAI_API_KEY;
         if (!apiKey) {
-            logger.error("OpenAI", "OPENAI_API_KEY is not set");
-            // ここでthrowせず、呼び出し時にエラーハンドリングさせる設計
+            logger.error("OpenAI", "OPENAI_API_KEY is not set (Delayed initialization)");
+            this.client = null;
+        } else {
+            this.client = new OpenAI({ apiKey });
         }
-        this.client = new OpenAI({ apiKey });
     }
 
     /**
@@ -55,6 +56,13 @@ class OpenAIClient {
 
         try {
             logger.info("OpenAI", `Calling API with model: ${requestModel}, jsonMode: ${jsonMode}`);
+
+            if (!this.client) {
+                const apiKey = process.env.OPENAI_API_KEY;
+                if (!apiKey) throw new Error("OPENAI_API_KEY_MISSING");
+                this.client = new OpenAI({ apiKey });
+            }
+
             const response = await this.client.chat.completions.create(options);
             return response;
         } catch (error) {

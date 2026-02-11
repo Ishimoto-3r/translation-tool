@@ -612,10 +612,10 @@ async function handleGenerate(req, res) {
 
 // ===== main handler =====
 async function handler(req, res) {
-  // 最低限のCORS
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  // CORS処理（共通ヘルパー利用）
+  const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
+  if (handleCorsPreFlight(req, res)) return;
+  setCorsHeaders(res);
 
   if (req.method === "OPTIONS") return res.status(200).end();
 

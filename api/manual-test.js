@@ -1,7 +1,7 @@
 // api/manual-test.js
-import xlsx from "xlsx";
+const xlsx = require("xlsx");
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   try {
     // 1) Azure AD でアクセストークン取得
     const tenantId = process.env.MANUAL_TENANT_ID;
@@ -80,9 +80,9 @@ export default async function handler(req, res) {
     // 追加列: 「ジャンル名」「ジャンル表示順」「ジャンル内表示順」「ジャンル表示対象外」
     const rows = mainJson
       .map((row, idx) => {
-        const label    = row["ラベル"] ?? "";
+        const label = row["ラベル"] ?? "";
         const category = row["項目名"] ?? "";
-        const content  = row["内容"] ?? "";
+        const content = row["内容"] ?? "";
 
         // ★ UI 用のジャンル情報
         const uiGenre = row["ジャンル名"] ?? "";
@@ -182,3 +182,5 @@ export default async function handler(req, res) {
     });
   }
 }
+
+module.exports = handler;

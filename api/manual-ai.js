@@ -1,5 +1,12 @@
 // api/manual-ai.js
-const OpenAI = require("openai");
+const logger = require("./utils/logger");
+const openaiClient = require("./utils/openai-client");
+
+// 依存関係コンテナ（テスト用）
+const deps = {
+  logger,
+  openaiClient,
+};
 
 const MODEL_MANUAL_CHECK =
   process.env.MODEL_MANUAL_CHECK ||
@@ -13,10 +20,6 @@ const MANUAL_CHECK_VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
 
 const MANUAL_IMAGE_REASONING = process.env.MANUAL_IMAGE_REASONING || "none";
 const MANUAL_IMAGE_VERBOSITY = process.env.MANUAL_IMAGE_VERBOSITY || "low";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -81,7 +84,8 @@ module.exports = async function handler(req, res) {
         { role: "user", content: userContent },
       ];
 
-      const completion = await client.chat.completions.create({
+      deps.logger.info("manual-ai", `media-manual: model=${MODEL_MANUAL_IMAGE}, images=${images.length}`);
+      const completion = await deps.openaiClient.chatCompletion({
         model: MODEL_MANUAL_IMAGE,
         messages,
       });
@@ -119,20 +123,22 @@ module.exports = async function handler(req, res) {
 
     const isCheck = (mode || "check") === "check";
 
-    const completion = await client.chat.completions.create({
+    deps.logger.info("manual-ai", `${isCheck ? "check" : "image"}: model=${isCheck ? MODEL_MANUAL_CHECK : MODEL_MANUAL_IMAGE}`);
+    const completion = await deps.openaiClient.chatCompletion({
       model: isCheck ? MODEL_MANUAL_CHECK : MODEL_MANUAL_IMAGE,
       messages,
     });
 
-
     const text = completion.choices[0]?.message?.content ?? "";
     return res.status(200).json({ text });
   } catch (err) {
-    console.error(err);
+    deps.logger.error("manual-ai", "Unexpected error", { error: err.message });
     return res.status(500).json({
       error: "OpenAIError",
-      detail: String(err),
+      detail: String(err?.message || err),
     });
   }
 }
+
+module.exports._deps = deps;
 
