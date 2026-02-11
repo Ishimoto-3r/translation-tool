@@ -26,22 +26,11 @@ const mockWorkbook = {
     eachSheet: jest.fn() // generateExcelで使用
 };
 
-const mockPDFPage = {
-    getTextContent: jest.fn().mockResolvedValue({
-        items: [{ str: "Test PDF Content" }]
-    })
-};
-
-const mockPDFDocument = {
-    numPages: 1,
-    getPage: jest.fn().mockResolvedValue(mockPDFPage)
-};
-
-const mockPDFJS = {
-    getDocument: jest.fn().mockReturnValue({
-        promise: Promise.resolve(mockPDFDocument)
-    })
-};
+// pdf-parse モック（実装が pdfjs-dist ではなく pdf-parse を使用しているため）
+// extractPdfTextFromBuffer内で50文字未満はエラーとなるため、十分な長さのテキストを返す
+const mockPdfParse = jest.fn().mockResolvedValue({
+    text: "Test PDF Content - This is a dummy manual document with specifications, operations, and accessories for inspection list generation testing purposes."
+});
 
 // モジュールモック
 jest.mock('exceljs', () => {
@@ -50,7 +39,7 @@ jest.mock('exceljs', () => {
     };
 });
 
-jest.mock('pdfjs-dist/legacy/build/pdf.js', () => mockPDFJS);
+jest.mock('pdf-parse', () => mockPdfParse);
 
 // fetchのグローバルモック
 global.fetch = jest.fn();
@@ -165,7 +154,7 @@ describe('検品リスト作成ツール (inspection.js)', () => {
         expect(res._getStatusCode()).toBe(200);
         const data = JSON.parse(res._getData());
         expect(data.model).toBe("Model-123");
-        expect(mockPDFJS.getDocument).toHaveBeenCalled();
+        expect(mockPdfParse).toHaveBeenCalled();
         expect(mockOpenAIClient.chatCompletion).toHaveBeenCalled();
     });
 
@@ -211,8 +200,8 @@ describe('検品リスト作成ツール (inspection.js)', () => {
         const data = JSON.parse(res._getData());
         // extraction logic uses mockOpenAIClient, which returns standard result
         expect(data.model).toBe("Model-123");
-        // HTML path should NOT call PDFJS
-        expect(mockPDFJS.getDocument).not.toHaveBeenCalled();
+        // HTML path should NOT call pdf-parse
+        expect(mockPdfParse).not.toHaveBeenCalled();
         expect(mockOpenAIClient.chatCompletion).toHaveBeenCalled();
     });
 
@@ -258,7 +247,7 @@ describe('検品リスト作成ツール (inspection.js)', () => {
         expect(res._getStatusCode()).toBe(200);
         const data = JSON.parse(res._getData());
         expect(data.model).toBe("Model-123");
-        expect(mockPDFJS.getDocument).toHaveBeenCalled();
+        expect(mockPdfParse).toHaveBeenCalled();
     });
 
     test('op=extract: 正常系 - JSON-LDからPDFリンク検出', async () => {
@@ -306,7 +295,7 @@ describe('検品リスト作成ツール (inspection.js)', () => {
 
         await handler(req, res);
         expect(res._getStatusCode()).toBe(200);
-        expect(mockPDFJS.getDocument).toHaveBeenCalled();
+        expect(mockPdfParse).toHaveBeenCalled();
     });
 
     // --- op=generate ---
