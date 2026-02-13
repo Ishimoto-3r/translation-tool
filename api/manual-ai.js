@@ -1,6 +1,6 @@
 // api/manual-ai.js
-const logger = require("./utils/logger");
-const openaiClient = require("./utils/openai-client");
+const logger = require("../lib/logger");
+const openaiClient = require("../lib/openai-client");
 
 // 依存関係コンテナ（テスト用）
 const deps = {
@@ -50,7 +50,7 @@ module.exports = async function handler(req, res) {
     //   images: [{ name, dataUrl }, ...]
     // }
     // api/utils/prompts.js からプロンプト定数を取得
-    const { MANUAL_AI_PROMPTS } = require("./utils/prompts");
+    const { MANUAL_AI_PROMPTS } = require("../lib/prompts");
 
     // 返却は { text } に統一（フロント互換）
     if ((mode || "") === "media-manual") {

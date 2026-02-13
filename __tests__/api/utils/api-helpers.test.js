@@ -1,5 +1,5 @@
 const nodeMocks = require('node-mocks-http');
-const { handleCorsPreFlight, setCorsHeaders, validatePostMethod, sendErrorResponse, getRequiredEnvVar } = require('../../../api/utils/api-helpers');
+const { handleCorsPreFlight, setCorsHeaders, validatePostMethod, sendErrorResponse, getRequiredEnvVar } = require('../../../lib/api-helpers');
 
 describe('API Helpers (api-helpers.js)', () => {
 

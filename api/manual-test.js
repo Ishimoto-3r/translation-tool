@@ -1,7 +1,7 @@
 // api/manual-test.js
 const xlsx = require("xlsx");
-const logger = require("./utils/logger");
-const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
+const logger = require("../lib/logger");
+const { handleCorsPreFlight, setCorsHeaders } = require("../lib/api-helpers");
 
 async function handler(req, res) {
   // CORS preflight処理（他APIと統一）

@@ -6,9 +6,9 @@
 
 const xlsx = require("xlsx");
 const ExcelJS = require("exceljs");
-const logger = require("./utils/logger");
-const openaiClient = require("./utils/openai-client");
-const { getAccessToken } = require("./utils/api-helpers");
+const logger = require("../lib/logger");
+const openaiClient = require("../lib/openai-client");
+const { getAccessToken } = require("../lib/api-helpers");
 
 // 依存関係コンテナ
 const deps = {
@@ -588,7 +588,7 @@ async function handleGenerate(req, res) {
 // ===== main handler =====
 async function handler(req, res) {
   // CORS処理（共通ヘルパー利用）
-  const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
+  const { handleCorsPreFlight, setCorsHeaders } = require("../lib/api-helpers");
   if (handleCorsPreFlight(req, res)) return;
   setCorsHeaders(res);
 

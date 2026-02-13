@@ -5,9 +5,9 @@
 
 const ExcelJS = require("exceljs");
 const pdfParse = require("pdf-parse");
-const logger = require("./utils/logger");
-const openaiClient = require("./utils/openai-client");
-const { getAccessToken } = require("./utils/api-helpers");
+const logger = require("../lib/logger");
+const openaiClient = require("../lib/openai-client");
+const { getAccessToken } = require("../lib/api-helpers");
 
 // 依存関係コンテナ
 const deps = {
@@ -387,7 +387,7 @@ async function getSelectionItemsFromTemplate() {
 
 // ===== AI extract =====
 // api/utils/prompts.js からプロンプト定数を取得
-const { INSPECTION_PROMPTS } = require("./utils/prompts");
+const { INSPECTION_PROMPTS } = require("../lib/prompts");
 
 async function aiExtractFromSourceText({ sourceText, fileName, modelHint, productHint }) {
   const { MODEL, REASONING, VERBOSITY } = getModelConfig();

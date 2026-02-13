@@ -5,8 +5,8 @@ const { PDFDocument, rgb } = require("pdf-lib");
 const fs = require("fs");
 const path = require("path");
 const fontkit = require("@pdf-lib/fontkit");
-const logger = require("./utils/logger");
-const openaiClient = require("./utils/openai-client");
+const logger = require("../lib/logger");
+const openaiClient = require("../lib/openai-client");
 
 // 依存関係コンテナ
 const deps = {
@@ -50,7 +50,7 @@ async function getFontBytes() {
     return cachedFontBytes;
 }
 
-const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
+const { handleCorsPreFlight, setCorsHeaders } = require("../lib/api-helpers");
 
 async function handler(req, res) {
     // CORS処理（共通ヘルパー利用）
@@ -368,7 +368,7 @@ function wrapText(text, font, fontSize, maxWidth) {
 }
 
 // api/utils/prompts.js からプロンプト定数を取得
-const { PDF_TRANSLATE_PROMPTS } = require("./utils/prompts");
+const { PDF_TRANSLATE_PROMPTS } = require("../lib/prompts");
 
 // Vision APIで翻訳（テキストのみ取得、bbox禁止）
 async function translateImageWithVision(imageDataUrl, targetLang) {

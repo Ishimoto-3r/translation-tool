@@ -1,7 +1,7 @@
 // api/translate.js (CommonJS)
-const logger = require("./utils/logger");
-const openaiClient = require("./utils/openai-client");
-const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
+const logger = require("../lib/logger");
+const openaiClient = require("../lib/openai-client");
+const { handleCorsPreFlight, setCorsHeaders } = require("../lib/api-helpers");
 
 // 依存関係コンテナ（テスト時にモックと差し替え可能にするため）
 const deps = {

@@ -16,7 +16,7 @@ jest.mock('openai', () => {
 });
 
 // utils/prompts モック
-jest.mock('../../api/utils/prompts', () => ({
+jest.mock('../../lib/prompts', () => ({
     MANUAL_AI_PROMPTS: {
         MEDIA_MANUAL_SYSTEM: "SysPrompt",
         MEDIA_MANUAL_USER_TEMPLATE: jest.fn((notes, gran, count) => `UserText: ${notes} ${gran} ${count}`)

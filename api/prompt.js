@@ -1,5 +1,5 @@
-const logger = require("./utils/logger");
-const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
+const logger = require("../lib/logger");
+const { handleCorsPreFlight, setCorsHeaders } = require("../lib/api-helpers");
 
 module.exports = async (req, res) => {
   // CORS処理（共通ヘルパー利用）

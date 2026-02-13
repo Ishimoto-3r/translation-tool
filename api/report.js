@@ -1,7 +1,7 @@
 // api/report.js (CommonJS統一版)
-const logger = require('./utils/logger');
-const openaiClient = require('./utils/openai-client');
-const { handleCorsPreFlight, validatePostMethod, sendErrorResponse, sendSuccessResponse } = require('./utils/api-helpers');
+const logger = require('../lib/logger');
+const openaiClient = require('../lib/openai-client');
+const { handleCorsPreFlight, validatePostMethod, sendErrorResponse, sendSuccessResponse } = require('../lib/api-helpers');
 
 // 依存関係コンテナ（テスト用）
 const deps = {

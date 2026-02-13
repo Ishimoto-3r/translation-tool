@@ -26,7 +26,7 @@ jest.mock('@pdf-lib/fontkit', () => ({
     register: jest.fn()
 }));
 
-jest.mock('../../api/utils/openai-client', () => ({
+jest.mock('../../lib/openai-client', () => ({
     chatCompletion: jest.fn()
 }));
 
@@ -59,7 +59,7 @@ beforeEach(() => {
 
     // OpenAI Client
     // jest.mockで定義済みなのでrequireしてmockを取得
-    mockOpenAIClient = require('../../api/utils/openai-client');
+    mockOpenAIClient = require('../../lib/openai-client');
     mockOpenAIClient.chatCompletion.mockReset();
 
     // fs (Node標準モジュール)
