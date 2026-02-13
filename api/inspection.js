@@ -7,7 +7,7 @@ const ExcelJS = require("exceljs");
 const pdfParse = require("pdf-parse");
 const logger = require("./utils/logger");
 const openaiClient = require("./utils/openai-client");
-const { getAccessToken } = require("./utils/graph-auth");
+const { getAccessToken } = require("./utils/api-helpers");
 
 // 依存関係コンテナ
 const deps = {
