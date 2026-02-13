@@ -8,6 +8,7 @@ const xlsx = require("xlsx");
 const ExcelJS = require("exceljs");
 const logger = require("./utils/logger");
 const openaiClient = require("./utils/openai-client");
+const { getAccessToken } = require("./utils/graph-auth");
 
 // 依存関係コンテナ
 const deps = {
@@ -21,33 +22,7 @@ const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
 const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
 
 // ===== SharePoint (Microsoft Graph) =====
-async function getAccessToken() {
-  const tenantId = process.env.MANUAL_TENANT_ID;
-  const clientId = process.env.MANUAL_CLIENT_ID;
-  const clientSecret = process.env.MANUAL_CLIENT_SECRET;
-
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error("ConfigError: MANUAL_TENANT_ID / MANUAL_CLIENT_ID / MANUAL_CLIENT_SECRET が不足");
-  }
-
-  const tokenRes = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: "https://graph.microsoft.com/.default",
-        grant_type: "client_credentials",
-      }),
-    }
-  );
-
-  const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) throw new Error("TokenError: " + JSON.stringify(tokenData));
-  return tokenData.access_token;
-}
+// getAccessToken() は api/utils/graph-auth.js に共通化済み
 
 async function downloadExcelBufferFromSharePoint() {
   // DEBUG: Mainで何が入っているか確認（秘密情報は表示しない）

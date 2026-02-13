@@ -7,6 +7,7 @@ const ExcelJS = require("exceljs");
 const pdfParse = require("pdf-parse");
 const logger = require("./utils/logger");
 const openaiClient = require("./utils/openai-client");
+const { getAccessToken } = require("./utils/graph-auth");
 
 // 依存関係コンテナ
 const deps = {
@@ -237,33 +238,7 @@ async function getPdfBufferFromRequest(req, { pdfUrl }) {
 }
 
 // ===== Graph token =====
-async function getAccessToken() {
-  const tenantId = process.env.MANUAL_TENANT_ID;
-  const clientId = process.env.MANUAL_CLIENT_ID;
-  const clientSecret = process.env.MANUAL_CLIENT_SECRET;
-
-  if (!tenantId || !clientId || !clientSecret) {
-    throw new Error("ConfigError: MANUAL_TENANT_ID / MANUAL_CLIENT_ID / MANUAL_CLIENT_SECRET が不足");
-  }
-
-  const tokenRes = await fetch(
-    `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        scope: "https://graph.microsoft.com/.default",
-        grant_type: "client_credentials",
-      }),
-    }
-  );
-
-  const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) throw new Error("TokenError: " + JSON.stringify(tokenData));
-  return tokenData.access_token;
-}
+// getAccessToken() は api/utils/graph-auth.js に共通化済み
 
 // ===== Template download =====
 // 優先：INSPECTION_TEMPLATE_URL（Shareリンク）

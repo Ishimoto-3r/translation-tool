@@ -1,7 +1,13 @@
 // api/manual-test.js
 const xlsx = require("xlsx");
+const logger = require("./utils/logger");
+const { handleCorsPreFlight, setCorsHeaders } = require("./utils/api-helpers");
 
 async function handler(req, res) {
+  // CORS preflight処理（他APIと統一）
+  if (handleCorsPreFlight(req, res)) return;
+  setCorsHeaders(res);
+
   try {
     // 1) Azure AD でアクセストークン取得
     const tenantId = process.env.MANUAL_TENANT_ID;
@@ -155,15 +161,7 @@ async function handler(req, res) {
         .filter((x) => x);
     }
 
-    console.log(
-      "[manual-test] parsed:",
-      "rows=",
-      rows.length,
-      "templates=",
-      templates.length,
-      "termRules=",
-      termRules.length
-    );
+    logger.info("manual-test", `parsed: rows=${rows.length}, templates=${templates.length}, termRules=${termRules.length}`);
 
     return res.status(200).json({
       message: "Excel parsed successfully",
@@ -175,7 +173,7 @@ async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error(err);
+    logger.error("manual-test", "Unexpected error", { error: err.toString() });
     return res.status(500).json({
       error: "UnexpectedError",
       detail: err.toString(),
