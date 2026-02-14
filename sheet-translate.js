@@ -77,7 +77,7 @@ async function loadExcelFile(file) {
       cb.type = "checkbox";
       cb.value = sheet.name;
       cb.checked = true; // デフォルトで全選択
-      cb.style.cssText = "margin:0; cursor:pointer;";
+      cb.style.cssText = "width:auto; margin:0; margin-right:6px; cursor:pointer; vertical-align:middle;";
       label.appendChild(cb);
       label.appendChild(document.createTextNode(sheet.name));
       checklist.appendChild(label);
