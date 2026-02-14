@@ -416,6 +416,15 @@ async function applyTranslationsToZip(zip, sheetPath, cellRefs, translations) {
 
   zip.file(sheetPath, sheetXml);
   console.log("[ZIP-DEBUG] 翻訳テキスト書き込み完了（文字列置換方式）");
+
+  // 診断: drawing要素が残っているか確認
+  const hasDrawing = sheetXml.includes("<drawing");
+  console.log("[ZIP-DEBUG] 翻訳後sheet XMLにdrawing要素:", hasDrawing ? "あり ✓" : "なし ✗");
+  console.log("[ZIP-DEBUG] sheet XML末尾500文字:", sheetXml.slice(-500));
+
+  // 診断: workbook.xmlの最終状態
+  const finalWb = await zip.file("xl/workbook.xml").async("string");
+  console.log("[ZIP-DEBUG] 最終workbook.xml:", finalWb);
 }
 
 // ====== 翻訳対象収集ロジック ======
