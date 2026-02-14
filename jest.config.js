@@ -13,8 +13,6 @@ module.exports = {
   collectCoverageFrom: [
     'api/**/*.js',
     'lib/**/*.js',
-    'app.js',
-    'navigation.js',
     '!**/node_modules/**',
     '!**/*.config.js',
     '!**/*.bak',
