@@ -386,45 +386,36 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
 // ExcelJSを経由しないので、グラフ・図形は一切影響を受けない
 
 async function applyTranslationsToZip(zip, sheetPath, cellRefs, translations) {
-  const sheetXml = await zip.file(sheetPath).async("string");
-  const parser = new DOMParser();
-  const sheetDoc = parser.parseFromString(sheetXml, "application/xml");
-  const ns = sheetDoc.documentElement.namespaceURI;
+  let sheetXml = await zip.file(sheetPath).async("string");
 
-  // 翻訳マップを構築: セルアドレス → 翻訳テキスト
-  const translationMap = {};
   cellRefs.forEach((ref, idx) => {
     const addr = colToLetter(ref.c) + ref.r;
     const transText = (translations[idx] || "").replace(/\|\|\|/g, "\n");
-    translationMap[addr] = transText;
+
+    // XMLエスケープ
+    const escaped = transText
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+    // セル要素を正規表現で検索: <c ...r="ADDR"...>...</c>
+    // ※属性の順序に依存しないパターン
+    const cellRegex = new RegExp(
+      '(<c\\b[^>]*?\\br="' + addr + '")(\\b[^>]*?)>([\\s\\S]*?)</c>',
+      ''
+    );
+
+    sheetXml = sheetXml.replace(cellRegex, (match, prefix, rest) => {
+      // 既存のt="..."属性を除去し、t="inlineStr"を設定
+      const cleanPrefix = prefix.replace(/\s+t="[^"]*"/, "");
+      const cleanRest = rest.replace(/\s+t="[^"]*"/, "");
+      return `${cleanPrefix} t="inlineStr"${cleanRest}><is><t>${escaped}</t></is></c>`;
+    });
   });
 
-  // シートXML内のセルを走査して翻訳テキストを適用
-  const rows = sheetDoc.getElementsByTagNameNS(ns, "row");
-  for (let ri = 0; ri < rows.length; ri++) {
-    const cells = rows[ri].getElementsByTagNameNS(ns, "c");
-    for (let ci = 0; ci < cells.length; ci++) {
-      const cell = cells[ci];
-      const ref = cell.getAttribute("r");
-      if (translationMap[ref] !== undefined) {
-        // セルの既存内容をクリア
-        cell.setAttribute("t", "inlineStr");
-        while (cell.firstChild) cell.removeChild(cell.firstChild);
-
-        // インライン文字列 <is><t>翻訳テキスト</t></is> を作成
-        const is = sheetDoc.createElementNS(ns, "is");
-        const t = sheetDoc.createElementNS(ns, "t");
-        t.textContent = translationMap[ref];
-        is.appendChild(t);
-        cell.appendChild(is);
-      }
-    }
-  }
-
-  // XMLをシリアライズしてZIPに書き戻し
-  const serializer = new XMLSerializer();
-  const updatedXml = serializer.serializeToString(sheetDoc);
-  zip.file(sheetPath, updatedXml);
+  zip.file(sheetPath, sheetXml);
+  console.log("[ZIP-DEBUG] 翻訳テキスト書き込み完了（文字列置換方式）");
 }
 
 // ====== 翻訳対象収集ロジック ======
