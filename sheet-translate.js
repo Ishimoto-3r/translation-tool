@@ -377,6 +377,33 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
     zip.file("[Content_Types].xml", ctXml);
   }
 
+  // 9. docProps/app.xmlのシートメタデータを更新
+  const appXmlPath = "docProps/app.xml";
+  if (zip.file(appXmlPath)) {
+    let appXml = await zip.file(appXmlPath).async("string");
+    console.log("[ZIP-DEBUG] 元のapp.xml:", appXml);
+
+    // TitlesOfPartsのvector sizeを+1し、新シート名を追加
+    appXml = appXml.replace(
+      /(<vt:vector\s+size=")(\d+)("[\s\S]*?baseType="lpstr"[\s\S]*?)([\s\S]*?)(<\/vt:vector>[\s\S]*?<\/TitlesOfParts>)/,
+      (match, prefix, size, mid, items, suffix) => {
+        const newSize = parseInt(size) + 1;
+        return `${prefix}${newSize}${mid}${items}<vt:lpstr>${newSheetName}</vt:lpstr>${suffix}`;
+      }
+    );
+
+    // HeadingPairsのワークシート数を+1
+    appXml = appXml.replace(
+      /(<HeadingPairs>[\s\S]*?<vt:i4>)(\d+)(<\/vt:i4>)/,
+      (match, prefix, count, suffix) => {
+        return `${prefix}${parseInt(count) + 1}${suffix}`;
+      }
+    );
+
+    zip.file(appXmlPath, appXml);
+    console.log("[ZIP-DEBUG] 更新後app.xml:", appXml);
+  }
+
   console.log("[sheet-trans] ZIPレベルでシートを複製しました: " + newSheetName);
   return { zip, newSheetFullPath };
 }
