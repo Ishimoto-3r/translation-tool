@@ -72,7 +72,7 @@ async function loadExcelFile(file) {
     checklist.innerHTML = "";
     workbook.eachSheet((sheet) => {
       const label = document.createElement("label");
-      label.style.cssText = "display:flex; align-items:center; gap:4px; cursor:pointer; padding:4px 8px; border-radius:6px; background:#eef2ff; border:1px solid #c7d2fe; font-size:0.9rem; user-select:none;";
+      label.style.cssText = "display:flex; align-items:center; gap:6px; cursor:pointer; padding:4px 0; font-size:0.9rem; user-select:none;";
       const cb = document.createElement("input");
       cb.type = "checkbox";
       cb.value = sheet.name;
