@@ -384,15 +384,16 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
     console.log("[ZIP-DEBUG] 元のapp.xml:", appXml);
 
     // TitlesOfPartsのvector sizeを+1し、新シート名を追加
+    // ※<TitlesOfParts>をアンカーにして正しいvectorを特定
     appXml = appXml.replace(
-      /(<vt:vector\s+size=")(\d+)("[\s\S]*?baseType="lpstr"[\s\S]*?)([\s\S]*?)(<\/vt:vector>[\s\S]*?<\/TitlesOfParts>)/,
-      (match, prefix, size, mid, items, suffix) => {
+      /(<TitlesOfParts>\s*<vt:vector\s+size=")(\d+)("[\s\S]*?)(<\/vt:vector>\s*<\/TitlesOfParts>)/,
+      (match, prefix, size, mid, suffix) => {
         const newSize = parseInt(size) + 1;
-        return `${prefix}${newSize}${mid}${items}<vt:lpstr>${newSheetName}</vt:lpstr>${suffix}`;
+        return `${prefix}${newSize}${mid}<vt:lpstr>${newSheetName}</vt:lpstr>${suffix}`;
       }
     );
 
-    // HeadingPairsのワークシート数を+1
+    // HeadingPairsのワークシート数を+1（vector sizeは変更しない）
     appXml = appXml.replace(
       /(<HeadingPairs>[\s\S]*?<vt:i4>)(\d+)(<\/vt:i4>)/,
       (match, prefix, count, suffix) => {
