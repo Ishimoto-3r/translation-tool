@@ -1,6 +1,6 @@
 let EXCEL_workbook = null;
 let EXCEL_fileName = null;
-let EXCEL_arrayBuffer = null; // ZIPレベルコピー用に元データを保持
+let EXCEL_arrayBuffer = null; // ZIPレベル処理用に元データを保持
 
 // ====== UI制御系 ======
 function setStatus(message) {
@@ -58,7 +58,7 @@ async function loadExcelFile(file) {
   try {
     EXCEL_fileName = file.name.replace(/\.xlsx$/i, "");
     const arrayBuffer = await file.arrayBuffer();
-    EXCEL_arrayBuffer = arrayBuffer.slice(0); // ZIPレベルコピー用に保持
+    EXCEL_arrayBuffer = arrayBuffer.slice(0); // ZIPレベル処理用に保持
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(arrayBuffer);
     EXCEL_workbook = workbook;
@@ -96,268 +96,253 @@ function setupDragAndDrop() {
   });
 }
 
-// ====== シート複製ロジック（ZIPレベル） ======
+// ====== ヘルパー関数 ======
 
-// フォールバック用：従来のExcelJSセル単位コピー
-function duplicateSheetFallback(originalSheet, newSheetName) {
-  const newSheet = EXCEL_workbook.addWorksheet(newSheetName);
-  originalSheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-    const newRow = newSheet.getRow(rowNumber);
-    row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-      const newCell = newRow.getCell(colNumber);
-      newCell.value = cell.value;
-      newCell.style = cell.style;
-    });
-    newRow.height = row.height;
-    newRow.commit();
-  });
-  if (originalSheet.columns) {
-    const maxCol = originalSheet.columnCount;
-    for (let i = 1; i <= maxCol; i++) {
-      const col = originalSheet.getColumn(i);
-      if (col && col.width) newSheet.getColumn(i).width = col.width;
-    }
+// 列番号(1始まり)をExcel列文字に変換（1→A, 27→AA）
+function colToLetter(col) {
+  let letter = "";
+  let c = col;
+  while (c > 0) {
+    c--;
+    letter = String.fromCharCode(65 + (c % 26)) + letter;
+    c = Math.floor(c / 26);
   }
-  const merges = Array.isArray(originalSheet.model?.merges) ? originalSheet.model.merges : [];
-  merges.forEach(range => newSheet.mergeCells(range));
-  return newSheet;
+  return letter;
 }
 
-// ZIPレベルでシートを丸ごとコピー（画像・図形・グラフすべて保持）
-async function duplicateSheet(originalSheetName, newSheetName) {
-  // JSZipが使えない場合やArrayBufferがない場合はフォールバック
-  if (typeof JSZip === "undefined" || !EXCEL_arrayBuffer) {
-    console.warn("[sheet-trans] JSZipが利用できません。従来方式でコピーします。");
-    const sheet = EXCEL_workbook.getWorksheet(originalSheetName);
-    return duplicateSheetFallback(sheet, newSheetName);
-  }
+// ====== ZIPレベル シート複製 ======
+// 元のArrayBufferをJSZipで操作し、シートを丸ごとコピーする
+// ExcelJSのwriteBuffer()を使わないため、グラフ・図形・画像がすべて保持される
 
-  try {
-    // 1. 現在のワークブックをバッファに書き出し（最新状態を使用）
-    const currentBuffer = await EXCEL_workbook.xlsx.writeBuffer();
-    const zip = await JSZip.loadAsync(currentBuffer);
+async function duplicateSheetInZip(originalSheetName, newSheetName) {
+  const zip = await JSZip.loadAsync(EXCEL_arrayBuffer);
+  const parser = new DOMParser();
 
-    // 2. workbook.xmlからシート情報を取得
-    const wbXml = await zip.file("xl/workbook.xml").async("string");
-    const parser = new DOMParser();
-    const wbDoc = parser.parseFromString(wbXml, "application/xml");
-    const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+  // 1. workbook.xmlからシート情報を取得
+  const wbXml = await zip.file("xl/workbook.xml").async("string");
+  const wbDoc = parser.parseFromString(wbXml, "application/xml");
+  const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 
-    // 対象シートを探す
-    const sheets = wbDoc.getElementsByTagNameNS(ns, "sheet");
-    let sourceSheetNode = null;
-    let sourceRId = null;
-    for (let i = 0; i < sheets.length; i++) {
-      if (sheets[i].getAttribute("name") === originalSheetName) {
-        sourceSheetNode = sheets[i];
-        sourceRId = sheets[i].getAttributeNS(
-          "http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id"
-        );
-        break;
-      }
-    }
-    if (!sourceSheetNode || !sourceRId) {
-      throw new Error("元シートがworkbook.xml内に見つかりません");
-    }
-
-    // 3. workbook.xml.relsから元シートのファイルパスを特定
-    const wbRelsXml = await zip.file("xl/_rels/workbook.xml.rels").async("string");
-    const wbRelsDoc = parser.parseFromString(wbRelsXml, "application/xml");
-    const rels = wbRelsDoc.getElementsByTagName("Relationship");
-    let sourceSheetPath = null;
-    for (let i = 0; i < rels.length; i++) {
-      if (rels[i].getAttribute("Id") === sourceRId) {
-        sourceSheetPath = rels[i].getAttribute("Target");
-        break;
-      }
-    }
-    if (!sourceSheetPath) {
-      throw new Error("元シートのファイルパスが特定できません");
-    }
-
-    // 4. 新しいシート番号を決定
-    const existingSheets = Object.keys(zip.files)
-      .filter(f => f.match(/^xl\/worksheets\/sheet\d+\.xml$/))
-      .map(f => parseInt(f.match(/sheet(\d+)/)[1]));
-    const newSheetNum = Math.max(...existingSheets) + 1;
-    const newSheetFile = `worksheets/sheet${newSheetNum}.xml`;
-    const newSheetFullPath = `xl/${newSheetFile}`;
-
-    // 5. シートXMLをコピー
-    const sourceFullPath = sourceSheetPath.startsWith("xl/")
-      ? sourceSheetPath
-      : `xl/${sourceSheetPath}`;
-    const sheetContent = await zip.file(sourceFullPath).async("uint8array");
-    zip.file(newSheetFullPath, sheetContent);
-
-    // 6. シートのrelsファイルをコピー（存在する場合 = drawing/chart等がある場合）
-    const sourceBaseName = sourceSheetPath.replace(/^.*\//, "");
-    const sourceRelsPath = sourceFullPath.replace(
-      sourceBaseName,
-      `_rels/${sourceBaseName}.rels`
-    );
-    const newRelsPath = `xl/worksheets/_rels/sheet${newSheetNum}.xml.rels`;
-
-    if (zip.file(sourceRelsPath)) {
-      let relsContent = await zip.file(sourceRelsPath).async("string");
-
-      // drawing/chartファイルもコピーして参照を更新
-      const relsDoc = parser.parseFromString(relsContent, "application/xml");
-      const sheetRels = relsDoc.getElementsByTagName("Relationship");
-
-      for (let i = 0; i < sheetRels.length; i++) {
-        const target = sheetRels[i].getAttribute("Target");
-        const type = sheetRels[i].getAttribute("Type") || "";
-
-        // drawing のコピー
-        if (type.includes("/drawing") && target) {
-          const drawingSource = target.startsWith("../")
-            ? `xl/${target.replace("../", "")}`
-            : `xl/drawings/${target}`;
-          if (zip.file(drawingSource)) {
-            const drawingMatch = target.match(/drawing(\d+)/);
-            if (drawingMatch) {
-              // 新しいdrawing番号
-              const existingDrawings = Object.keys(zip.files)
-                .filter(f => f.match(/^xl\/drawings\/drawing\d+\.xml$/))
-                .map(f => parseInt(f.match(/drawing(\d+)/)[1]));
-              const newDrawNum = existingDrawings.length > 0
-                ? Math.max(...existingDrawings) + 1 : 1;
-              const newDrawFile = `drawing${newDrawNum}.xml`;
-
-              // drawingの内容をコピー
-              const drawContent = await zip.file(drawingSource).async("uint8array");
-              zip.file(`xl/drawings/${newDrawFile}`, drawContent);
-
-              // drawing の rels もコピー（画像参照を含む）
-              const drawRelsSource = drawingSource.replace(
-                /([^\/]+)$/,
-                "_rels/$1.rels"
-              );
-              if (zip.file(drawRelsSource)) {
-                const drawRelsContent = await zip.file(drawRelsSource).async("uint8array");
-                zip.file(`xl/drawings/_rels/${newDrawFile}.rels`, drawRelsContent);
-              }
-
-              // Content_Typesにdrawing追加
-              const ctXml = await zip.file("[Content_Types].xml").async("string");
-              if (!ctXml.includes(`/xl/drawings/${newDrawFile}`)) {
-                const updatedCt = ctXml.replace(
-                  "</Types>",
-                  `<Override PartName="/xl/drawings/${newDrawFile}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>`
-                );
-                zip.file("[Content_Types].xml", updatedCt);
-              }
-
-              // relsの参照先を更新
-              const oldTarget = target;
-              const newTarget = target.replace(/drawing\d+/, `drawing${newDrawNum}`);
-              relsContent = relsContent.replace(oldTarget, newTarget);
-            }
-          }
-        }
-
-        // chart のコピー
-        if (type.includes("/chart") && target) {
-          const chartSource = target.startsWith("../")
-            ? `xl/${target.replace("../", "")}`
-            : `xl/charts/${target}`;
-          if (zip.file(chartSource)) {
-            const chartMatch = target.match(/chart(\d+)/);
-            if (chartMatch) {
-              const existingCharts = Object.keys(zip.files)
-                .filter(f => f.match(/^xl\/charts\/chart\d+\.xml$/))
-                .map(f => parseInt(f.match(/chart(\d+)/)[1]));
-              const newChartNum = existingCharts.length > 0
-                ? Math.max(...existingCharts) + 1 : 1;
-              const newChartFile = `chart${newChartNum}.xml`;
-
-              const chartContent = await zip.file(chartSource).async("uint8array");
-              zip.file(`xl/charts/${newChartFile}`, chartContent);
-
-              // chart の rels もコピー
-              const chartRelsSource = chartSource.replace(
-                /([^\/]+)$/,
-                "_rels/$1.rels"
-              );
-              if (zip.file(chartRelsSource)) {
-                const chartRelsContent = await zip.file(chartRelsSource).async("uint8array");
-                zip.file(`xl/charts/_rels/${newChartFile}.rels`, chartRelsContent);
-              }
-
-              // Content_Typesにchart追加
-              const ctXml2 = await zip.file("[Content_Types].xml").async("string");
-              if (!ctXml2.includes(`/xl/charts/${newChartFile}`)) {
-                const updatedCt2 = ctXml2.replace(
-                  "</Types>",
-                  `<Override PartName="/xl/charts/${newChartFile}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>`
-                );
-                zip.file("[Content_Types].xml", updatedCt2);
-              }
-
-              const oldChartTarget = target;
-              const newChartTarget = target.replace(/chart\d+/, `chart${newChartNum}`);
-              relsContent = relsContent.replace(oldChartTarget, newChartTarget);
-            }
-          }
-        }
-      }
-
-      zip.file(newRelsPath, relsContent);
-    }
-
-    // 7. workbook.xmlに新シートを追加
-    const maxSheetId = Array.from(sheets).reduce(
-      (max, s) => Math.max(max, parseInt(s.getAttribute("sheetId")) || 0), 0
-    );
-    const newSheetId = maxSheetId + 1;
-    const newRIdNum = newSheetNum + 100; // 既存rIdと衝突しないように大きめの番号
-    const newRId = `rId${newRIdNum}`;
-
-    const updatedWbXml = wbXml.replace(
-      "</sheets>",
-      `<sheet name="${newSheetName}" sheetId="${newSheetId}" r:id="${newRId}"/></sheets>`
-    );
-    zip.file("xl/workbook.xml", updatedWbXml);
-
-    // 8. workbook.xml.relsに新シートの参照を追加
-    const updatedRelsXml = wbRelsXml.replace(
-      "</Relationships>",
-      `<Relationship Id="${newRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="${newSheetFile}"/></Relationships>`
-    );
-    zip.file("xl/_rels/workbook.xml.rels", updatedRelsXml);
-
-    // 9. [Content_Types].xmlに新シートを追加
-    let ctXml = await zip.file("[Content_Types].xml").async("string");
-    if (!ctXml.includes(newSheetFullPath)) {
-      ctXml = ctXml.replace(
-        "</Types>",
-        `<Override PartName="/${newSheetFullPath}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`
+  const sheets = wbDoc.getElementsByTagNameNS(ns, "sheet");
+  let sourceRId = null;
+  for (let i = 0; i < sheets.length; i++) {
+    if (sheets[i].getAttribute("name") === originalSheetName) {
+      sourceRId = sheets[i].getAttributeNS(
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id"
       );
-      zip.file("[Content_Types].xml", ctXml);
+      break;
     }
-
-    // 10. 更新したZIPをExcelJSで再読み込み
-    const newBuffer = await zip.generateAsync({ type: "arraybuffer" });
-    const newWorkbook = new ExcelJS.Workbook();
-    await newWorkbook.xlsx.load(newBuffer);
-    EXCEL_workbook = newWorkbook;
-
-    const newSheet = EXCEL_workbook.getWorksheet(newSheetName);
-    if (!newSheet) {
-      throw new Error("ZIPコピー後にシートが見つかりません");
-    }
-
-    console.log("[sheet-trans] ZIPレベルでシートを複製しました: " + newSheetName);
-    return newSheet;
-
-  } catch (err) {
-    console.error("[sheet-trans] ZIPコピーに失敗しました。従来方式にフォールバック:", err);
-    // フォールバック：従来のセル単位コピー
-    const sheet = EXCEL_workbook.getWorksheet(originalSheetName);
-    if (!sheet) throw new Error("元シートが見つかりません: " + originalSheetName);
-    return duplicateSheetFallback(sheet, newSheetName);
   }
+  if (!sourceRId) throw new Error("元シートがworkbook.xml内に見つかりません");
+
+  // 2. workbook.xml.relsから元シートのファイルパスを特定
+  const wbRelsXml = await zip.file("xl/_rels/workbook.xml.rels").async("string");
+  const wbRelsDoc = parser.parseFromString(wbRelsXml, "application/xml");
+  const rels = wbRelsDoc.getElementsByTagName("Relationship");
+  let sourceSheetPath = null;
+  for (let i = 0; i < rels.length; i++) {
+    if (rels[i].getAttribute("Id") === sourceRId) {
+      sourceSheetPath = rels[i].getAttribute("Target");
+      break;
+    }
+  }
+  if (!sourceSheetPath) throw new Error("元シートのファイルパスが特定できません");
+
+  // 3. 新しいシート番号を決定
+  const existingSheets = Object.keys(zip.files)
+    .filter(f => f.match(/^xl\/worksheets\/sheet\d+\.xml$/))
+    .map(f => parseInt(f.match(/sheet(\d+)/)[1]));
+  const newSheetNum = Math.max(...existingSheets) + 1;
+  const newSheetFile = `worksheets/sheet${newSheetNum}.xml`;
+  const newSheetFullPath = `xl/${newSheetFile}`;
+
+  // 4. シートXMLをコピー
+  const sourceFullPath = sourceSheetPath.startsWith("xl/")
+    ? sourceSheetPath
+    : `xl/${sourceSheetPath}`;
+  const sheetContent = await zip.file(sourceFullPath).async("uint8array");
+  zip.file(newSheetFullPath, sheetContent);
+
+  // 5. シートのrelsファイルをコピー（drawing/chart等の参照を含む）
+  const sourceBaseName = sourceSheetPath.replace(/^.*\//, "");
+  const sourceRelsPath = sourceFullPath.replace(
+    sourceBaseName,
+    `_rels/${sourceBaseName}.rels`
+  );
+  const newRelsPath = `xl/worksheets/_rels/sheet${newSheetNum}.xml.rels`;
+
+  if (zip.file(sourceRelsPath)) {
+    let relsContent = await zip.file(sourceRelsPath).async("string");
+    const relsDoc = parser.parseFromString(relsContent, "application/xml");
+    const sheetRels = relsDoc.getElementsByTagName("Relationship");
+
+    for (let i = 0; i < sheetRels.length; i++) {
+      const target = sheetRels[i].getAttribute("Target");
+      const type = sheetRels[i].getAttribute("Type") || "";
+
+      // drawingのコピー
+      if (type.includes("/drawing") && target) {
+        const drawingSource = target.startsWith("../")
+          ? `xl/${target.replace("../", "")}`
+          : `xl/drawings/${target}`;
+        if (zip.file(drawingSource)) {
+          const drawingMatch = target.match(/drawing(\d+)/);
+          if (drawingMatch) {
+            const existingDrawings = Object.keys(zip.files)
+              .filter(f => f.match(/^xl\/drawings\/drawing\d+\.xml$/))
+              .map(f => parseInt(f.match(/drawing(\d+)/)[1]));
+            const newDrawNum = existingDrawings.length > 0
+              ? Math.max(...existingDrawings) + 1 : 1;
+            const newDrawFile = `drawing${newDrawNum}.xml`;
+
+            const drawContent = await zip.file(drawingSource).async("uint8array");
+            zip.file(`xl/drawings/${newDrawFile}`, drawContent);
+
+            // drawing の rels もコピー
+            const drawRelsSource = drawingSource.replace(/([^\/]+)$/, "_rels/$1.rels");
+            if (zip.file(drawRelsSource)) {
+              const drawRelsContent = await zip.file(drawRelsSource).async("uint8array");
+              zip.file(`xl/drawings/_rels/${newDrawFile}.rels`, drawRelsContent);
+            }
+
+            // Content_Typesにdrawing追加
+            let ctXml = await zip.file("[Content_Types].xml").async("string");
+            if (!ctXml.includes(`/xl/drawings/${newDrawFile}`)) {
+              ctXml = ctXml.replace(
+                "</Types>",
+                `<Override PartName="/xl/drawings/${newDrawFile}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>`
+              );
+              zip.file("[Content_Types].xml", ctXml);
+            }
+
+            const newTarget = target.replace(/drawing\d+/, `drawing${newDrawNum}`);
+            relsContent = relsContent.replace(target, newTarget);
+          }
+        }
+      }
+
+      // chartのコピー
+      if (type.includes("/chart") && target) {
+        const chartSource = target.startsWith("../")
+          ? `xl/${target.replace("../", "")}`
+          : `xl/charts/${target}`;
+        if (zip.file(chartSource)) {
+          const chartMatch = target.match(/chart(\d+)/);
+          if (chartMatch) {
+            const existingCharts = Object.keys(zip.files)
+              .filter(f => f.match(/^xl\/charts\/chart\d+\.xml$/))
+              .map(f => parseInt(f.match(/chart(\d+)/)[1]));
+            const newChartNum = existingCharts.length > 0
+              ? Math.max(...existingCharts) + 1 : 1;
+            const newChartFile = `chart${newChartNum}.xml`;
+
+            const chartContent = await zip.file(chartSource).async("uint8array");
+            zip.file(`xl/charts/${newChartFile}`, chartContent);
+
+            const chartRelsSource = chartSource.replace(/([^\/]+)$/, "_rels/$1.rels");
+            if (zip.file(chartRelsSource)) {
+              const chartRelsContent = await zip.file(chartRelsSource).async("uint8array");
+              zip.file(`xl/charts/_rels/${newChartFile}.rels`, chartRelsContent);
+            }
+
+            let ctXml2 = await zip.file("[Content_Types].xml").async("string");
+            if (!ctXml2.includes(`/xl/charts/${newChartFile}`)) {
+              ctXml2 = ctXml2.replace(
+                "</Types>",
+                `<Override PartName="/xl/charts/${newChartFile}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>`
+              );
+              zip.file("[Content_Types].xml", ctXml2);
+            }
+
+            const newChartTarget = target.replace(/chart\d+/, `chart${newChartNum}`);
+            relsContent = relsContent.replace(target, newChartTarget);
+          }
+        }
+      }
+    }
+
+    zip.file(newRelsPath, relsContent);
+  }
+
+  // 6. workbook.xmlに新シートを追加
+  const maxSheetId = Array.from(sheets).reduce(
+    (max, s) => Math.max(max, parseInt(s.getAttribute("sheetId")) || 0), 0
+  );
+  const newSheetId = maxSheetId + 1;
+  const newRIdNum = newSheetNum + 100;
+  const newRId = `rId${newRIdNum}`;
+
+  const updatedWbXml = wbXml.replace(
+    "</sheets>",
+    `<sheet name="${newSheetName}" sheetId="${newSheetId}" r:id="${newRId}"/></sheets>`
+  );
+  zip.file("xl/workbook.xml", updatedWbXml);
+
+  // 7. workbook.xml.relsに参照追加
+  const updatedRelsXml = wbRelsXml.replace(
+    "</Relationships>",
+    `<Relationship Id="${newRId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="${newSheetFile}"/></Relationships>`
+  );
+  zip.file("xl/_rels/workbook.xml.rels", updatedRelsXml);
+
+  // 8. [Content_Types].xmlに新シートを追加
+  let ctXml = await zip.file("[Content_Types].xml").async("string");
+  if (!ctXml.includes(newSheetFullPath)) {
+    ctXml = ctXml.replace(
+      "</Types>",
+      `<Override PartName="/${newSheetFullPath}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`
+    );
+    zip.file("[Content_Types].xml", ctXml);
+  }
+
+  console.log("[sheet-trans] ZIPレベルでシートを複製しました: " + newSheetName);
+  return { zip, newSheetFullPath };
+}
+
+// ====== ZIPレベル 翻訳テキスト書き込み ======
+// シートXMLのセル値を直接インライン文字列で置き換える
+// ExcelJSを経由しないので、グラフ・図形は一切影響を受けない
+
+async function applyTranslationsToZip(zip, sheetPath, cellRefs, translations) {
+  const sheetXml = await zip.file(sheetPath).async("string");
+  const parser = new DOMParser();
+  const sheetDoc = parser.parseFromString(sheetXml, "application/xml");
+  const ns = sheetDoc.documentElement.namespaceURI;
+
+  // 翻訳マップを構築: セルアドレス → 翻訳テキスト
+  const translationMap = {};
+  cellRefs.forEach((ref, idx) => {
+    const addr = colToLetter(ref.c) + ref.r;
+    const transText = (translations[idx] || "").replace(/\|\|\|/g, "\n");
+    translationMap[addr] = transText;
+  });
+
+  // シートXML内のセルを走査して翻訳テキストを適用
+  const rows = sheetDoc.getElementsByTagNameNS(ns, "row");
+  for (let ri = 0; ri < rows.length; ri++) {
+    const cells = rows[ri].getElementsByTagNameNS(ns, "c");
+    for (let ci = 0; ci < cells.length; ci++) {
+      const cell = cells[ci];
+      const ref = cell.getAttribute("r");
+      if (translationMap[ref] !== undefined) {
+        // セルの既存内容をクリア
+        cell.setAttribute("t", "inlineStr");
+        while (cell.firstChild) cell.removeChild(cell.firstChild);
+
+        // インライン文字列 <is><t>翻訳テキスト</t></is> を作成
+        const is = sheetDoc.createElementNS(ns, "is");
+        const t = sheetDoc.createElementNS(ns, "t");
+        t.textContent = translationMap[ref];
+        is.appendChild(t);
+        cell.appendChild(is);
+      }
+    }
+  }
+
+  // XMLをシリアライズしてZIPに書き戻し
+  const serializer = new XMLSerializer();
+  const updatedXml = serializer.serializeToString(sheetDoc);
+  zip.file(sheetPath, updatedXml);
 }
 
 // ====== 翻訳対象収集ロジック ======
@@ -389,8 +374,6 @@ function collectCellsToTranslate(sheet) {
       if (text === "") return;
 
       // ★フィルタリング：翻訳不要なものはリストに入れない
-      // 1. 半角英数字・記号のみで構成される短い文字列（型番、ODM、USBなど）
-      //    (ここでは30文字以下の英数字記号のみの場合スキップとする)
       if (/^[A-Za-z0-9\s\-_.,()]+$/.test(text) && text.length < 30) {
         return;
       }
@@ -415,14 +398,13 @@ async function callSheetTranslateAPI(rows, toLang, context, onProgress) {
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
 
-    // api/sheet を呼び出し
     const res = await fetch("/api/translate?op=sheet", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         rows: batch,
         toLang: toLang,
-        context: context // コンテキストも送信
+        context: context
       }),
     });
 
@@ -444,13 +426,14 @@ async function callSheetTranslateAPI(rows, toLang, context, onProgress) {
 
 // ====== メイン処理 ======
 async function handleTranslateClick() {
-  if (!EXCEL_workbook) {
+  if (!EXCEL_workbook || !EXCEL_arrayBuffer) {
     showError("ファイルを選択してください");
     return;
   }
 
   const select = document.getElementById("sheet-select");
   const originalSheetName = select.value;
+  const originalSheet = EXCEL_workbook.getWorksheet(originalSheetName);
 
   const toLang = document.getElementById("to-lang").value;
   const context = document.getElementById("sheet-context").value;
@@ -459,40 +442,38 @@ async function handleTranslateClick() {
     toggleUI(true);
     showLoading(true, 0, 0);
 
-    // 1. シートをコピー作成（ZIPレベルで丸ごとコピー）
-    setStatus("シートを複製中...");
-    const newSheetName = originalSheetName + "_翻訳";
-
-    const targetSheet = await duplicateSheet(originalSheetName, newSheetName);
-
-    // 2. 翻訳対象セルを収集
+    // 1. ExcelJSで翻訳対象セルを収集（読み取り専用）
     setStatus("翻訳対象を収集中...");
-    const info = collectCellsToTranslate(targetSheet);
+    const info = collectCellsToTranslate(originalSheet);
 
     if (info.texts.length === 0) {
       showLoading(false);
-      alert("翻訳対象となるテキストが見つかりませんでした。\nファイルのみダウンロードします。");
-      await downloadWorkbook();
+      alert("翻訳対象となるテキストが見つかりませんでした。");
       return;
     }
 
-    // 3. 翻訳実行
+    // 2. APIで翻訳を取得
     showLoading(true, info.texts.length, 0);
     const translations = await callSheetTranslateAPI(info.texts, toLang, context, (done, total) => {
       showLoading(true, total, done);
     });
 
-    // 4. 結果を書き込み
+    // 3. ZIPレベルでシートを複製（画像・図形・グラフすべて保持）
+    setStatus("シートを複製中...");
+    const newSheetName = originalSheetName + "_翻訳";
+    const { zip, newSheetFullPath } = await duplicateSheetInZip(originalSheetName, newSheetName);
+
+    // 4. ZIPレベルで翻訳テキストを書き込み（ExcelJSを経由しない）
     setStatus("翻訳結果を書き込み中...");
-    info.cellRefs.forEach((ref, idx) => {
-      const cell = targetSheet.getRow(ref.r).getCell(ref.c);
-      const transText = (translations[idx] || "").replace(/\|\|\|/g, "\n");
-      cell.value = transText;
-    });
+    await applyTranslationsToZip(zip, newSheetFullPath, info.cellRefs, translations);
+
+    // 5. ZIPから最終ファイルを生成してダウンロード
+    setStatus("ファイルを生成中...");
+    const outputBuffer = await zip.generateAsync({ type: "arraybuffer" });
+    downloadBuffer(outputBuffer);
 
     setStatus("完了");
     showLoading(false);
-    await downloadWorkbook();
     alert("翻訳が完了しました。");
 
   } catch (e) {
@@ -503,13 +484,12 @@ async function handleTranslateClick() {
   }
 }
 
-async function downloadWorkbook() {
-  const buffer = await EXCEL_workbook.xlsx.writeBuffer();
+// ====== ダウンロード ======
+function downloadBuffer(buffer) {
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  // ファイル名末尾に_翻訳をつけるルール
   a.download = (EXCEL_fileName || "download") + "_翻訳.xlsx";
   document.body.appendChild(a);
   a.click();
