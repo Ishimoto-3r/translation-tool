@@ -251,9 +251,12 @@
                     <label>Excelファイル</label>
                     <input type="file" id="excel-file" accept=".xlsx" />
                 </div>
-                <div class="form-group">
-                    <label>翻訳するシート</label>
-                    <select id="sheet-select"></select>
+            </div>
+            <div class="form-group">
+                <label>翻訳するシート（複数選択可）</label>
+                <div id="sheet-checklist"
+                    style="border:1px solid #d1d5db; border-radius:8px; padding:8px 12px; min-height:36px; background:#f9fafb; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+                    <span style="color:#9ca3af; font-size:0.85rem;">ファイルを読み込むとシート一覧が表示されます</span>
                 </div>
             </div>
         </section>
@@ -281,8 +284,8 @@
                 </div>
             </div>
             <p style="font-size:0.85rem; color:#6b7280; margin-top:8px;">
-                ※ シートをコピーして末尾に「_翻訳」を追加し、その中のテキストを翻訳します。<br>
-                ※ 数値やアルファベット単体（ODMなど）は翻訳せずそのまま残します。
+                ※ 選択した各シートのテキストを翻訳した別ファイルがダウンロードされます。<br>
+                ※ 元ファイルは変更されません。グラフ・図形・画像はそのまま保持されます。
             </p>
         </section>
 

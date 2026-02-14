@@ -39,10 +39,14 @@ function hideErrorModal() {
 }
 
 function toggleUI(disabled) {
-  const ids = ["excel-file", "sheet-select", "to-lang", "sheet-context", "translate-btn"];
+  const ids = ["excel-file", "to-lang", "sheet-context", "translate-btn"];
   ids.forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = disabled;
+  });
+  // チェックボックスも制御
+  document.querySelectorAll('#sheet-checklist input[type="checkbox"]').forEach(cb => {
+    cb.disabled = disabled;
   });
 }
 
@@ -63,13 +67,20 @@ async function loadExcelFile(file) {
     await workbook.xlsx.load(arrayBuffer);
     EXCEL_workbook = workbook;
 
-    const sheetSelect = document.getElementById("sheet-select");
-    sheetSelect.innerHTML = "";
+    // チェックボックスリストを生成
+    const checklist = document.getElementById("sheet-checklist");
+    checklist.innerHTML = "";
     workbook.eachSheet((sheet) => {
-      const opt = document.createElement("option");
-      opt.value = sheet.name;
-      opt.textContent = sheet.name;
-      sheetSelect.appendChild(opt);
+      const label = document.createElement("label");
+      label.style.cssText = "display:flex; align-items:center; gap:4px; cursor:pointer; padding:4px 8px; border-radius:6px; background:#eef2ff; border:1px solid #c7d2fe; font-size:0.9rem; user-select:none;";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.value = sheet.name;
+      cb.checked = true; // デフォルトで全選択
+      cb.style.cssText = "margin:0; cursor:pointer;";
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(sheet.name));
+      checklist.appendChild(label);
     });
     setStatus(`読込完了: ${file.name}`);
   } catch (err) {
@@ -257,9 +268,16 @@ async function handleTranslateClick() {
     return;
   }
 
-  const select = document.getElementById("sheet-select");
-  const originalSheetName = select.value;
-  const originalSheet = EXCEL_workbook.getWorksheet(originalSheetName);
+  // 選択されたシート名を取得
+  const selectedSheets = [];
+  document.querySelectorAll('#sheet-checklist input[type="checkbox"]:checked').forEach(cb => {
+    selectedSheets.push(cb.value);
+  });
+
+  if (selectedSheets.length === 0) {
+    showError("翻訳するシートを1つ以上選択してください");
+    return;
+  }
 
   const toLang = document.getElementById("to-lang").value;
   const context = document.getElementById("sheet-context").value;
@@ -268,38 +286,60 @@ async function handleTranslateClick() {
     toggleUI(true);
     showLoading(true, 0, 0);
 
-    // 1. ExcelJSで翻訳対象セルを収集（読み取り専用）
-    setStatus("翻訳対象を収集中...");
-    const info = collectCellsToTranslate(originalSheet);
+    // 各シートの翻訳情報を収集
+    setStatus(`翻訳対象を収集中...（${selectedSheets.length}シート）`);
+    const sheetInfos = [];
+    let totalTexts = 0;
 
-    if (info.texts.length === 0) {
+    for (const sheetName of selectedSheets) {
+      const sheet = EXCEL_workbook.getWorksheet(sheetName);
+      const info = collectCellsToTranslate(sheet);
+      if (info.texts.length > 0) {
+        sheetInfos.push({ name: sheetName, info });
+        totalTexts += info.texts.length;
+      }
+    }
+
+    if (sheetInfos.length === 0) {
       showLoading(false);
       alert("翻訳対象となるテキストが見つかりませんでした。");
       return;
     }
 
-    // 2. APIで翻訳を取得
-    showLoading(true, info.texts.length, 0);
-    const translations = await callSheetTranslateAPI(info.texts, toLang, context, (done, total) => {
-      showLoading(true, total, done);
-    });
+    // 各シートの翻訳をAPIで取得
+    let doneTexts = 0;
+    showLoading(true, totalTexts, 0);
+    const allTranslations = [];
 
-    // 3. ZIPとして読み込み、元シートのパスを特定
+    for (const si of sheetInfos) {
+      const translations = await callSheetTranslateAPI(si.info.texts, toLang, context, (done, total) => {
+        showLoading(true, totalTexts, doneTexts + done);
+      });
+      allTranslations.push(translations);
+      doneTexts += si.info.texts.length;
+      showLoading(true, totalTexts, doneTexts);
+    }
+
+    // ZIPとして読み込み、全シートに翻訳を適用
     setStatus("翻訳を適用中...");
     const zip = await JSZip.loadAsync(EXCEL_arrayBuffer);
-    const sheetPath = await getSheetPathInZip(zip, originalSheetName);
 
-    // 4. 元シートに直接翻訳を書き込み（ファイル構造は一切変更しない）
-    await applyTranslationsToZip(zip, sheetPath, info.cellRefs, translations);
+    for (let i = 0; i < sheetInfos.length; i++) {
+      const sheetPath = await getSheetPathInZip(zip, sheetInfos[i].name);
+      await applyTranslationsToZip(zip, sheetPath, sheetInfos[i].info.cellRefs, allTranslations[i]);
+    }
 
-    // 5. 別ファイルとしてダウンロード（元ファイルは変更しない）
+    // 別ファイルとしてダウンロード
     setStatus("ファイルを生成中...");
     const outputBuffer = await zip.generateAsync({ type: "arraybuffer" });
     downloadBuffer(outputBuffer);
 
     setStatus("完了");
     showLoading(false);
-    alert("翻訳が完了しました。\n翻訳済みファイルがダウンロードされました。");
+    const msg = sheetInfos.length === 1
+      ? "翻訳が完了しました。\n翻訳済みファイルがダウンロードされました。"
+      : `翻訳が完了しました。\n${sheetInfos.length}シートを翻訳したファイルがダウンロードされました。`;
+    alert(msg);
 
   } catch (e) {
     showError(e.message);
