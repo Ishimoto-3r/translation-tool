@@ -627,3 +627,96 @@ document.addEventListener("DOMContentLoaded", () => {
 
   setupDragAndDrop();
 });
+
+// ====== 診断テスト（コンソールから呼び出し用）======
+// テスト1: JSZipパススルー（変更なし → 修復出たらJSZip自体が原因）
+window._test1 = async function () {
+  if (!EXCEL_arrayBuffer) { alert("ファイルを先にロード"); return; }
+  const zip = await JSZip.loadAsync(EXCEL_arrayBuffer);
+  const buf = await zip.generateAsync({ type: "arraybuffer" });
+  downloadBuffer(buf);
+  alert("テスト1完了: 変更なしパススルー");
+};
+
+// テスト2: シート追加+翻訳のみ（drawing/chartコピーなし → 修復出たらシート追加が原因）
+window._test2 = async function () {
+  if (!EXCEL_arrayBuffer || !EXCEL_workbook) { alert("ファイルを先にロード"); return; }
+  const zip = await JSZip.loadAsync(EXCEL_arrayBuffer);
+  const parser = new DOMParser();
+
+  const select = document.getElementById("sheet-select");
+  const originalSheetName = select.value;
+
+  // workbook.xmlからシート情報取得
+  const wbXml = await zip.file("xl/workbook.xml").async("string");
+  const wbDoc = parser.parseFromString(wbXml, "application/xml");
+  const ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+  const sheets = wbDoc.getElementsByTagNameNS(ns, "sheet");
+  let sourceRId = null;
+  for (let i = 0; i < sheets.length; i++) {
+    if (sheets[i].getAttribute("name") === originalSheetName) {
+      sourceRId = sheets[i].getAttributeNS("http://schemas.openxmlformats.org/officeDocument/2006/relationships", "id");
+      break;
+    }
+  }
+
+  const wbRelsXml = await zip.file("xl/_rels/workbook.xml.rels").async("string");
+  const wbRelsDoc = parser.parseFromString(wbRelsXml, "application/xml");
+  const rels = wbRelsDoc.getElementsByTagName("Relationship");
+  let sourceSheetPath = null;
+  for (let i = 0; i < rels.length; i++) {
+    if (rels[i].getAttribute("Id") === sourceRId) {
+      sourceSheetPath = rels[i].getAttribute("Target");
+      break;
+    }
+  }
+
+  const sourceFullPath = sourceSheetPath.startsWith("xl/") ? sourceSheetPath : `xl/${sourceSheetPath}`;
+  const newSheetNum = 2;
+  const newSheetFile = `worksheets/sheet${newSheetNum}.xml`;
+  const newSheetFullPath = `xl/${newSheetFile}`;
+  const newSheetName = originalSheetName + "_test2";
+
+  // シートXMLをコピー（描画参照を除去）
+  let sheetXml = await zip.file(sourceFullPath).async("string");
+  sheetXml = sheetXml.replace(/<drawing[^/]*\/>/g, "");  // drawing参照を削除
+  zip.file(newSheetFullPath, sheetXml);
+
+  // workbook.xmlに追加
+  const maxSheetId = Array.from(sheets).reduce(
+    (max, s) => Math.max(max, parseInt(s.getAttribute("sheetId")) || 0), 0
+  );
+  zip.file("xl/workbook.xml", wbXml.replace(
+    "</sheets>",
+    `<sheet name="${newSheetName}" sheetId="${maxSheetId + 1}" r:id="rId200"/></sheets>`
+  ));
+
+  // workbook.xml.relsに追加
+  zip.file("xl/_rels/workbook.xml.rels", wbRelsXml.replace(
+    "</Relationships>",
+    `<Relationship Id="rId200" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="${newSheetFile}"/></Relationships>`
+  ));
+
+  // Content_Types追加
+  let ctXml = await zip.file("[Content_Types].xml").async("string");
+  ctXml = ctXml.replace("</Types>", `<Override PartName="/${newSheetFullPath}" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`);
+  zip.file("[Content_Types].xml", ctXml);
+
+  // app.xml更新
+  if (zip.file("docProps/app.xml")) {
+    let appXml = await zip.file("docProps/app.xml").async("string");
+    appXml = appXml.replace(
+      /(<TitlesOfParts>\s*<vt:vector\s+size=")(\d+)("[\s\S]*?)(<\/vt:vector>\s*<\/TitlesOfParts>)/,
+      (m, pre, sz, mid, suf) => `${pre}${parseInt(sz) + 1}${mid}<vt:lpstr>${newSheetName}</vt:lpstr>${suf}`
+    );
+    appXml = appXml.replace(
+      /(<HeadingPairs>[\s\S]*?<vt:i4>)(\d+)(<\/vt:i4>)/,
+      (m, pre, cnt, suf) => `${pre}${parseInt(cnt) + 1}${suf}`
+    );
+    zip.file("docProps/app.xml", appXml);
+  }
+
+  const buf = await zip.generateAsync({ type: "arraybuffer" });
+  downloadBuffer(buf);
+  alert("テスト2完了: drawing/chartなしでシート追加のみ");
+};
