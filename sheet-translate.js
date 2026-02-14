@@ -211,11 +211,76 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
             zip.file(`xl/drawings/${newDrawFile}`, drawContent);
             console.log("[ZIP-DEBUG] drawingコピー:", drawingSource, "→", `xl/drawings/${newDrawFile}`);
 
-            // drawing の rels もコピー
+            // drawing の rels を解析し、chart/imageの参照を処理
             const drawRelsSource = drawingSource.replace(/([^\/]+)$/, "_rels/$1.rels");
+            console.log("[ZIP-DEBUG] drawing rels検索:", drawRelsSource, "→", zip.file(drawRelsSource) ? "見つかった" : "見つからない");
+
             if (zip.file(drawRelsSource)) {
-              const drawRelsContent = await zip.file(drawRelsSource).async("uint8array");
+              let drawRelsContent = await zip.file(drawRelsSource).async("string");
+              console.log("[ZIP-DEBUG] drawing rels内容:", drawRelsContent);
+
+              // drawing rels内のRelationshipを解析
+              const drawRelsDoc = parser.parseFromString(drawRelsContent, "application/xml");
+              const drawRelsList = drawRelsDoc.getElementsByTagName("Relationship");
+
+              for (let j = 0; j < drawRelsList.length; j++) {
+                const dTarget = drawRelsList[j].getAttribute("Target");
+                const dType = drawRelsList[j].getAttribute("Type") || "";
+                console.log(`[ZIP-DEBUG] drawing rels[${j}] type=${dType}, target=${dTarget}`);
+
+                // chartの個別コピー（同一chart共有を避ける）
+                if (dType.includes("/chart") && dTarget) {
+                  const chartSource = dTarget.startsWith("../")
+                    ? `xl/${dTarget.replace("../", "")}`
+                    : dTarget;
+                  console.log("[ZIP-DEBUG] chart検索:", chartSource, "→", zip.file(chartSource) ? "見つかった" : "見つからない");
+
+                  if (zip.file(chartSource)) {
+                    const chartMatch = dTarget.match(/chart(\d+)/);
+                    if (chartMatch) {
+                      const existingCharts = Object.keys(zip.files)
+                        .filter(f => f.match(/^xl\/charts\/chart\d+\.xml$/))
+                        .map(f => parseInt(f.match(/chart(\d+)/)[1]));
+                      const newChartNum = existingCharts.length > 0
+                        ? Math.max(...existingCharts) + 1 : 1;
+                      const newChartFile = `chart${newChartNum}.xml`;
+
+                      // chart XMLをコピー
+                      const chartContent = await zip.file(chartSource).async("uint8array");
+                      zip.file(`xl/charts/${newChartFile}`, chartContent);
+                      console.log("[ZIP-DEBUG] chartコピー:", chartSource, "→", `xl/charts/${newChartFile}`);
+
+                      // chart relsもコピー（style等の参照）
+                      const chartRelsSource = chartSource.replace(/([^\/]+)$/, "_rels/$1.rels");
+                      if (zip.file(chartRelsSource)) {
+                        const chartRelsContent = await zip.file(chartRelsSource).async("uint8array");
+                        zip.file(`xl/charts/_rels/${newChartFile}.rels`, chartRelsContent);
+                        console.log("[ZIP-DEBUG] chart relsコピー:", chartRelsSource);
+                      }
+
+                      // Content_Typesにchart追加
+                      let ctXmlChart = await zip.file("[Content_Types].xml").async("string");
+                      if (!ctXmlChart.includes(`/xl/charts/${newChartFile}`)) {
+                        ctXmlChart = ctXmlChart.replace(
+                          "</Types>",
+                          `<Override PartName="/xl/charts/${newChartFile}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>`
+                        );
+                        zip.file("[Content_Types].xml", ctXmlChart);
+                      }
+
+                      // drawing rels内の参照を新chartに更新
+                      const newChartTarget = dTarget.replace(/chart\d+/, `chart${newChartNum}`);
+                      drawRelsContent = drawRelsContent.replace(dTarget, newChartTarget);
+                      console.log("[ZIP-DEBUG] chart参照更新:", dTarget, "→", newChartTarget);
+                    }
+                  }
+                }
+                // image参照はそのまま（共有OK）
+              }
+
+              // 更新済みdrawing relsを保存
               zip.file(`xl/drawings/_rels/${newDrawFile}.rels`, drawRelsContent);
+              console.log("[ZIP-DEBUG] drawing rels保存:", `xl/drawings/_rels/${newDrawFile}.rels`);
             }
 
             // Content_Typesにdrawing追加
