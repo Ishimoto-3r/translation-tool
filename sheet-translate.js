@@ -414,6 +414,7 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
 
 async function applyTranslationsToZip(zip, sheetPath, cellRefs, translations) {
   let sheetXml = await zip.file(sheetPath).async("string");
+  let matchCount = 0;
 
   cellRefs.forEach((ref, idx) => {
     const addr = colToLetter(ref.c) + ref.r;
@@ -429,20 +430,26 @@ async function applyTranslationsToZip(zip, sheetPath, cellRefs, translations) {
     // セル要素を正規表現で検索: <c ...r="ADDR"...>...</c>
     // ※属性の順序に依存しないパターン
     const cellRegex = new RegExp(
-      '(<c\\b[^>]*?\\br="' + addr + '")(\\b[^>]*?)>([\\s\\S]*?)</c>',
+      '(<c\\b[^>]*?\\br="' + addr + '")([^>]*)>([\\s\\S]*?)</c>',
       ''
     );
 
+    const before = sheetXml;
     sheetXml = sheetXml.replace(cellRegex, (match, prefix, rest) => {
       // 既存のt="..."属性を除去し、t="inlineStr"を設定
       const cleanPrefix = prefix.replace(/\s+t="[^"]*"/, "");
       const cleanRest = rest.replace(/\s+t="[^"]*"/, "");
+      matchCount++;
       return `${cleanPrefix} t="inlineStr"${cleanRest}><is><t>${escaped}</t></is></c>`;
     });
+
+    if (before === sheetXml && idx < 5) {
+      console.warn(`[ZIP-DEBUG] セル ${addr} がマッチしませんでした`);
+    }
   });
 
   zip.file(sheetPath, sheetXml);
-  console.log("[ZIP-DEBUG] 翻訳テキスト書き込み完了（文字列置換方式）");
+  console.log(`[ZIP-DEBUG] 翻訳テキスト書き込み完了: ${matchCount}/${cellRefs.length}セル置換`);
 
   // 診断: drawing要素が残っているか確認
   const hasDrawing = sheetXml.includes("<drawing");
