@@ -411,16 +411,6 @@ async function handleTranslateClick() {
     setStatus("翻訳結果を書き込み中...");
     await applyTranslationsToZip(zip, newSheetFullPath, info.cellRefs, translations);
 
-    // 5. sharedStrings.xmlのcount属性を除去（ExcelJSに再計算させる）
-    const ssPath = "xl/sharedStrings.xml";
-    if (zip.file(ssPath)) {
-      let ssXml = await zip.file(ssPath).async("string");
-      ssXml = ssXml.replace(/\s+count="\d+"/, "");
-      ssXml = ssXml.replace(/\s+uniqueCount="\d+"/, "");
-      zip.file(ssPath, ssXml);
-      console.log("[ZIP-DEBUG] sharedStrings count属性を除去");
-    }
-
 
 
     // 6. ZIPから最終ファイルを生成してダウンロード
