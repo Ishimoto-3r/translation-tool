@@ -160,28 +160,16 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
   const newSheetFile = `worksheets/sheet${newSheetNum}.xml`;
   const newSheetFullPath = `xl/${newSheetFile}`;
 
-  // 4. シートXMLをコピー
+  // 4. シートXMLをコピー（drawing参照は除去して修復を回避）
   const sourceFullPath = sourceSheetPath.startsWith("xl/")
     ? sourceSheetPath
     : `xl/${sourceSheetPath}`;
-  const sheetContent = await zip.file(sourceFullPath).async("uint8array");
-  zip.file(newSheetFullPath, sheetContent);
+  let sheetXmlContent = await zip.file(sourceFullPath).async("string");
+  // drawing参照を除去（修復トリガー回避のため）
+  sheetXmlContent = sheetXmlContent.replace(/<drawing[^/]*\/>/g, "");
+  zip.file(newSheetFullPath, sheetXmlContent);
 
-
-  // 5. シートのrelsファイルをコピー（drawing/chart等の参照を含む）
-  const sourceBaseName = sourceSheetPath.replace(/^.*\//, "");
-  const sourceRelsPath = sourceFullPath.replace(
-    sourceBaseName,
-    `_rels/${sourceBaseName}.rels`
-  );
-  const newRelsPath = `xl/worksheets/_rels/sheet${newSheetNum}.xml.rels`;
-
-  if (zip.file(sourceRelsPath)) {
-    // 元シートのrelsをそのままコピー（drawing/chart参照は元ファイルを共有）
-    // 描画ファイルをコピーするとExcelの修復対象になるため、元のdrawingを共有する
-    const relsContent = await zip.file(sourceRelsPath).async("uint8array");
-    zip.file(newRelsPath, relsContent);
-  }
+  // relsファイルはコピーしない（drawing参照を除去したため不要）
 
   // 6. workbook.xmlに新シートを追加
   const maxSheetId = Array.from(sheets).reduce(
