@@ -22,7 +22,7 @@ const REASONING = process.env.MANUAL_CHECK_REASONING || "medium";
 const VERBOSITY = process.env.MANUAL_CHECK_VERBOSITY || "low";
 
 // ===== SharePoint (Microsoft Graph) =====
-// getAccessToken() は api/utils/graph-auth.js に共通化済み
+// getAccessToken() は lib/api-helpers.js に共通化済み
 
 async function downloadExcelBufferFromSharePoint() {
   // DEBUG: Mainで何が入っているか確認（秘密情報は表示しない）

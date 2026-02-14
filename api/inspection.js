@@ -238,7 +238,7 @@ async function getPdfBufferFromRequest(req, { pdfUrl }) {
 }
 
 // ===== Graph token =====
-// getAccessToken() は api/utils/graph-auth.js に共通化済み
+// getAccessToken() は lib/api-helpers.js に共通化済み
 
 // ===== Template download =====
 // 優先：INSPECTION_TEMPLATE_URL（Shareリンク）

@@ -12,6 +12,7 @@ module.exports = {
   // カバレッジ収集対象のファイル
   collectCoverageFrom: [
     'api/**/*.js',
+    'lib/**/*.js',
     'app.js',
     'navigation.js',
     '!**/node_modules/**',
