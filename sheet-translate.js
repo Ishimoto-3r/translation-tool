@@ -118,6 +118,10 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
   const zip = await JSZip.loadAsync(EXCEL_arrayBuffer);
   const parser = new DOMParser();
 
+  // デバッグ: ZIP内の全ファイル一覧
+  const allFiles = Object.keys(zip.files).filter(f => !zip.files[f].dir);
+  console.log("[ZIP-DEBUG] ZIP内ファイル一覧:", allFiles);
+
   // 1. workbook.xmlからシート情報を取得
   const wbXml = await zip.file("xl/workbook.xml").async("string");
   const wbDoc = parser.parseFromString(wbXml, "application/xml");
@@ -134,6 +138,7 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
     }
   }
   if (!sourceRId) throw new Error("元シートがworkbook.xml内に見つかりません");
+  console.log("[ZIP-DEBUG] 元シートRId:", sourceRId);
 
   // 2. workbook.xml.relsから元シートのファイルパスを特定
   const wbRelsXml = await zip.file("xl/_rels/workbook.xml.rels").async("string");
@@ -147,6 +152,7 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
     }
   }
   if (!sourceSheetPath) throw new Error("元シートのファイルパスが特定できません");
+  console.log("[ZIP-DEBUG] 元シートパス:", sourceSheetPath);
 
   // 3. 新しいシート番号を決定
   const existingSheets = Object.keys(zip.files)
@@ -162,6 +168,7 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
     : `xl/${sourceSheetPath}`;
   const sheetContent = await zip.file(sourceFullPath).async("uint8array");
   zip.file(newSheetFullPath, sheetContent);
+  console.log("[ZIP-DEBUG] シートコピー:", sourceFullPath, "→", newSheetFullPath);
 
   // 5. シートのrelsファイルをコピー（drawing/chart等の参照を含む）
   const sourceBaseName = sourceSheetPath.replace(/^.*\//, "");
@@ -171,20 +178,25 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
   );
   const newRelsPath = `xl/worksheets/_rels/sheet${newSheetNum}.xml.rels`;
 
+  console.log("[ZIP-DEBUG] シートrels検索:", sourceRelsPath, "→", zip.file(sourceRelsPath) ? "見つかった" : "見つからない");
+
   if (zip.file(sourceRelsPath)) {
     let relsContent = await zip.file(sourceRelsPath).async("string");
+    console.log("[ZIP-DEBUG] シートrels内容:", relsContent);
     const relsDoc = parser.parseFromString(relsContent, "application/xml");
     const sheetRels = relsDoc.getElementsByTagName("Relationship");
 
     for (let i = 0; i < sheetRels.length; i++) {
       const target = sheetRels[i].getAttribute("Target");
       const type = sheetRels[i].getAttribute("Type") || "";
+      console.log(`[ZIP-DEBUG] rels[${i}] type=${type}, target=${target}`);
 
       // drawingのコピー
       if (type.includes("/drawing") && target) {
         const drawingSource = target.startsWith("../")
           ? `xl/${target.replace("../", "")}`
           : `xl/drawings/${target}`;
+        console.log("[ZIP-DEBUG] drawing検索:", drawingSource, "→", zip.file(drawingSource) ? "見つかった" : "見つからない");
         if (zip.file(drawingSource)) {
           const drawingMatch = target.match(/drawing(\d+)/);
           if (drawingMatch) {
@@ -197,6 +209,7 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
 
             const drawContent = await zip.file(drawingSource).async("uint8array");
             zip.file(`xl/drawings/${newDrawFile}`, drawContent);
+            console.log("[ZIP-DEBUG] drawingコピー:", drawingSource, "→", `xl/drawings/${newDrawFile}`);
 
             // drawing の rels もコピー
             const drawRelsSource = drawingSource.replace(/([^\/]+)$/, "_rels/$1.rels");
@@ -261,7 +274,11 @@ async function duplicateSheetInZip(originalSheetName, newSheetName) {
       }
     }
 
+    console.log("[ZIP-DEBUG] 新relsファイル保存:", newRelsPath);
+    console.log("[ZIP-DEBUG] 新rels内容:", relsContent);
     zip.file(newRelsPath, relsContent);
+  } else {
+    console.warn("[ZIP-DEBUG] シートrelsファイルが見つかりません！drawingなしの可能性");
   }
 
   // 6. workbook.xmlに新シートを追加
