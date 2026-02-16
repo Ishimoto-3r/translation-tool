@@ -8,7 +8,7 @@ const xlsx = require("xlsx");
 const ExcelJS = require("exceljs");
 const logger = require("../lib/logger");
 const openaiClient = require("../lib/openai-client");
-const { getAccessToken } = require("../lib/api-helpers");
+const { getAccessToken, thinBorder } = require("../lib/api-helpers");
 
 // 依存関係コンテナ
 const deps = {
@@ -111,15 +111,7 @@ function parseKenshoDbFromBuffer(buf) {
 
 
 
-// ===== Generate helpers (ExcelJS) =====
-function thinBorder() {
-  return {
-    top: { style: "thin" },
-    left: { style: "thin" },
-    bottom: { style: "thin" },
-    right: { style: "thin" },
-  };
-}
+
 
 function findLastUsedRowBH(ws) {
   let last = 1;

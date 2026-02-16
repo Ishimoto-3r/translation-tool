@@ -1,6 +1,7 @@
 // api/manual-ai.js
 const logger = require("../lib/logger");
 const openaiClient = require("../lib/openai-client");
+const { handleCorsPreFlight, setCorsHeaders } = require("../lib/api-helpers");
 
 // 依存関係コンテナ（テスト用）
 const deps = {
@@ -22,6 +23,10 @@ const MANUAL_IMAGE_REASONING = process.env.MANUAL_IMAGE_REASONING || "none";
 const MANUAL_IMAGE_VERBOSITY = process.env.MANUAL_IMAGE_VERBOSITY || "low";
 
 module.exports = async function handler(req, res) {
+  // CORS preflight処理（他APIと統一）
+  if (handleCorsPreFlight(req, res)) return;
+  setCorsHeaders(res);
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "MethodNotAllowed" });
   }

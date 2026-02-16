@@ -7,7 +7,7 @@ const ExcelJS = require("exceljs");
 const pdfParse = require("pdf-parse");
 const logger = require("../lib/logger");
 const openaiClient = require("../lib/openai-client");
-const { getAccessToken, validateExternalUrl } = require("../lib/api-helpers");
+const { getAccessToken, validateExternalUrl, thinBorder } = require("../lib/api-helpers");
 
 // 依存関係コンテナ
 const deps = {
@@ -312,14 +312,7 @@ function norm(s) {
   return cellToText(s).trim();
 }
 
-function thinBorder() {
-  return {
-    top: { style: "thin" },
-    left: { style: "thin" },
-    bottom: { style: "thin" },
-    right: { style: "thin" },
-  };
-}
+
 
 function shouldSkipOpItem(text) {
   const t = norm(text);
@@ -470,32 +463,10 @@ async function aiExtractFromPdfFile({ pdfBuffer, fileName, modelHint, productHin
 }
 `;
 
-  const file = new File([pdfBuffer], fileName || "manual.pdf", { type: "application/pdf" });
-
-  // deps.openaiClient.client.files.create を直接使用
-  deps.logger.info("inspection", `Uploading PDF file: ${fileName}`);
-  const uploaded = await deps.openaiClient.client.files.create({ file, purpose: "assistants" });
-
   deps.logger.info("inspection", `Calling AI Extract (PDF) for ${fileName}, model=${MODEL}`);
 
-  // ファイルIDを使ったプロンプト構築が標準ChatCompletionではサポートされていない（Vision/File Searchが必要）
-  // しかし元のコードは `type: "input_file", file_id: ...` という独自の書き方をしている。
-  // これは恐らく動かない、または特殊なラッパー。
-  // ここでは標準的なGPT-4 Vision/File Searchの使い方に合わせるか、
-  // あるいは user content にそのまま含める形（もしモデルがサポートしていれば）にする。
-  // 元のコードが `client.responses.create` だったので、Google Gemini SDK かもしれない。
-  // しかし `require("openai")` している。
-  // ひとまず `chatCompletion` に投げるが、`input_file` は OpenAI Chat API では標準ではない。
-  // `image_url` ならあるが PDF は送れない。
-  // File Search (Assistants API) なら可能だが、Chat Completion API で PDF ID を送る方法は標準ではない。
-  // テキスト抽出済みの情報を使う `aiExtractFromSourceText` があるので、PDFのテキスト抽出(`extractPdfTextFromBuffer`)の結果を使って
-  // `aiExtractFromSourceText` を呼ぶほうが安全かもしれない。
-  // だが `extractPdfTextFromBuffer` は `pdfjs-dist` を使っており、テキスト抽出ができる。
-  // ここでは、`extractPdfTextFromBuffer` を使ってテキスト化し、それを `aiExtractFromSourceText` と同様のプロンプトで送る実装に切り替える。
-
-  // NOTE: PDFアップロードしてIDを送る方式は OpenAI Chat Completion では不可。Assistants API + Vector Store が必要。
-  // 既存コードが動いていたとは考えにくい（幻覚コード）。
-  // 安全策：PDFからテキスト抽出して、それを送る。
+  // Chat Completion APIではPDFファイルIDを直接送信できないため、
+  // pdfjs-distでテキスト抽出し、テキストベースでAIに送る方式を採用。
 
   const extractedText = await extractPdfTextFromBuffer(pdfBuffer);
 
