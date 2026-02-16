@@ -1,7 +1,7 @@
 // api/manual-test.js
 const xlsx = require("xlsx");
 const logger = require("../lib/logger");
-const { handleCorsPreFlight, setCorsHeaders } = require("../lib/api-helpers");
+const { handleCorsPreFlight, setCorsHeaders, getAccessToken } = require("../lib/api-helpers");
 
 async function handler(req, res) {
   // CORS preflight処理（他APIと統一）
@@ -9,42 +9,16 @@ async function handler(req, res) {
   setCorsHeaders(res);
 
   try {
-    // 1) Azure AD でアクセストークン取得
-    const tenantId = process.env.MANUAL_TENANT_ID;
-    const clientId = process.env.MANUAL_CLIENT_ID;
-    const clientSecret = process.env.MANUAL_CLIENT_SECRET;
+    // 1) Azure AD でアクセストークン取得（共通ヘルパー利用）
     const fileUrl = process.env.MANUAL_SHAREPOINT_FILE_URL;
-
-    if (!tenantId || !clientId || !clientSecret || !fileUrl) {
+    if (!fileUrl) {
       return res.status(500).json({
         error: "ConfigError",
-        detail: "MANUAL_* 系の環境変数が不足しています。",
+        detail: "MANUAL_SHAREPOINT_FILE_URL が設定されていません。",
       });
     }
 
-    const tokenRes = await fetch(
-      `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: clientId,
-          client_secret: clientSecret,
-          scope: "https://graph.microsoft.com/.default",
-          grant_type: "client_credentials",
-        }),
-      }
-    );
-
-    const tokenData = await tokenRes.json();
-    if (!tokenData.access_token) {
-      return res.status(500).json({
-        error: "TokenError",
-        detail: tokenData,
-      });
-    }
-
-    const accessToken = tokenData.access_token;
+    const accessToken = await getAccessToken();
 
     // 2) SharePoint の Excel を取得
     const shareId = Buffer.from(fileUrl).toString("base64").replace(/=+$/, "");

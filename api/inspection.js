@@ -7,7 +7,7 @@ const ExcelJS = require("exceljs");
 const pdfParse = require("pdf-parse");
 const logger = require("../lib/logger");
 const openaiClient = require("../lib/openai-client");
-const { getAccessToken } = require("../lib/api-helpers");
+const { getAccessToken, validateExternalUrl } = require("../lib/api-helpers");
 
 // 依存関係コンテナ
 const deps = {
@@ -55,7 +55,7 @@ const MAX_PDF_BYTES = 4 * 1024 * 1024;
 const MAX_HTML_TEXT_CHARS = 30000;
 
 async function resolvePdfUrlFromHtml(baseUrl, htmlText) {
-  console.log("[inspection][extract] html length:", htmlText.length);
+  deps.logger.info("inspection", "[extract] html length: " + htmlText.length);
   const rawLinks = [];
   const attrRegex = /(href|src)\s*=\s*["']([^"']+)["']/gi;
   let match;
@@ -147,7 +147,7 @@ async function resolvePdfUrlFromHtml(baseUrl, htmlText) {
     }
   }
 
-  console.log("[inspection][extract] pdf hits:", hits.length);
+  deps.logger.info("inspection", "[extract] pdf hits: " + hits.length);
   return { resolvedUrl: hits[0] || "", candidates: deduped };
 }
 
@@ -417,38 +417,7 @@ async function aiExtractFromSourceText({ sourceText, fileName, modelHint, produc
     obj = {};
   }
 
-  const model = norm(obj.model);
-  const productName = norm(obj.productName);
-
-  const specs = dedupeKeepOrder(Array.isArray(obj.specs) ? obj.specs : []);
-
-  // ops: filter + dedupe
-  const opsIn = Array.isArray(obj.ops) ? obj.ops : [];
-  const ops = [];
-  for (const g0 of opsIn) {
-    const title = norm(g0?.title);
-    let items = Array.isArray(g0?.items) ? g0.items.map(norm) : [];
-    items = items.filter(x => x && !shouldSkipOpItem(x));
-    items = dedupeKeepOrder(items);
-    if (!title && items.length === 0) continue;
-    ops.push({ title, items });
-  }
-
-  // accs: normalize + ensure manual
-  let accs = Array.isArray(obj.accs) ? obj.accs.map(normalizeManualAccessory).map(norm) : [];
-  accs = accs.map(normalizeManualAccessory);
-  accs.push("取扱説明書"); // 必ず入れる
-  accs = dedupeKeepOrder(accs);
-
-  // USB表記揺れの代表化（AIが揺らした場合の最終ガード）
-  accs = accs.map(a => {
-    if (a.includes("USB") && (a.includes("コード") || a.includes("ケーブル") || a === "ケーブル")) return "USBケーブル";
-    if (a === "ケーブル") return "USBケーブル";
-    return a;
-  });
-  accs = dedupeKeepOrder(accs);
-
-  return { model, productName, specs, ops, accs };
+  return normalizeExtractResult(obj);
 }
 
 async function extractPdfTextFromBuffer(pdfBuffer) {
@@ -567,36 +536,7 @@ ${user.trim()}
     obj = {};
   }
 
-  const model = norm(obj.model);
-  const productName = norm(obj.productName);
-
-  const specs = dedupeKeepOrder(Array.isArray(obj.specs) ? obj.specs : []);
-
-  const opsIn = Array.isArray(obj.ops) ? obj.ops : [];
-  const ops = [];
-  for (const g0 of opsIn) {
-    const title = norm(g0?.title);
-    let items = Array.isArray(g0?.items) ? g0.items.map(norm) : [];
-    items = items.filter(x => x && !shouldSkipOpItem(x));
-    items = dedupeKeepOrder(items);
-    if (!title && items.length === 0) continue;
-    ops.push({ title, items });
-  }
-
-  let accs = Array.isArray(obj.accs) ? obj.accs.map(normalizeManualAccessory).map(norm) : [];
-  accs = accs.map(normalizeManualAccessory);
-  accs.push("取扱説明書");
-  accs = dedupeKeepOrder(accs);
-
-  accs = accs.map(a => {
-    if (a.includes("USB") && (a.includes("コード") || a.includes("ケーブル") || a === "ケーブル")) return "USBケーブル";
-    if (a === "ケーブル") return "USBケーブル";
-    return a;
-  });
-  accs = dedupeKeepOrder(accs);
-
-  return { model, productName, specs, ops, accs };
-  return { model, productName, specs, ops, accs };
+  return normalizeExtractResult(obj);
 }
 
 // ===== AI extract from Images (Vision) =====
@@ -717,6 +657,13 @@ async function handleFetch(req, res) {
   const url = req.query.url;
   if (!url) {
     return res.status(400).json({ error: "Missing url parameter" });
+  }
+
+  // SSRF防止: 外部URLの安全性検証
+  const urlCheck = validateExternalUrl(url);
+  if (!urlCheck.safe) {
+    deps.logger.warn("inspection", `Blocked unsafe URL: ${url}`, { reason: urlCheck.reason });
+    return res.status(403).json({ error: "ForbiddenURL", detail: urlCheck.reason });
   }
 
   try {

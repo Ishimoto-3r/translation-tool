@@ -23,6 +23,9 @@ const config = {
     }
 };
 
+// モデル設定（環境変数でオーバーライド可能）
+const MODEL_PDFTRANSLATE = process.env.MODEL_PDFTRANSLATE || "gpt-4o";
+
 let cachedFontBytes = null;
 
 async function getFontBytes() {
@@ -50,7 +53,7 @@ async function getFontBytes() {
     return cachedFontBytes;
 }
 
-const { handleCorsPreFlight, setCorsHeaders } = require("../lib/api-helpers");
+const { handleCorsPreFlight, setCorsHeaders, validateExternalUrl } = require("../lib/api-helpers");
 
 async function handler(req, res) {
     // CORS処理（共通ヘルパー利用）
@@ -66,6 +69,13 @@ async function handler(req, res) {
 
         // URLが指定された場合、PDFを取得してBase64で返す（プレビュー用）
         if (url && !pages) {
+            // SSRF防止: 外部URLの安全性検証
+            const urlCheck = validateExternalUrl(url);
+            if (!urlCheck.safe) {
+                deps.logger.warn("pdftranslate", `Blocked unsafe URL: ${url}`, { reason: urlCheck.reason });
+                return res.status(403).json({ error: "ForbiddenURL", detail: urlCheck.reason });
+            }
+
             deps.logger.info("pdftranslate", `[URL Fetch] Fetching PDF from: ${url}`);
             const response = await fetch(url);
             if (!response.ok) {
@@ -376,7 +386,7 @@ async function translateImageWithVision(imageDataUrl, targetLang) {
 
     try {
         const completion = await deps.openaiClient.chatCompletion({
-            model: "gpt-4o",
+            model: MODEL_PDFTRANSLATE,
             messages: [
                 {
                     role: "user",
@@ -408,7 +418,7 @@ async function translateTextWithGPT(text, targetLang) {
         // However, the original code used gpt-4o. Let's stick to gpt-4o.
 
         const completion = await deps.openaiClient.chatCompletion({
-            model: "gpt-4o",
+            model: MODEL_PDFTRANSLATE,
             messages: [
                 {
                     role: "system",
